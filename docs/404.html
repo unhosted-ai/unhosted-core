@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>404 — unhosted</title>
+  <link rel="icon" type="image/svg+xml" href="branding/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .not-found {
+      min-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 0 var(--pad);
+      max-width: var(--max);
+      margin: 0 auto;
+      text-transform: lowercase;
+    }
+    .not-found h1 {
+      font-family: 'Inter', system-ui, sans-serif;
+      font-size: clamp(80px, 18vw, 280px);
+      font-weight: 900;
+      letter-spacing: -0.05em;
+      line-height: 0.85;
+      margin: 0 0 24px;
+    }
+    .not-found p {
+      font-size: 22px;
+      max-width: 640px;
+      margin: 0 0 16px;
+    }
+    .not-found .sub {
+      color: var(--mute);
+      font-size: 16px;
+    }
+    .not-found a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <main class="not-found">
+    <h1>404</h1>
+    <p>this page is unhosted &mdash; literally.</p>
+    <p class="sub">the link is broken or the page never existed. <a href="/">back to the index</a>, or open an <a href="https://github.com/unhosted-ai/unhosted-core/issues">issue</a> if you got here from one of our links.</p>
+  </main>
+</body>
+</html>
