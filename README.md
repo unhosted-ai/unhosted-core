@@ -72,14 +72,15 @@ unhosted config set public.max-usd-per-month 5
 
 This section replaces the typical "Features" list. It's the truth about what works:
 
-| Capability                    | Status    | Notes                                          |
-|-------------------------------|-----------|------------------------------------------------|
-| Single-machine inference      | building  | Wrapping llama.cpp / MLX                       |
-| LAN cluster (local mode)      | building  | Spec being written                             |
-| Trusted-peer pairing          | designed  | Not started                                    |
-| Public swarm (USDC)           | designed  | Q3 2026 earliest                               |
-| Verifiable inference          | research  | Open problem; will not ship until viable       |
-| Windows GPU support           | designed  | After Mac + Linux work                         |
+| Capability                    | Status      | Notes                                                              |
+|-------------------------------|-------------|--------------------------------------------------------------------|
+| Single-machine inference      | shipped     | v0.0.1. Wraps llama.cpp `llama-server`. Smoke-tested on M-series.  |
+| LAN cluster (local mode)      | building    | v0.0.2. Spec being written.                                        |
+| Trusted-peer pairing          | designed    | v0.1.0. WireGuard-style.                                           |
+| Public swarm (USDC)           | designed    | v0.3.0+. See [design/0001](design/0001-public-mode-architecture.md). |
+| Verifiable inference          | research    | Optimistic + redundancy planned; ZK proofs when affordable.        |
+| Web UI / desktop app          | designed    | v0.1.0+ web, v0.2.0+ Tauri. See [design/0002](design/0002-application-frontends.md). |
+| Windows GPU support           | designed    | After Mac + Linux are stable.                                      |
 
 Reproducible benchmarks land in `benchmarks/` once any code exists. We will publish honest tokens-per-second numbers, not marketing language.
 

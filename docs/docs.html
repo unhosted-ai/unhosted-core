@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>learn — unhosted</title>
+  <meta name="description" content="What unhosted is, how it works, and how to run it.">
+
+  <meta property="og:title" content="learn — unhosted">
+  <meta property="og:description" content="What unhosted is, how it works, and how to run it.">
+  <meta property="og:image" content="branding/og-image.svg">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <link rel="icon" type="image/svg+xml" href="branding/favicon.svg">
+  <link rel="apple-touch-icon" href="branding/apple-touch-icon.svg">
+  <meta name="theme-color" content="#F5F5F0" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0A0A0A" media="(prefers-color-scheme: dark)">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="doc-body">
+
+  <nav class="doc-nav">
+    <a class="brand-link" href="/">
+      <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="3" width="22" height="22" aria-hidden="true">
+        <circle cx="50" cy="50" r="44" stroke-dasharray="2 6"/>
+        <circle cx="50" cy="50" r="28"/>
+        <circle cx="50" cy="50" r="12" fill="currentColor" stroke="none"/>
+      </svg>
+      <span>unhosted</span>
+    </a>
+    <div class="nav-links">
+      <a href="/">home</a>
+      <a href="https://github.com/unhosted-ai/unhosted-core/blob/main/MANIFESTO.md">manifesto</a>
+      <a href="https://github.com/unhosted-ai/unhosted-core">github</a>
+    </div>
+  </nav>
+
+  <article class="doc">
+
+    <header class="doc-head">
+      <p class="kicker">learn</p>
+      <h1>understand unhosted in five minutes</h1>
+      <p class="lede">unhosted is open-source software that turns the computers you already own into one AI inference cluster. this page explains what that means in plain words.</p>
+    </header>
+
+    <nav class="toc" aria-label="on this page">
+      <span class="toc-label">on this page</span>
+      <a href="#what-is-it">what is it</a>
+      <a href="#three-modes">the three modes</a>
+      <a href="#how-it-works">how it works</a>
+      <a href="#quickstart">quickstart</a>
+      <a href="#status">what's working today</a>
+      <a href="#faq">faq</a>
+      <a href="#more">where to go next</a>
+    </nav>
+
+    <section id="what-is-it">
+      <h2>what is it</h2>
+      <p>most ai today runs in someone else's data center. you send a prompt over the internet, you get tokens back, you pay per token, and the company on the other end keeps a copy of what you asked.</p>
+      <p>unhosted is the opposite shape. it pools the devices already in your home or your team's office &mdash; macbook, gaming pc, home server, raspberry pi &mdash; into a single inference cluster. you point one cli at the cluster, you ask a model a question, the model runs locally, the answer comes back. no api key. no rate limit. no logging by default.</p>
+      <p>when your local hardware can't handle a request &mdash; a model too big, a prompt too long &mdash; unhosted can optionally tap a public swarm of strangers' gpus, paid in stablecoin per token. that's a safety net, not the default. you can use unhosted forever and never spend a dollar.</p>
+    </section>
+
+    <section id="three-modes">
+      <h2>the three modes</h2>
+      <p>unhosted has three concentric rings of trust. you decide how far the radius goes for any given request.</p>
+
+      <figure class="trust-diagram" aria-label="trust radius diagram">
+        <svg viewBox="0 0 360 360" xmlns="http://www.w3.org/2000/svg">
+          <g fill="none" stroke="currentColor">
+            <circle cx="180" cy="180" r="160" stroke-dasharray="4 12" stroke-width="2"/>
+            <circle cx="180" cy="180" r="100" stroke-width="2"/>
+            <circle cx="180" cy="180" r="44" fill="currentColor" stroke="none"/>
+          </g>
+          <g font-family="'Inter', sans-serif" font-size="13" fill="currentColor" font-weight="500">
+            <text x="180" y="184" text-anchor="middle" fill="#F5F5F0">local</text>
+            <text x="180" y="120" text-anchor="middle">trusted</text>
+            <text x="180" y="40" text-anchor="middle">public</text>
+          </g>
+        </svg>
+      </figure>
+
+      <div class="mode">
+        <h3>local &mdash; free, private, default</h3>
+        <p>devices you own, on a network you control. nothing leaves your house. no internet required after the model is downloaded. this is the mode the manifesto is about.</p>
+      </div>
+
+      <div class="mode">
+        <h3>trusted &mdash; free, encrypted, opt-in</h3>
+        <p>devices owned by people you've explicitly paired with: a roommate, a family member, a teammate. traffic between paired peers is end-to-end encrypted. no public exposure, no payment.</p>
+      </div>
+
+      <div class="mode">
+        <h3>public &mdash; pay-per-token, opt-in</h3>
+        <p>strangers' idle gpus rented in exchange for usdc per token. you set a price ceiling. providers stake collateral and lose it if they cheat. this mode only kicks in when you ask for it &mdash; never silently.</p>
+      </div>
+    </section>
+
+    <section id="how-it-works">
+      <h2>how it works</h2>
+      <p>two pieces, no magic.</p>
+
+      <ol>
+        <li><strong>a daemon</strong> &mdash; the program that runs on each of your devices. it talks to a local inference backend (today: llama.cpp's <code>llama-server</code>) and exposes a small http api on port <code>7777</code>.</li>
+        <li><strong>a cli</strong> &mdash; <code>unhosted</code>, the command you type. it sends prompts to a daemon and prints the streaming reply.</li>
+      </ol>
+
+      <p>at v0.0.1 there's exactly one daemon and one cli, both on the same machine:</p>
+
+      <pre class="diagram">
+your prompt
+    │
+    ▼
+┌────────────────┐    http     ┌────────────────┐    http     ┌────────────────┐
+│   unhosted     │  ────────▶  │ unhosted node  │  ────────▶  │  llama-server  │
+│   (cli)        │   :7777     │  (daemon)      │   :8080     │  (llama.cpp)   │
+└────────────────┘             └────────────────┘             └────────────────┘
+                                                                       │
+                                                                       ▼
+                                                                  tokens stream
+                                                                       │
+                                                              ◀────────┘
+                                                              tokens stream
+      </pre>
+
+      <p>future versions add more daemons across more machines, then encrypted pairing between trusted peers, then a discovery layer for the public swarm. the cli &harr; daemon contract stays the same.</p>
+    </section>
+
+    <section id="quickstart">
+      <h2>quickstart</h2>
+      <p>v0.0.1 wraps llama.cpp's existing <code>llama-server</code>. you need llama.cpp installed and a model file before unhosted has anything to talk to.</p>
+
+      <ol class="steps">
+        <li>
+          <h3>install llama.cpp</h3>
+          <pre><code>brew install llama.cpp</code></pre>
+          <p class="note">on linux, build it from <a href="https://github.com/ggerganov/llama.cpp">github.com/ggerganov/llama.cpp</a>. windows works too, with extra steps.</p>
+        </li>
+        <li>
+          <h3>get a small model</h3>
+          <pre><code>mkdir -p ~/.cache/unhosted/models
+cd ~/.cache/unhosted/models
+curl -fL -o llama-3.2-1b.gguf \
+  https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf</code></pre>
+          <p class="note">that's a 770 mb file. start small. you can swap in a larger model later.</p>
+        </li>
+        <li>
+          <h3>start the inference backend</h3>
+          <pre><code>llama-server -m ~/.cache/unhosted/models/llama-3.2-1b.gguf \
+  --port 8080 -c 2048 -ngl 99</code></pre>
+          <p class="note"><code>-ngl 99</code> offloads all layers to gpu (metal on apple silicon, cuda on nvidia). leave that off if you don't have one.</p>
+        </li>
+        <li>
+          <h3>build unhosted</h3>
+          <pre><code>git clone https://github.com/unhosted-ai/unhosted-core
+cd unhosted-core
+cargo build --release</code></pre>
+          <p class="note">requires rust stable 1.75+. if you don't have rust: <code>curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh</code>.</p>
+        </li>
+        <li>
+          <h3>run a node</h3>
+          <pre><code>./target/release/unhosted serve</code></pre>
+          <p class="note">leave this running in one terminal. it'll log when it's ready.</p>
+        </li>
+        <li>
+          <h3>send a prompt</h3>
+          <pre><code>./target/release/unhosted run "explain quantum tunneling in two sentences"</code></pre>
+          <p class="note">tokens stream to your terminal as they're generated. that's the whole demo.</p>
+        </li>
+      </ol>
+    </section>
+
+    <section id="status">
+      <h2>what's working today</h2>
+      <p>the truth, not the marketing version.</p>
+
+      <table class="status-table">
+        <thead>
+          <tr><th>capability</th><th>status</th><th>notes</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>single-machine inference</td><td><span class="pill on">shipped</span></td><td>v0.0.1, smoke-tested on m-series mac.</td></tr>
+          <tr><td>lan cluster (local mode)</td><td><span class="pill mid">building</span></td><td>v0.0.2. design phase.</td></tr>
+          <tr><td>trusted-peer pairing</td><td><span class="pill off">designed</span></td><td>v0.1.0. wireguard-style.</td></tr>
+          <tr><td>public swarm (usdc)</td><td><span class="pill off">designed</span></td><td>v0.3.0+. base first, solana later.</td></tr>
+          <tr><td>verifiable inference</td><td><span class="pill off">research</span></td><td>optimistic + redundancy is the v1 plan.</td></tr>
+          <tr><td>web ui / desktop app</td><td><span class="pill off">designed</span></td><td>v0.1.0 web, v0.2.0 tauri.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="faq">
+      <h2>faq</h2>
+
+      <details>
+        <summary>is this a crypto project?</summary>
+        <p>no. there is no token, no airdrop, no chain we operate. the public mode (when it ships) uses usdc on existing networks because that's how you do permissionless global payments without a us llc and a stripe account &mdash; the same reason a freelancer in argentina takes usdc. you can use the local and trusted modes for the rest of your life and never touch a stablecoin.</p>
+      </details>
+
+      <details>
+        <summary>are my prompts private?</summary>
+        <p><strong>local mode:</strong> yes. nothing leaves your hardware.<br>
+        <strong>trusted mode:</strong> yes. traffic to paired peers is end-to-end encrypted, and you only pair with people you actually trust.<br>
+        <strong>public mode:</strong> no, by default. you're sending the prompt to a stranger's gpu. when this mode ships, the cli will warn you before each public-mode request. don't send your medical history through it.</p>
+      </details>
+
+      <details>
+        <summary>why agpl-3.0 instead of mit / apache?</summary>
+        <p>agpl prevents a company from taking unhosted, hosting it as a paid service, and not giving improvements back. that's the entire ethos of the project &mdash; we don't want a hosted competitor masquerading as unhosted. you can still read it, fork it, audit it, and ship it for any other purpose.</p>
+      </details>
+
+      <details>
+        <summary>what hardware do i actually need?</summary>
+        <p>at v0.0.1: anything that runs llama.cpp. an m-series macbook. a linux box with or without a gpu. a windows machine with cuda. small models (1&ndash;3b parameters) run on a raspberry pi 5. larger models (70b+) need 24+ gb of vram or a recent apple silicon mac with enough unified memory. real benchmarks land in <code>benchmarks/</code> as we collect them.</p>
+      </details>
+
+      <details>
+        <summary>how is this different from ollama or exo?</summary>
+        <p>ollama is great for single-machine local inference and we use llama.cpp under the hood the same way ollama does. unhosted's value is in the cluster layer &mdash; pooling several devices, trusted-peer pairing over the internet, and the optional public swarm. exo is the closest thing in spirit; we differ in stack (rust vs python), in the explicit trust-radius model, and in the planned payment layer for public mode.</p>
+      </details>
+
+      <details>
+        <summary>when can i use it?</summary>
+        <p>v0.0.1 ships today: single machine. v0.0.2 ships when two-node lan cluster is solid &mdash; weeks, not months. trusted-peer over the internet is v0.1.0. the public swarm is v0.3.0+. no firm dates. we'll ship and tell you what works.</p>
+      </details>
+
+      <details>
+        <summary>how do i help?</summary>
+        <p>star the repo, run it on your hardware, file issues that include exact commands and exact error output, send pull requests against open issues. see <a href="https://github.com/unhosted-ai/unhosted-core/blob/main/CONTRIBUTING.md">contributing</a>.</p>
+      </details>
+    </section>
+
+    <section id="more">
+      <h2>where to go next</h2>
+      <ul class="next-list">
+        <li><a href="https://github.com/unhosted-ai/unhosted-core/blob/main/MANIFESTO.md">read the manifesto</a> &mdash; the why, in 500 words</li>
+        <li><a href="https://github.com/unhosted-ai/unhosted-core/blob/main/design/">browse the design notes</a> &mdash; architectural decisions and trade-offs</li>
+        <li><a href="https://github.com/unhosted-ai/unhosted-core/blob/main/CHANGELOG.md">read the changelog</a> &mdash; what's actually shipped</li>
+        <li><a href="https://github.com/unhosted-ai/unhosted-core/blob/main/BRAND.md">brand and voice rules</a> &mdash; if you're contributing copy or design</li>
+        <li><a href="https://github.com/unhosted-ai/unhosted-core/issues">file an issue</a> &mdash; bugs, ideas, questions</li>
+      </ul>
+    </section>
+
+  </article>
+
+  <footer class="doc-footer">
+    <a href="/" class="back-home">&larr; back to home</a>
+    <span class="copy">&copy; 2026 unhosted &middot; <a href="https://github.com/unhosted-ai/unhosted-core/blob/main/LICENSE">agpl-3.0</a></span>
+  </footer>
+
+</body>
+</html>
