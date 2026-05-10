@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or discussion
+    url: https://github.com/unhosted-ai/unhosted/discussions
+    about: Ask questions and discuss ideas in Discussions, not Issues.
+  - name: Security issue
+    url: https://github.com/unhosted-ai/unhosted/security/policy
+    about: Report security issues privately via SECURITY.md, not in public Issues.
