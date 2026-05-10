@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640">
+  <title>unhosted — AI that lives where you do.</title>
+  <rect width="1280" height="640" fill="#0A0A0A"/>
+
+  <!-- mark: trust gradient -->
+  <g transform="translate(120, 200)" fill="none" stroke="#F5F5F0" stroke-width="6">
+    <circle cx="120" cy="120" r="108" stroke-dasharray="3 12"/>
+    <circle cx="120" cy="120" r="68"/>
+    <circle cx="120" cy="120" r="28" fill="#F5F5F0" stroke="none"/>
+  </g>
+
+  <!-- wordmark -->
+  <text x="420" y="320" font-family="ui-monospace, 'JetBrains Mono', monospace" font-size="140" font-weight="700" fill="#F5F5F0" letter-spacing="-3">unhosted</text>
+
+  <!-- tagline -->
+  <text x="420" y="380" font-family="ui-monospace, 'JetBrains Mono', monospace" font-size="32" fill="#FF3B30">AI that lives where you do.</text>
+
+  <!-- three modes -->
+  <g transform="translate(120, 540)" font-family="ui-monospace, 'JetBrains Mono', monospace" font-size="24" fill="#737373">
+    <text x="0" y="0">local</text>
+    <text x="100" y="0">/</text>
+    <text x="120" y="0">trusted</text>
+    <text x="240" y="0">/</text>
+    <text x="260" y="0">public</text>
+  </g>
+
+  <!-- subtle URL line -->
+  <text x="120" y="600" font-family="ui-monospace, 'JetBrains Mono', monospace" font-size="20" fill="#404040">github.com/unhosted-ai</text>
+</svg>
