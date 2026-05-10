@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round">
+  <title>unhosted — stacked secondary mark</title>
+  <path d="M 30 40 L 30 80 Q 30 100 50 100 Q 70 100 70 80 L 70 40"/>
+  <path d="M 90 100 L 90 40 Q 90 40 110 40 Q 130 40 130 60 L 130 100"/>
+  <path d="M 30 110 L 30 175 M 30 140 Q 30 130 50 130 Q 70 130 70 145 L 70 175"/>
+  <path d="M 130 110 L 130 175 M 130 175 L 110 175 Q 90 175 90 155 Q 90 130 110 130 Q 130 130 130 145"/>
+  <circle cx="160" cy="118" r="7"/>
+</svg>

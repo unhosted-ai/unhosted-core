@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none" stroke="#F5F5F0" stroke-width="3">
+  <title>unhosted — for dark backgrounds</title>
+  <circle cx="50" cy="50" r="44" stroke-dasharray="2 6"/>
+  <circle cx="50" cy="50" r="28"/>
+  <circle cx="50" cy="50" r="12" fill="#F5F5F0" stroke="none"/>
+</svg>

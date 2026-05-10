@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">
+  <title>unhosted — apple touch icon</title>
+  <rect width="180" height="180" rx="36" fill="#0A0A0A"/>
+  <g fill="none" stroke="#F5F5F0" stroke-width="6" transform="translate(20, 20)">
+    <circle cx="70" cy="70" r="62" stroke-dasharray="3 9"/>
+    <circle cx="70" cy="70" r="40"/>
+    <circle cx="70" cy="70" r="18" fill="#F5F5F0" stroke="none"/>
+  </g>
+</svg>

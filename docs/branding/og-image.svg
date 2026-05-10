@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
+  <title>unhosted — Open Graph image</title>
+  <rect width="1200" height="630" fill="#F5F5F0"/>
+
+  <text x="100" y="320" font-family="Boldonse, Impact, sans-serif" font-size="240" font-weight="900" fill="#0A0A0A" letter-spacing="-8">unhosted</text>
+  <text x="100" y="400" font-family="Inter, system-ui, sans-serif" font-size="36" fill="#FF3B30">AI that lives where you do.</text>
+
+  <g transform="translate(100, 480)" font-family="Inter, system-ui, sans-serif" font-size="22" fill="#737373">
+    <text x="0" y="0">local · trusted · public</text>
+  </g>
+
+  <text x="100" y="580" font-family="ui-monospace, 'JetBrains Mono', monospace" font-size="20" fill="#737373">github.com/unhosted-ai</text>
+</svg>

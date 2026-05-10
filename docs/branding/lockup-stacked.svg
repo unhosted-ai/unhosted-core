@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 320">
+  <title>unhosted — stacked lockup with tagline</title>
+  <g fill="none" stroke="currentColor" stroke-width="6" transform="translate(180, 20)">
+    <circle cx="60" cy="60" r="54" stroke-dasharray="3 9"/>
+    <circle cx="60" cy="60" r="34"/>
+    <circle cx="60" cy="60" r="14" fill="currentColor" stroke="none"/>
+  </g>
+  <text x="240" y="240" font-family="ui-monospace, 'JetBrains Mono', monospace" font-size="80" font-weight="700" fill="currentColor" letter-spacing="-2" text-anchor="middle">unhosted</text>
+  <text x="240" y="280" font-family="ui-monospace, 'JetBrains Mono', monospace" font-size="20" fill="#737373" text-anchor="middle">AI that lives where you do.</text>
+</svg>
