@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
+  <title>unhosted — Open Graph image</title>
+  <rect width="1200" height="630" fill="#0A0A0A"/>
+
+  <!-- subtle field of dots, evoking the swarm -->
+  <g fill="#1A1A1A">
+    <circle cx="80" cy="80" r="2"/>
+    <circle cx="180" cy="120" r="2"/>
+    <circle cx="280" cy="60" r="2"/>
+    <circle cx="380" cy="100" r="2"/>
+    <circle cx="480" cy="140" r="2"/>
+    <circle cx="80" cy="540" r="2"/>
+    <circle cx="180" cy="500" r="2"/>
+    <circle cx="280" cy="560" r="2"/>
+    <circle cx="380" cy="520" r="2"/>
+    <circle cx="1080" cy="80" r="2"/>
+    <circle cx="1120" cy="180" r="2"/>
+    <circle cx="1080" cy="540" r="2"/>
+    <circle cx="1120" cy="450" r="2"/>
+  </g>
+
+  <!-- mark -->
+  <g transform="translate(100, 200)" fill="none" stroke="#F5F5F0" stroke-width="6">
+    <circle cx="120" cy="120" r="108" stroke-dasharray="3 12"/>
+    <circle cx="120" cy="120" r="68"/>
+    <circle cx="120" cy="120" r="28" fill="#F5F5F0" stroke="none"/>
+  </g>
+
+  <!-- wordmark -->
+  <text x="400" y="320" font-family="ui-monospace, 'JetBrains Mono', monospace" font-size="140" font-weight="700" fill="#F5F5F0" letter-spacing="-3">unhosted</text>
+
+  <!-- tagline -->
+  <text x="400" y="380" font-family="ui-monospace, 'JetBrains Mono', monospace" font-size="32" fill="#FF3B30">AI that lives where you do.</text>
+
+  <!-- modes ribbon -->
+  <g transform="translate(400, 460)" font-family="ui-monospace, 'JetBrains Mono', monospace" font-size="22" fill="#737373">
+    <text x="0" y="0">local</text>
+    <text x="100" y="0">/</text>
+    <text x="120" y="0">trusted</text>
+    <text x="240" y="0">/</text>
+    <text x="260" y="0">public</text>
+  </g>
+
+  <!-- url -->
+  <text x="100" y="580" font-family="ui-monospace, 'JetBrains Mono', monospace" font-size="20" fill="#404040">github.com/unhosted-ai</text>
+</svg>

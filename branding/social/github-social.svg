@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640">
+  <title>unhosted — GitHub social preview</title>
+  <rect width="1280" height="640" fill="#0A0A0A"/>
+
+  <g transform="translate(120, 200)" fill="none" stroke="#F5F5F0" stroke-width="6">
+    <circle cx="120" cy="120" r="108" stroke-dasharray="3 12"/>
+    <circle cx="120" cy="120" r="68"/>
+    <circle cx="120" cy="120" r="28" fill="#F5F5F0" stroke="none"/>
+  </g>
+
+  <text x="420" y="320" font-family="ui-monospace, 'JetBrains Mono', monospace" font-size="140" font-weight="700" fill="#F5F5F0" letter-spacing="-3">unhosted</text>
+  <text x="420" y="380" font-family="ui-monospace, 'JetBrains Mono', monospace" font-size="32" fill="#FF3B30">AI that lives where you do.</text>
+
+  <g transform="translate(420, 460)" font-family="ui-monospace, 'JetBrains Mono', monospace" font-size="24" fill="#737373">
+    <text x="0" y="0">local</text>
+    <text x="110" y="0">/</text>
+    <text x="135" y="0">trusted</text>
+    <text x="265" y="0">/</text>
+    <text x="290" y="0">public</text>
+  </g>
+
+  <text x="120" y="600" font-family="ui-monospace, 'JetBrains Mono', monospace" font-size="20" fill="#404040">github.com/unhosted-ai</text>
+</svg>

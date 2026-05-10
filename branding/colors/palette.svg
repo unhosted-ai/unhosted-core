@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200" font-family="ui-monospace, 'JetBrains Mono', monospace">
+  <title>Unhosted color palette</title>
+
+  <rect x="0"   y="0" width="200" height="200" fill="#0A0A0A"/>
+  <rect x="200" y="0" width="200" height="200" fill="#F5F5F0"/>
+  <rect x="400" y="0" width="200" height="200" fill="#FF3B30"/>
+  <rect x="600" y="0" width="200" height="200" fill="#737373"/>
+
+  <g font-size="14" font-weight="600">
+    <text x="20"  y="170" fill="#F5F5F0">bg · #0A0A0A</text>
+    <text x="220" y="170" fill="#0A0A0A">fg · #F5F5F0</text>
+    <text x="420" y="170" fill="#F5F5F0">accent · #FF3B30</text>
+    <text x="620" y="170" fill="#F5F5F0">mute · #737373</text>
+  </g>
+</svg>

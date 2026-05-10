@@ -1,0 +1,28 @@
+/* Unhosted color palette — pulled from BRAND.md.
+   Use these custom properties anywhere you need a brand color. */
+
+:root {
+  /* primary surfaces */
+  --u-bg: #0A0A0A;          /* near-black, never pure #000 */
+  --u-fg: #F5F5F0;          /* warm off-white, never pure #FFF */
+
+  /* accent + mute */
+  --u-accent: #FF3B30;      /* signal red — taglines, links on dark, "live" indicators */
+  --u-mute:   #737373;      /* secondary text, dividers, dashed-ring hint */
+
+  /* trust gradient (for diagrams that explicitly show the radius) */
+  --u-trust-local:  var(--u-fg);
+  --u-trust-friend: var(--u-fg);
+  --u-trust-public: var(--u-mute);
+
+  /* light theme */
+  --u-bg-light: #F5F5F0;
+  --u-fg-light: #0A0A0A;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --u-bg: var(--u-bg-light);
+    --u-fg: var(--u-fg-light);
+  }
+}

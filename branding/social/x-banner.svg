@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 500">
+  <title>unhosted — X / Twitter header</title>
+  <rect width="1500" height="500" fill="#0A0A0A"/>
+
+  <!-- big mark on the left -->
+  <g transform="translate(120, 90)" fill="none" stroke="#F5F5F0" stroke-width="8">
+    <circle cx="160" cy="160" r="148" stroke-dasharray="4 16"/>
+    <circle cx="160" cy="160" r="92"/>
+    <circle cx="160" cy="160" r="38" fill="#F5F5F0" stroke="none"/>
+  </g>
+
+  <!-- text block on the right -->
+  <text x="540" y="240" font-family="ui-monospace, 'JetBrains Mono', monospace" font-size="120" font-weight="700" fill="#F5F5F0" letter-spacing="-3">unhosted</text>
+  <text x="540" y="290" font-family="ui-monospace, 'JetBrains Mono', monospace" font-size="28" fill="#FF3B30">AI that lives where you do.</text>
+
+  <g transform="translate(540, 340)" font-family="ui-monospace, 'JetBrains Mono', monospace" font-size="20" fill="#737373">
+    <text x="0" y="0">local · trusted · public</text>
+  </g>
+</svg>
