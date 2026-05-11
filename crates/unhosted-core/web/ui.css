@@ -166,17 +166,33 @@ button:disabled:hover { border-color: var(--line-strong); }
   margin: 12px 0 6px;
 }
 
-.chat-list { list-style: none; padding: 0; margin: 0; }
+.chat-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
 .chat-item {
   padding: 7px 10px;
   border-radius: 7px;
   font-size: 13.5px;
   color: var(--fg);
   cursor: pointer;
-  transition: background .12s ease;
+  transition: background .12s ease, color .12s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .chat-item:hover { background: var(--surface); }
-.chat-item.active { background: var(--surface); }
+.chat-item.active { background: var(--surface); border-left: 2px solid var(--accent); padding-left: 8px; }
+.chat-item.empty {
+  color: var(--mute);
+  font-style: italic;
+  cursor: default;
+  font-size: 12.5px;
+}
+.chat-item.empty:hover { background: transparent; }
 
 /* connection panel — the headline */
 

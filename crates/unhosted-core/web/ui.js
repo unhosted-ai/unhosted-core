@@ -1,7 +1,7 @@
 // unhosted — local web UI
 // Talks to the daemon HTTP API on the same origin:
 //   GET  /health     liveness
-//   GET  /v1/status  connection details: node + upstream + model + peers
+//   GET  /v1/status  connection details
 //   POST /v1/run     streaming text/plain inference
 
 const $ = (sel) => document.querySelector(sel);
@@ -21,10 +21,10 @@ const THEME_LABELS = { auto: "theme · auto", dark: "theme · dark", light: "the
     const next = current === "auto" ? "dark" : current === "dark" ? "light" : "auto";
     if (next === "auto") {
       delete document.documentElement.dataset.theme;
-      safeRemove();
+      safeRemove(THEME_KEY);
     } else {
       document.documentElement.dataset.theme = next;
-      safeSet(next);
+      safeSet(THEME_KEY, next);
     }
     paintTheme(btn);
   });
@@ -42,8 +42,10 @@ function paintTheme(btn) {
   btn.title = THEME_LABELS[t];
   btn.setAttribute("aria-label", THEME_LABELS[t]);
 }
-function safeSet(v) { try { localStorage.setItem(THEME_KEY, v); } catch (e) {} }
-function safeRemove() { try { localStorage.removeItem(THEME_KEY); } catch (e) {} }
+function safeSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+function safeRemove(k) { try { localStorage.removeItem(k); } catch (e) {} }
+
+// ---------------------------------------------------------------- elements
 
 const els = {
   composer: $("#composer"),
@@ -62,19 +64,166 @@ const els = {
   peersBlock: $("#peers-block"),
   peerList: $("#peer-list"),
   newChat: $("#new-chat"),
+  chatList: $("#chat-list"),
 };
 
 let streaming = false;
-let firstUserPrompt = null;
 
-// ---------------------------------------------------------------- status
+// ---------------------------------------------------------------- chat store
+
+const STORE_KEY = "unhosted-chats";
+const MAX_CHATS = 50;
+
+const store = loadStore();
+
+function loadStore() {
+  let raw = null;
+  try { raw = localStorage.getItem(STORE_KEY); } catch (e) {}
+  if (!raw) return { activeId: null, chats: [] };
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed.chats) return { activeId: null, chats: [] };
+    return parsed;
+  } catch (e) {
+    return { activeId: null, chats: [] };
+  }
+}
+
+function saveStore() { safeSet(STORE_KEY, JSON.stringify(store)); }
+
+function newChatId() {
+  return "c_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+function activeChat() {
+  return store.chats.find((c) => c.id === store.activeId) || null;
+}
+
+function ensureActiveChat() {
+  let chat = activeChat();
+  if (!chat) {
+    chat = { id: newChatId(), title: "new chat", createdAt: Date.now(), messages: [] };
+    store.chats.unshift(chat);
+    store.activeId = chat.id;
+    if (store.chats.length > MAX_CHATS) store.chats.length = MAX_CHATS;
+    saveStore();
+  }
+  return chat;
+}
+
+function startNewChat() {
+  // Only create a fresh entry if the current chat actually has messages —
+  // otherwise just reuse the empty one (avoids piling up blank chats).
+  const current = activeChat();
+  if (current && current.messages.length === 0) {
+    renderActiveChat();
+    return;
+  }
+  const chat = { id: newChatId(), title: "new chat", createdAt: Date.now(), messages: [] };
+  store.chats.unshift(chat);
+  store.activeId = chat.id;
+  if (store.chats.length > MAX_CHATS) store.chats.length = MAX_CHATS;
+  saveStore();
+  renderChatList();
+  renderActiveChat();
+  els.prompt.focus();
+}
+
+function switchToChat(id) {
+  if (!store.chats.some((c) => c.id === id)) return;
+  store.activeId = id;
+  saveStore();
+  renderChatList();
+  renderActiveChat();
+}
+
+// ---------------------------------------------------------------- rendering
+
+function renderChatList() {
+  els.chatList.innerHTML = "";
+  if (store.chats.length === 0) {
+    const li = document.createElement("li");
+    li.className = "chat-item empty";
+    li.textContent = "no chats yet";
+    els.chatList.append(li);
+    return;
+  }
+  for (const chat of store.chats) {
+    const li = document.createElement("li");
+    li.className = "chat-item" + (chat.id === store.activeId ? " active" : "");
+    li.dataset.chatId = chat.id;
+    li.textContent = chat.title || "new chat";
+    li.addEventListener("click", () => switchToChat(chat.id));
+    els.chatList.append(li);
+  }
+}
+
+function renderActiveChat() {
+  const chat = activeChat();
+  els.conversation.innerHTML = "";
+  if (!chat || chat.messages.length === 0) {
+    if (els.empty) els.empty.style.display = "";
+    els.topic.textContent = "new chat";
+    return;
+  }
+  if (els.empty) els.empty.style.display = "none";
+  els.topic.textContent = truncate(chat.title || chat.messages[0].text, 48);
+  for (const msg of chat.messages) {
+    renderMessage(msg);
+  }
+  els.scroll.scrollTop = els.scroll.scrollHeight;
+}
+
+function renderMessage(msg) {
+  const node = document.createElement("article");
+  node.className = `msg ${msg.role}`;
+
+  const who = document.createElement("div");
+  who.className = "who";
+  who.innerHTML = `<span class="dot"></span><span>${msg.role === "user" ? "you" : "unhosted"}</span>`;
+
+  const body = document.createElement("div");
+  body.className = "body";
+  body.textContent = msg.text;
+
+  node.append(who, body);
+
+  if (msg.role === "assistant" && msg.stats) {
+    node.append(buildStats(msg.stats));
+  }
+
+  els.conversation.append(node);
+  return node;
+}
+
+function buildStats(stats) {
+  const el = document.createElement("div");
+  el.className = "stats";
+  let servedHtml;
+  if (stats.servedBy && stats.servedBy.startsWith("peer:")) {
+    const name = stats.servedBy.slice("peer:".length);
+    servedHtml = `<span class="served-peer">served by peer · ${escapeHtml(name)}</span>`;
+  } else if (stats.servedBy) {
+    servedHtml = `served by ${stats.servedBy}`;
+  } else {
+    servedHtml = "served by local";
+  }
+  el.innerHTML = `
+    <span>${servedHtml}</span>
+    <span>~${stats.tokens} tok</span>
+    <span>${stats.seconds.toFixed(1)} s</span>
+    <span>~${stats.tokPerSec} tok/s</span>
+  `;
+  return el;
+}
+
+// ---------------------------------------------------------------- status panel
 
 async function refreshStatus() {
   try {
     const r = await fetch("/v1/status", { cache: "no-store" });
     if (!r.ok) throw new Error(`${r.status}`);
-    const s = await r.json();
-    renderStatus(s);
+    renderStatus(await r.json());
   } catch (e) {
     setStatusDot("err", "node unreachable");
     els.connModel.textContent = "—";
@@ -84,23 +233,17 @@ async function refreshStatus() {
 }
 
 function renderStatus(s) {
-  // upstream first
   if (s.upstream.reachable) {
     setStatusDot("ok", `node ready · v${s.node.version}`);
     els.connModel.textContent = s.upstream.model || "(model not reported)";
     els.connUpstream.textContent = s.upstream.url.replace(/^https?:\/\//, "");
   } else {
-    setStatusDot(
-      "warn",
-      "upstream offline — start `llama-server` to enable inference",
-    );
+    setStatusDot("warn", "upstream offline — start `llama-server`");
     els.connModel.textContent = "no model loaded";
     els.connUpstream.textContent = s.upstream.url.replace(/^https?:\/\//, "");
   }
-
   els.connNode.textContent = s.node.addr;
 
-  // peers
   if (s.peers && s.peers.length > 0) {
     els.peersBlock.hidden = false;
     els.peerList.innerHTML = "";
@@ -152,35 +295,36 @@ document.querySelectorAll(".chip[data-suggest]").forEach((btn) => {
   });
 });
 
-els.newChat.addEventListener("click", () => {
-  els.conversation.innerHTML = "";
-  if (els.empty) els.empty.style.display = "";
-  firstUserPrompt = null;
-  els.topic.textContent = "new chat";
-  els.prompt.focus();
-});
-
+els.newChat.addEventListener("click", startNewChat);
 autoresize();
 
-// ---------------------------------------------------------------- submit + stream
+// ---------------------------------------------------------------- submit
 
 els.composer.addEventListener("submit", async (e) => {
   e.preventDefault();
   const prompt = els.prompt.value.trim();
   if (!prompt || streaming) return;
 
-  if (els.empty) els.empty.style.display = "none";
-  if (!firstUserPrompt) {
-    firstUserPrompt = prompt;
-    els.topic.textContent = truncate(prompt, 48);
+  const chat = ensureActiveChat();
+  const userMsg = { role: "user", text: prompt };
+  chat.messages.push(userMsg);
+  if (chat.messages.length === 1) {
+    chat.title = truncate(prompt, 48);
+    els.topic.textContent = chat.title;
   }
+  saveStore();
+  renderChatList();
 
-  appendMessage("user", prompt);
+  if (els.empty) els.empty.style.display = "none";
+  renderMessage(userMsg);
+
   els.prompt.value = "";
   autoresize();
 
-  const assistant = appendMessage("assistant", "");
-  assistant.classList.add("streaming");
+  const assistantMsg = { role: "assistant", text: "" };
+  chat.messages.push(assistantMsg);
+  const assistantNode = renderMessage(assistantMsg);
+  assistantNode.classList.add("streaming");
 
   streaming = true;
   els.send.disabled = true;
@@ -191,19 +335,29 @@ els.composer.addEventListener("submit", async (e) => {
 
   try {
     const servedBy = await streamPrompt(prompt, (chunk) => {
-      const bodyEl = assistant.querySelector(".body");
-      bodyEl.textContent += chunk;
+      assistantMsg.text += chunk;
+      const bodyEl = assistantNode.querySelector(".body");
+      bodyEl.textContent = assistantMsg.text;
       bytes += chunk.length;
       els.scroll.scrollTop = els.scroll.scrollHeight;
     });
     const elapsedMs = performance.now() - startedAt;
-    annotateStats(assistant, servedBy, bytes, elapsedMs);
+    const stats = {
+      servedBy,
+      tokens: Math.max(1, Math.round(bytes / 4)),
+      seconds: elapsedMs / 1000,
+    };
+    stats.tokPerSec = stats.seconds > 0 ? (stats.tokens / stats.seconds).toFixed(1) : "—";
+    assistantMsg.stats = stats;
+    assistantNode.append(buildStats(stats));
   } catch (err) {
-    showError(assistant, err);
+    showError(assistantNode, err);
+    assistantMsg.text += `\n[error: ${err && err.message ? err.message : "request failed"}]`;
   } finally {
-    assistant.classList.remove("streaming");
+    assistantNode.classList.remove("streaming");
     streaming = false;
     els.meta.innerHTML = '<span class="hint">enter to send</span>';
+    saveStore();
     autoresize();
     els.prompt.focus();
   }
@@ -231,58 +385,10 @@ async function streamPrompt(prompt, onChunk) {
   return servedBy;
 }
 
-// ---------------------------------------------------------------- DOM helpers
+// ---------------------------------------------------------------- helpers
 
-function appendMessage(role, text) {
-  const msg = document.createElement("article");
-  msg.className = `msg ${role}`;
-
-  const who = document.createElement("div");
-  who.className = "who";
-  who.innerHTML = `<span class="dot"></span><span>${role === "user" ? "you" : "unhosted"}</span>`;
-
-  const body = document.createElement("div");
-  body.className = "body";
-  body.textContent = text;
-
-  msg.append(who, body);
-  els.conversation.append(msg);
-  els.scroll.scrollTop = els.scroll.scrollHeight;
-  return msg;
-}
-
-function annotateStats(msgEl, servedBy, bytes, elapsedMs) {
-  // Rough estimate: 1 token ≈ 4 bytes for English text in most tokenizers.
-  // Good enough for a live indicator; the actual count would require parsing
-  // llama-server's response headers.
-  const approxTokens = Math.max(1, Math.round(bytes / 4));
-  const seconds = elapsedMs / 1000;
-  const tokPerSec = seconds > 0 ? (approxTokens / seconds).toFixed(1) : "—";
-
-  const stats = document.createElement("div");
-  stats.className = "stats";
-
-  let servedHtml;
-  if (servedBy && servedBy.startsWith("peer:")) {
-    const name = servedBy.slice("peer:".length);
-    servedHtml = `<span class="served-peer">served by peer · ${escapeHtml(name)}</span>`;
-  } else if (servedBy) {
-    servedHtml = `served by ${servedBy}`;
-  } else {
-    servedHtml = `served by local`;
-  }
-
-  stats.innerHTML = `
-    <span>${servedHtml}</span>
-    <span>~${approxTokens} tok</span>
-    <span>${seconds.toFixed(1)} s</span>
-    <span>~${tokPerSec} tok/s</span>
-  `;
-  msgEl.append(stats);
-}
-
-function showError(assistantEl, err) {
-  const bodyEl = assistantEl.querySelector(".body");
+function showError(node, err) {
+  const bodyEl = node.querySelector(".body");
   const banner = document.createElement("div");
   banner.className = "error-banner";
   banner.innerHTML =
@@ -306,3 +412,8 @@ function truncate(s, n) {
   if (s.length <= n) return s;
   return s.slice(0, n - 1) + "…";
 }
+
+// ---------------------------------------------------------------- boot
+
+renderChatList();
+renderActiveChat();
