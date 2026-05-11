@@ -3,6 +3,10 @@
 //!
 //! v0.0.1 is single-machine only. Multi-node orchestration arrives in v0.0.2.
 
+pub mod peer;
+
+pub use peer::{Peer, PeerRegistry};
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 

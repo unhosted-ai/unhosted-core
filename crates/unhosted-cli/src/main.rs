@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use futures::StreamExt;
-use unhosted_core::{serve, Node, DEFAULT_LLAMA_SERVER_URL, DEFAULT_NODE_ADDR};
+use unhosted_core::{serve, Node, Peer, PeerRegistry, DEFAULT_LLAMA_SERVER_URL, DEFAULT_NODE_ADDR};
 
 #[derive(Parser, Debug)]
 #[command(name = "unhosted", version, about = "AI that lives where you do.")]
@@ -35,6 +35,32 @@ enum Command {
         #[arg(long, default_value_t = 256)]
         max_tokens: u32,
     },
+    /// Manage peer nodes (v0.0.2 multi-node cluster).
+    Peer {
+        #[command(subcommand)]
+        action: PeerAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum PeerAction {
+    /// List configured peers.
+    List,
+    /// Add a peer by name and address. Replaces an existing entry with the same name.
+    Add {
+        /// Human-readable name for this peer.
+        name: String,
+        /// Peer address (e.g. 192.168.1.42:7777).
+        addr: SocketAddr,
+        /// Lower priorities are preferred. Default 10.
+        #[arg(long, default_value_t = 10)]
+        priority: u8,
+    },
+    /// Remove a peer by name.
+    Remove {
+        /// The name passed to `peer add`.
+        name: String,
+    },
 }
 
 #[tokio::main]
@@ -60,8 +86,60 @@ async fn main() -> Result<()> {
         } => {
             run_prompt(&node, &prompt, max_tokens).await?;
         }
+        Command::Peer { action } => {
+            handle_peer(action)?;
+        }
     }
 
+    Ok(())
+}
+
+fn handle_peer(action: PeerAction) -> Result<()> {
+    let mut registry = PeerRegistry::load().context("loading peer registry")?;
+    match action {
+        PeerAction::List => {
+            if registry.peers.is_empty() {
+                println!("no peers configured. add one with `unhosted peer add <name> <addr>`.");
+                return Ok(());
+            }
+            println!("{:<16} {:<24} {:<10} MODELS", "NAME", "ADDRESS", "PRIORITY");
+            for peer in registry.by_priority() {
+                let models = if peer.models.is_empty() {
+                    "(any)".to_string()
+                } else {
+                    peer.models.join(", ")
+                };
+                println!(
+                    "{:<16} {:<24} {:<10} {}",
+                    peer.name, peer.addr, peer.priority, models
+                );
+            }
+        }
+        PeerAction::Add {
+            name,
+            addr,
+            priority,
+        } => {
+            registry.add(Peer {
+                name: name.clone(),
+                addr,
+                priority,
+                models: vec![],
+            })?;
+            println!("peer added: {name} @ {addr} (priority {priority})");
+            println!("config: {}", PeerRegistry::config_path()?.display());
+            println!(
+                "note: v0.0.2 routing is not yet wired — peers are registered but inference still runs locally."
+            );
+        }
+        PeerAction::Remove { name } => {
+            if registry.remove(&name)? {
+                println!("peer removed: {name}");
+            } else {
+                anyhow::bail!("no peer named '{name}' is configured");
+            }
+        }
+    }
     Ok(())
 }
 
