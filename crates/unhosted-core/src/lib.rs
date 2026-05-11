@@ -11,12 +11,14 @@
 pub mod discovery;
 pub mod identity;
 pub mod peer;
+pub mod relay_client;
 pub mod router;
 mod web;
 
 pub use discovery::{default_node_name, DiscoveredPeer, Discovery};
 pub use identity::Identity;
 pub use peer::{Peer, PeerRegistry};
+pub use relay_client::{RelayClient, RelayState};
 pub use router::{Router as RouteRouter, Target};
 
 use std::net::SocketAddr;
@@ -59,6 +61,10 @@ pub struct Node {
     pub peers: Vec<Peer>,
     /// Human-readable name used for mDNS announcement and the served-by tag.
     pub name: String,
+    /// Optional relay URL (`wss://...` or `ws://...`). When set, the daemon
+    /// connects to the relay, registers with its identity, and (eventually)
+    /// routes off-LAN peer traffic through it.
+    pub relay_url: Option<String>,
 }
 
 impl Node {
@@ -69,6 +75,7 @@ impl Node {
                 .unwrap_or_else(|_| DEFAULT_LLAMA_SERVER_URL.to_string()),
             peers: Vec::new(),
             name: default_node_name(),
+            relay_url: std::env::var("UNHOSTED_RELAY").ok(),
         }
     }
 }
@@ -85,6 +92,7 @@ struct NodeState {
     /// expires 5 minutes after issuance. In-memory only — restart drops
     /// them, which is the right behavior for one-time secrets.
     pairing_tokens: Arc<std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>>,
+    relay: RelayClient,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -134,6 +142,13 @@ pub async fn serve(node: Node) -> Result<()> {
     let identity = Identity::load_or_create().context("loading node identity")?;
     tracing::info!(pubkey = %identity.public_b64(), "node identity loaded");
 
+    let relay = if let Some(url) = node.relay_url.clone() {
+        tracing::info!(relay = %url, "starting relay client");
+        RelayClient::spawn(identity.clone(), url)
+    } else {
+        RelayClient::disabled()
+    };
+
     let state = NodeState {
         node: Arc::new(node.clone()),
         router: router.clone(),
@@ -141,6 +156,7 @@ pub async fn serve(node: Node) -> Result<()> {
         discovery,
         identity,
         pairing_tokens: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        relay,
     };
 
     let api = AxumRouter::new()
@@ -181,6 +197,15 @@ struct StatusResponse {
     peers: Vec<PeerStatus>,
     routing: RoutingStatus,
     discovered: Vec<DiscoveredPeer>,
+    relay: RelayStatus,
+}
+
+#[derive(Serialize)]
+struct RelayStatus {
+    /// "disabled" | "connecting" | "registered" | "error"
+    state: &'static str,
+    url: Option<String>,
+    error: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -241,6 +266,30 @@ async fn status_handler(State(state): State<NodeState>) -> axum::Json<StatusResp
         peers.iter().map(|p| p.name.clone()).collect();
     discovered.retain(|d| !paired_names.contains(&d.name));
 
+    let relay_state = state.relay.current_state().await;
+    let relay = match relay_state {
+        RelayState::Disabled => RelayStatus {
+            state: "disabled",
+            url: None,
+            error: None,
+        },
+        RelayState::Connecting => RelayStatus {
+            state: "connecting",
+            url: state.node.relay_url.clone(),
+            error: None,
+        },
+        RelayState::Registered => RelayStatus {
+            state: "registered",
+            url: state.node.relay_url.clone(),
+            error: None,
+        },
+        RelayState::Error(msg) => RelayStatus {
+            state: "error",
+            url: state.node.relay_url.clone(),
+            error: Some(msg),
+        },
+    };
+
     axum::Json(StatusResponse {
         node: NodeStatus {
             addr: state.node.addr.to_string(),
@@ -258,6 +307,7 @@ async fn status_handler(State(state): State<NodeState>) -> axum::Json<StatusResp
             mode: "round-robin",
         },
         discovered,
+        relay,
     })
 }
 

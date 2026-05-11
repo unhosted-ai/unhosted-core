@@ -58,6 +58,11 @@ enum Command {
         /// Upstream llama-server URL. Overrides UNHOSTED_LLAMA_SERVER_URL.
         #[arg(long)]
         upstream: Option<String>,
+        /// Relay URL (ws:// or wss://). Daemon registers with the relay
+        /// for trusted-peer reachability across the internet. Overrides
+        /// UNHOSTED_RELAY env var.
+        #[arg(long)]
+        relay: Option<String>,
     },
     /// Run a prompt against a local node and stream tokens to stdout.
     Run {
@@ -138,7 +143,11 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::Serve { addr, upstream } => {
+        Command::Serve {
+            addr,
+            upstream,
+            relay,
+        } => {
             let llama_server_url = upstream
                 .or_else(|| std::env::var("UNHOSTED_LLAMA_SERVER_URL").ok())
                 .unwrap_or_else(|| DEFAULT_LLAMA_SERVER_URL.to_string());
@@ -149,11 +158,13 @@ async fn main() -> Result<()> {
                     "loaded peers from registry — request routing is round-robin local + peers"
                 );
             }
+            let relay_url = relay.or_else(|| std::env::var("UNHOSTED_RELAY").ok());
             let node = Node {
                 addr,
                 llama_server_url,
                 peers: registry.peers,
                 name: default_node_name(),
+                relay_url,
             };
             serve(node).await?;
         }

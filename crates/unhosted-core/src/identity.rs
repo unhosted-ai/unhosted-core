@@ -31,9 +31,15 @@ impl Identity {
     /// Load the identity from disk, generating + persisting a new keypair if
     /// none exists yet.
     pub fn load_or_create() -> Result<Self> {
-        let path = config_path()?;
+        Self::load_or_create_at(&config_path()?)
+    }
+
+    /// Same as [`Identity::load_or_create`] but uses an explicit path
+    /// instead of reading `XDG_CONFIG_HOME`. Useful for tests that need
+    /// isolation from process-global env vars.
+    pub fn load_or_create_at(path: &std::path::Path) -> Result<Self> {
         if path.exists() {
-            let text = std::fs::read_to_string(&path)
+            let text = std::fs::read_to_string(path)
                 .with_context(|| format!("reading {}", path.display()))?;
             let stored: IdentityFile =
                 toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
@@ -60,13 +66,13 @@ impl Identity {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating {}", parent.display()))?;
         }
-        std::fs::write(&path, toml::to_string_pretty(&file)?)
+        std::fs::write(path, toml::to_string_pretty(&file)?)
             .with_context(|| format!("writing {}", path.display()))?;
         // Tighten permissions on the secret file (owner-only).
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
         }
 
         Ok(Self {
@@ -123,19 +129,23 @@ mod tests {
 
     #[test]
     fn sign_and_verify_roundtrip() {
-        // Use an isolated config dir so we don't trample the real one.
-        let tmp = std::env::temp_dir().join(format!("unhosted-id-{}", std::process::id()));
-        std::env::set_var("XDG_CONFIG_HOME", &tmp);
+        // Use an explicit, per-test path. No XDG_CONFIG_HOME, no shared state.
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let tmp = std::env::temp_dir().join(format!("unhosted-id-{}-{stamp}", std::process::id()));
+        let path = tmp.join("identity.toml");
 
-        let id = Identity::load_or_create().unwrap();
+        let id = Identity::load_or_create_at(&path).unwrap();
         let msg = b"hello world";
         let sig = id.sign(msg);
 
         assert!(Identity::verify(&id.public_b64(), msg, &sig));
         assert!(!Identity::verify(&id.public_b64(), b"different", &sig));
 
-        // load_or_create twice returns the same key (persistence works)
-        let id2 = Identity::load_or_create().unwrap();
+        // load_or_create twice returns the same key (persistence works).
+        let id2 = Identity::load_or_create_at(&path).unwrap();
         assert_eq!(id.public_b64(), id2.public_b64());
 
         let _ = std::fs::remove_dir_all(&tmp);
