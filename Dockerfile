@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Cache dependencies separately from the source so changes to src
 # don't re-download every crate.
-COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY Cargo.toml Cargo.lock rust-toolchain.toml LICENSE README.md ./
 COPY crates ./crates
 RUN cargo build --release -p unhosted-cli && \
     strip target/release/unhosted
