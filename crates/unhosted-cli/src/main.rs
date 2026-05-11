@@ -4,7 +4,9 @@ use std::net::SocketAddr;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use futures::StreamExt;
-use unhosted_core::{serve, Node, Peer, PeerRegistry, DEFAULT_LLAMA_SERVER_URL, DEFAULT_NODE_ADDR};
+use unhosted_core::{
+    default_node_name, serve, Node, Peer, PeerRegistry, DEFAULT_LLAMA_SERVER_URL, DEFAULT_NODE_ADDR,
+};
 
 #[derive(Parser, Debug)]
 #[command(name = "unhosted", version, about = "AI that lives where you do.")]
@@ -84,6 +86,7 @@ async fn main() -> Result<()> {
                 addr,
                 llama_server_url,
                 peers: registry.peers,
+                name: default_node_name(),
             };
             serve(node).await?;
         }

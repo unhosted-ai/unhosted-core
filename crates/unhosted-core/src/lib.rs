@@ -8,10 +8,12 @@
 //! Peer protocol is the same HTTP API the CLI uses (`POST /v1/run`), so a
 //! peer is just another `unhosted serve` process. No new transport.
 
+pub mod discovery;
 pub mod peer;
 pub mod router;
 mod web;
 
+pub use discovery::{default_node_name, DiscoveredPeer, Discovery};
 pub use peer::{Peer, PeerRegistry};
 pub use router::{Router as RouteRouter, Target};
 
@@ -49,6 +51,8 @@ pub struct Node {
     /// Peers reachable from this node. Loaded from the peer registry at
     /// startup; empty means single-node operation (v0.0.1 behavior).
     pub peers: Vec<Peer>,
+    /// Human-readable name used for mDNS announcement and the served-by tag.
+    pub name: String,
 }
 
 impl Node {
@@ -58,6 +62,7 @@ impl Node {
             llama_server_url: std::env::var("UNHOSTED_LLAMA_SERVER_URL")
                 .unwrap_or_else(|_| DEFAULT_LLAMA_SERVER_URL.to_string()),
             peers: Vec::new(),
+            name: default_node_name(),
         }
     }
 }
@@ -67,6 +72,8 @@ impl Node {
 struct NodeState {
     node: Arc<Node>,
     router: Arc<RouteRouter>,
+    registry: Arc<std::sync::Mutex<PeerRegistry>>,
+    discovery: Option<Discovery>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -90,15 +97,37 @@ struct UpstreamCompletion<'a> {
 
 pub async fn serve(node: Node) -> Result<()> {
     let router = Arc::new(RouteRouter::new(&node.peers));
+
+    // mDNS: announce ourselves and start browsing for peers. Best-effort —
+    // if it fails, the daemon still works, you just don't get auto-discovery.
+    let discovery = match Discovery::start(&node.name, node.addr, env!("CARGO_PKG_VERSION")) {
+        Ok(d) => {
+            tracing::info!(name = %node.name, "mdns discovery active");
+            Some(d)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "mdns discovery disabled — peers won't auto-discover");
+            None
+        }
+    };
+
+    let registry = Arc::new(std::sync::Mutex::new(PeerRegistry {
+        peers: node.peers.clone(),
+    }));
+
     let state = NodeState {
         node: Arc::new(node.clone()),
         router: router.clone(),
+        registry,
+        discovery,
     };
 
     let api = AxumRouter::new()
         .route("/health", get(health))
         .route("/v1/run", post(run_handler))
         .route("/v1/status", get(status_handler))
+        .route("/v1/peers", post(pair_handler))
+        .route("/v1/peers/{name}", axum::routing::delete(unpair_handler))
         .with_state(state);
 
     let app = api
@@ -128,11 +157,13 @@ struct StatusResponse {
     upstream: UpstreamStatus,
     peers: Vec<PeerStatus>,
     routing: RoutingStatus,
+    discovered: Vec<DiscoveredPeer>,
 }
 
 #[derive(Serialize)]
 struct NodeStatus {
     addr: String,
+    name: String,
     version: &'static str,
 }
 
@@ -161,19 +192,36 @@ async fn status_handler(State(state): State<NodeState>) -> axum::Json<StatusResp
     let (reachable, model) = probe_upstream(&upstream_url).await;
 
     let peers = state
-        .node
-        .peers
-        .iter()
-        .map(|p| PeerStatus {
-            name: p.name.clone(),
-            addr: p.addr.to_string(),
-            priority: p.priority,
+        .registry
+        .lock()
+        .map(|r| {
+            r.peers
+                .iter()
+                .map(|p| PeerStatus {
+                    name: p.name.clone(),
+                    addr: p.addr.to_string(),
+                    priority: p.priority,
+                })
+                .collect::<Vec<_>>()
         })
-        .collect();
+        .unwrap_or_default();
+
+    let mut discovered = state
+        .discovery
+        .as_ref()
+        .map(|d| d.snapshot())
+        .unwrap_or_default();
+
+    // Hide peers that are already in the registry — we only want to show
+    // *unpaired* discoveries in the UI.
+    let paired_names: std::collections::HashSet<String> =
+        peers.iter().map(|p| p.name.clone()).collect();
+    discovered.retain(|d| !paired_names.contains(&d.name));
 
     axum::Json(StatusResponse {
         node: NodeStatus {
             addr: state.node.addr.to_string(),
+            name: state.node.name.clone(),
             version: env!("CARGO_PKG_VERSION"),
         },
         upstream: UpstreamStatus {
@@ -186,7 +234,109 @@ async fn status_handler(State(state): State<NodeState>) -> axum::Json<StatusResp
             targets: state.router.target_count(),
             mode: "round-robin",
         },
+        discovered,
     })
+}
+
+#[derive(Deserialize)]
+struct PairRequest {
+    name: String,
+    addr: SocketAddr,
+    #[serde(default = "default_pair_priority")]
+    priority: u8,
+}
+
+fn default_pair_priority() -> u8 {
+    10
+}
+
+#[derive(Serialize)]
+struct PairResponse {
+    ok: bool,
+    peers: Vec<PeerStatus>,
+}
+
+async fn pair_handler(
+    State(state): State<NodeState>,
+    Json(req): Json<PairRequest>,
+) -> Result<axum::Json<PairResponse>, StatusCode> {
+    let new_peer = Peer {
+        name: req.name.clone(),
+        addr: req.addr,
+        priority: req.priority,
+        models: vec![],
+    };
+
+    {
+        let mut reg = state
+            .registry
+            .lock()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        reg.add(new_peer).map_err(|e| {
+            tracing::error!(error = %e, "pair: persisting peer failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+        state.router.replace_peers(&reg.peers);
+        tracing::info!(name = %req.name, addr = %req.addr, "peer paired and live");
+    }
+
+    let peers = state
+        .registry
+        .lock()
+        .map(|r| {
+            r.peers
+                .iter()
+                .map(|p| PeerStatus {
+                    name: p.name.clone(),
+                    addr: p.addr.to_string(),
+                    priority: p.priority,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(axum::Json(PairResponse { ok: true, peers }))
+}
+
+async fn unpair_handler(
+    State(state): State<NodeState>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> Result<axum::Json<PairResponse>, StatusCode> {
+    let removed = {
+        let mut reg = state
+            .registry
+            .lock()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let removed = reg
+            .remove(&name)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        if removed {
+            state.router.replace_peers(&reg.peers);
+            tracing::info!(%name, "peer unpaired");
+        }
+        removed
+    };
+
+    if !removed {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    let peers = state
+        .registry
+        .lock()
+        .map(|r| {
+            r.peers
+                .iter()
+                .map(|p| PeerStatus {
+                    name: p.name.clone(),
+                    addr: p.addr.to_string(),
+                    priority: p.priority,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(axum::Json(PairResponse { ok: true, peers }))
 }
 
 /// Best-effort probe of llama-server: reachable check + currently loaded

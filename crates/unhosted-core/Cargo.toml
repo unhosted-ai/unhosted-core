@@ -22,3 +22,5 @@ futures.workspace = true
 bytes.workspace = true
 rust-embed.workspace = true
 mime_guess.workspace = true
+mdns-sd.workspace = true
+hostname.workspace = true

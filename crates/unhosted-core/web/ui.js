@@ -65,6 +65,8 @@ const els = {
   peerList: $("#peer-list"),
   newChat: $("#new-chat"),
   chatList: $("#chat-list"),
+  discoveredSection: $("#discovered-section"),
+  discoveredList: $("#discovered-list"),
 };
 
 let streaming = false;
@@ -249,17 +251,87 @@ function renderStatus(s) {
     els.peerList.innerHTML = "";
     for (const peer of s.peers) {
       const li = document.createElement("li");
+
+      const left = document.createElement("div");
+      left.style.display = "flex";
+      left.style.flexDirection = "column";
       const name = document.createElement("span");
       name.className = "pname";
       name.textContent = peer.name;
       const addr = document.createElement("span");
       addr.className = "paddr";
       addr.textContent = peer.addr;
-      li.append(name, addr);
+      left.append(name, addr);
+
+      const unpair = document.createElement("button");
+      unpair.className = "unpair";
+      unpair.textContent = "unpair";
+      unpair.title = `unpair ${peer.name}`;
+      unpair.addEventListener("click", () => unpairPeer(peer.name));
+
+      li.append(left, unpair);
       els.peerList.append(li);
     }
   } else {
     els.peersBlock.hidden = true;
+  }
+
+  // discovered (unpaired) peers
+  if (els.discoveredSection) {
+    const list = s.discovered || [];
+    if (list.length === 0) {
+      els.discoveredSection.hidden = true;
+      els.discoveredList.innerHTML = "";
+    } else {
+      els.discoveredSection.hidden = false;
+      els.discoveredList.innerHTML = "";
+      for (const d of list) {
+        const li = document.createElement("li");
+
+        const left = document.createElement("div");
+        left.className = "dname";
+        const name = document.createElement("span");
+        name.className = "name";
+        name.textContent = d.name;
+        const addr = document.createElement("span");
+        addr.className = "addr";
+        addr.textContent = d.addr;
+        left.append(name, addr);
+
+        const pair = document.createElement("button");
+        pair.className = "pair";
+        pair.textContent = "pair";
+        pair.addEventListener("click", () => pairPeer(d));
+
+        li.append(left, pair);
+        els.discoveredList.append(li);
+      }
+    }
+  }
+}
+
+async function pairPeer(d) {
+  try {
+    const r = await fetch("/v1/peers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: d.name, addr: d.addr }),
+    });
+    if (!r.ok) throw new Error(`${r.status}`);
+    await refreshStatus();
+  } catch (e) {
+    console.error("pair failed", e);
+    alert("pair failed: " + (e && e.message ? e.message : "unknown"));
+  }
+}
+
+async function unpairPeer(name) {
+  try {
+    const r = await fetch(`/v1/peers/${encodeURIComponent(name)}`, { method: "DELETE" });
+    if (!r.ok) throw new Error(`${r.status}`);
+    await refreshStatus();
+  } catch (e) {
+    console.error("unpair failed", e);
   }
 }
 
