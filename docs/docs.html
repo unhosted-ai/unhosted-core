@@ -186,7 +186,8 @@ cargo build --release</code></pre>
         </thead>
         <tbody>
           <tr><td>single-machine inference</td><td><span class="pill on">shipped</span></td><td>v0.0.1, smoke-tested on m-series mac.</td></tr>
-          <tr><td>lan cluster (local mode)</td><td><span class="pill mid">building</span></td><td>v0.0.2. design phase.</td></tr>
+          <tr><td>lan cluster (request routing)</td><td><span class="pill on">shipped</span></td><td>v0.0.2. round-robin across local + peers, verified end-to-end.</td></tr>
+          <tr><td>vram pooling (layer splitting)</td><td><span class="pill mid">building</span></td><td>v0.0.3+. needs llama.cpp built with -dggml_rpc=on.</td></tr>
           <tr><td>trusted-peer pairing</td><td><span class="pill off">designed</span></td><td>v0.1.0. wireguard-style.</td></tr>
           <tr><td>public swarm (usdc)</td><td><span class="pill off">designed</span></td><td>v0.3.0+. base first, solana later.</td></tr>
           <tr><td>verifiable inference</td><td><span class="pill off">research</span></td><td>optimistic + redundancy is the v1 plan.</td></tr>

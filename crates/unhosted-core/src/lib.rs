@@ -1,12 +1,19 @@
-//! Core engine for Unhosted: a local node that proxies inference requests to
-//! a llama.cpp `llama-server` instance and streams tokens back to the caller.
+//! Core engine for Unhosted.
 //!
-//! v0.0.1 is single-machine only. Multi-node orchestration arrives in v0.0.2.
+//! - v0.0.1: single-machine inference — proxies to a local llama-server.
+//! - v0.0.2 (in progress): multi-node — the daemon round-robins requests
+//!   across `Local` + configured peers, with loop prevention and per-request
+//!   fallback to local on peer failure.
+//!
+//! Peer protocol is the same HTTP API the CLI uses (`POST /v1/run`), so a
+//! peer is just another `unhosted serve` process. No new transport.
 
 pub mod peer;
+pub mod router;
 mod web;
 
 pub use peer::{Peer, PeerRegistry};
+pub use router::{Router as RouteRouter, Target};
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -15,10 +22,10 @@ use anyhow::Result;
 use axum::{
     body::Body,
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::Response,
     routing::{get, post},
-    Json, Router,
+    Json, Router as AxumRouter,
 };
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -31,10 +38,17 @@ pub const DEFAULT_LLAMA_SERVER_URL: &str = "http://127.0.0.1:8080";
 /// Default address the local Unhosted node listens on.
 pub const DEFAULT_NODE_ADDR: &str = "127.0.0.1:7777";
 
+/// Header used to mark a request as already forwarded from another peer.
+/// Daemons that receive this header skip the router and serve locally.
+const FORWARDED_HEADER: &str = "x-unhosted-forwarded";
+
 #[derive(Clone, Debug)]
 pub struct Node {
     pub addr: SocketAddr,
     pub llama_server_url: String,
+    /// Peers reachable from this node. Loaded from the peer registry at
+    /// startup; empty means single-node operation (v0.0.1 behavior).
+    pub peers: Vec<Peer>,
 }
 
 impl Node {
@@ -43,11 +57,19 @@ impl Node {
             addr: DEFAULT_NODE_ADDR.parse().expect("valid default addr"),
             llama_server_url: std::env::var("UNHOSTED_LLAMA_SERVER_URL")
                 .unwrap_or_else(|_| DEFAULT_LLAMA_SERVER_URL.to_string()),
+            peers: Vec::new(),
         }
     }
 }
 
-#[derive(Deserialize, Debug)]
+/// Runtime state shared by all request handlers.
+#[derive(Clone)]
+struct NodeState {
+    node: Arc<Node>,
+    router: Arc<RouteRouter>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct RunRequest {
     pub prompt: String,
     #[serde(default = "default_max_tokens")]
@@ -67,18 +89,17 @@ struct UpstreamCompletion<'a> {
 }
 
 pub async fn serve(node: Node) -> Result<()> {
-    let state = Arc::new(node.clone());
+    let router = Arc::new(RouteRouter::new(&node.peers));
+    let state = NodeState {
+        node: Arc::new(node.clone()),
+        router: router.clone(),
+    };
 
-    // API routes (consumed by the CLI and the embedded web UI).
-    let api = Router::new()
+    let api = AxumRouter::new()
         .route("/health", get(health))
         .route("/v1/run", post(run_handler))
         .with_state(state);
 
-    // The embedded web UI sits alongside the API on the same port.
-    // Specific routes match first; the wildcard at the end catches
-    // /ui.css, /ui.js, /favicon.svg, etc. and falls back to index.html
-    // for unknown paths so a future client-side router can take over.
     let app = api
         .route("/", get(web::serve_index))
         .fallback(web::serve_static);
@@ -87,6 +108,7 @@ pub async fn serve(node: Node) -> Result<()> {
     tracing::info!(
         addr = %node.addr,
         upstream = %node.llama_server_url,
+        peers = router.target_count() - 1,
         ui = "enabled",
         "unhosted node listening — open http://{} in a browser",
         node.addr
@@ -100,9 +122,83 @@ async fn health() -> &'static str {
 }
 
 async fn run_handler(
-    State(node): State<Arc<Node>>,
+    State(state): State<NodeState>,
+    headers: HeaderMap,
     Json(req): Json<RunRequest>,
 ) -> Result<Response, StatusCode> {
+    // Loop prevention: if a peer already forwarded this request to us, we
+    // serve it locally and don't bounce it back into the router.
+    let already_forwarded = headers.get(FORWARDED_HEADER).is_some();
+
+    let target = if already_forwarded {
+        Target::Local
+    } else {
+        state.router.next()
+    };
+
+    match target {
+        Target::Local => {
+            tracing::debug!(
+                target = "local",
+                forwarded = already_forwarded,
+                "routing request"
+            );
+            run_local(&state.node, req).await
+        }
+        Target::Peer { ref name, addr } => {
+            tracing::debug!(target = %name, %addr, "routing request to peer");
+            match run_peer(name, addr, &req).await {
+                Ok(resp) => Ok(resp),
+                Err(e) => {
+                    tracing::warn!(
+                        peer = %name,
+                        error = %e,
+                        "peer unreachable, falling back to local"
+                    );
+                    run_local(&state.node, req).await
+                }
+            }
+        }
+    }
+}
+
+/// Forward a request to a peer's `/v1/run`, streaming the response body back
+/// to our caller unchanged. The peer is another `unhosted` daemon, so the
+/// response is already text/plain token stream.
+async fn run_peer(name: &str, addr: SocketAddr, req: &RunRequest) -> Result<Response> {
+    let url = format!("http://{addr}/v1/run");
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(2))
+        .build()
+        .map_err(anyhow::Error::from)?;
+
+    let upstream_resp = client
+        .post(&url)
+        .header(FORWARDED_HEADER, "1")
+        .json(req)
+        .send()
+        .await
+        .map_err(anyhow::Error::from)?;
+
+    if !upstream_resp.status().is_success() {
+        anyhow::bail!("peer {} returned {}", name, upstream_resp.status());
+    }
+
+    let stream = upstream_resp.bytes_stream().map(|chunk| match chunk {
+        Ok(b) => Ok::<_, std::io::Error>(b),
+        Err(e) => Err(std::io::Error::other(e.to_string())),
+    });
+
+    Ok(Response::builder()
+        .header("content-type", "text/plain; charset=utf-8")
+        .header("x-unhosted-served-by", format!("peer:{name}"))
+        .body(Body::from_stream(stream))
+        .expect("valid response"))
+}
+
+/// Serve a request locally by proxying to this node's upstream llama-server,
+/// parsing its SSE stream, and emitting plain-text tokens.
+async fn run_local(node: &Node, req: RunRequest) -> Result<Response, StatusCode> {
     let upstream_url = format!("{}/completion", node.llama_server_url);
     let client = reqwest::Client::new();
 
@@ -143,9 +239,6 @@ async fn run_handler(
 
             buffer.push_str(&String::from_utf8_lossy(&chunk));
 
-            // SSE events are separated by "\n\n"; each carries one or more
-            // "data: <payload>" lines. We accumulate, split, and forward the
-            // `content` field of each JSON payload as plain text.
             while let Some(boundary) = buffer.find("\n\n") {
                 let event: String = buffer.drain(..boundary + 2).collect();
                 if !forward_event(&event, &tx).await {
@@ -158,6 +251,7 @@ async fn run_handler(
     let stream = ReceiverStream::new(rx);
     Ok(Response::builder()
         .header("content-type", "text/plain; charset=utf-8")
+        .header("x-unhosted-served-by", "local")
         .body(Body::from_stream(stream))
         .expect("valid response"))
 }

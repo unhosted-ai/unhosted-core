@@ -73,9 +73,17 @@ async fn main() -> Result<()> {
             let llama_server_url = upstream
                 .or_else(|| std::env::var("UNHOSTED_LLAMA_SERVER_URL").ok())
                 .unwrap_or_else(|| DEFAULT_LLAMA_SERVER_URL.to_string());
+            let registry = PeerRegistry::load().context("loading peer registry")?;
+            if !registry.peers.is_empty() {
+                tracing::info!(
+                    count = registry.peers.len(),
+                    "loaded peers from registry — request routing is round-robin local + peers"
+                );
+            }
             let node = Node {
                 addr,
                 llama_server_url,
+                peers: registry.peers,
             };
             serve(node).await?;
         }
@@ -128,9 +136,7 @@ fn handle_peer(action: PeerAction) -> Result<()> {
             })?;
             println!("peer added: {name} @ {addr} (priority {priority})");
             println!("config: {}", PeerRegistry::config_path()?.display());
-            println!(
-                "note: v0.0.2 routing is not yet wired — peers are registered but inference still runs locally."
-            );
+            println!("restart `unhosted serve` to include this peer in the routing rotation.");
         }
         PeerAction::Remove { name } => {
             if registry.remove(&name)? {

@@ -75,7 +75,8 @@ This section replaces the typical "Features" list. It's the truth about what wor
 | Capability                    | Status      | Notes                                                              |
 |-------------------------------|-------------|--------------------------------------------------------------------|
 | Single-machine inference      | shipped     | v0.0.1. Wraps llama.cpp `llama-server`. Smoke-tested on M-series.  |
-| LAN cluster (local mode)      | building    | v0.0.2. Spec being written.                                        |
+| LAN cluster (request routing) | shipped     | v0.0.2. Round-robin across local + peers; verified end-to-end.     |
+| VRAM-pooling (layer splitting) | building   | v0.0.3+. Needs llama.cpp built with `-DGGML_RPC=ON`.              |
 | Trusted-peer pairing          | designed    | v0.1.0. WireGuard-style.                                           |
 | Public swarm (USDC)           | designed    | v0.3.0+. See [design/0001](design/0001-public-mode-architecture.md). |
 | Verifiable inference          | research    | Optimistic + redundancy planned; ZK proofs when affordable.        |
