@@ -202,7 +202,8 @@ pub async fn serve(node: Node) -> Result<()> {
 
     let app = api
         .route("/", get(web::serve_index))
-        .fallback(web::serve_static);
+        .fallback(web::serve_static)
+        .layer(cors_layer());
 
     let listener = tokio::net::TcpListener::bind(node.addr).await?;
     tracing::info!(
@@ -219,6 +220,55 @@ pub async fn serve(node: Node) -> Result<()> {
 
 async fn health() -> &'static str {
     "ok"
+}
+
+/// CORS policy. Default is local-only — explicit allow-list extends it to
+/// browser-based clients (e.g. a Delta extension served from a non-loopback
+/// origin).
+///
+///   UNHOSTED_CORS_ORIGINS=""         only localhost / 127.0.0.1 origins
+///   UNHOSTED_CORS_ORIGINS="*"        allow any origin (use with care)
+///   UNHOSTED_CORS_ORIGINS="https://delta.local,https://x.unhosted.dev"
+fn cors_layer() -> tower_http::cors::CorsLayer {
+    use tower_http::cors::{AllowOrigin, CorsLayer};
+
+    let raw = std::env::var("UNHOSTED_CORS_ORIGINS").unwrap_or_default();
+    let trimmed = raw.trim();
+
+    let base = CorsLayer::new()
+        .allow_methods([
+            axum::http::Method::GET,
+            axum::http::Method::POST,
+            axum::http::Method::DELETE,
+            axum::http::Method::OPTIONS,
+        ])
+        .allow_headers(tower_http::cors::Any)
+        .max_age(std::time::Duration::from_secs(600));
+
+    if trimmed.is_empty() {
+        // Default: allow loopback origins so the embedded web UI works
+        // and any tool on the same machine reaches us, but nothing else.
+        return base.allow_origin(AllowOrigin::predicate(|origin, _req| {
+            origin.as_bytes().starts_with(b"http://127.0.0.1")
+                || origin.as_bytes().starts_with(b"http://localhost")
+                || origin.as_bytes().starts_with(b"https://127.0.0.1")
+                || origin.as_bytes().starts_with(b"https://localhost")
+                || origin.as_bytes().starts_with(b"tauri://")
+                || origin.as_bytes().starts_with(b"file://")
+        }));
+    }
+
+    if trimmed == "*" {
+        return base.allow_origin(AllowOrigin::any());
+    }
+
+    let origins: Vec<axum::http::HeaderValue> = trimmed
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    base.allow_origin(origins)
 }
 
 #[derive(Serialize)]
