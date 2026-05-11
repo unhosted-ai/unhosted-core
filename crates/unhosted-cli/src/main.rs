@@ -94,6 +94,20 @@ enum Command {
         #[command(subcommand)]
         action: PairAction,
     },
+    /// Attempt a UDP hole-punch with a trusted peer through the relay.
+    /// Both daemons must run this within ~10s of each other; the relay
+    /// matches the requests and tells each side where to dial. Reports
+    /// whether direct UDP traffic actually arrived.
+    Punch {
+        /// Peer name (as shown in `peer list`).
+        peer: String,
+        /// Address of the local daemon.
+        #[arg(long, default_value_t = format!("http://{}", DEFAULT_NODE_ADDR))]
+        node: String,
+        /// Coordination timeout in seconds.
+        #[arg(long, default_value_t = 8)]
+        timeout: u64,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -195,8 +209,59 @@ async fn main() -> Result<()> {
         Command::Pair { action } => {
             handle_pair(action).await?;
         }
+        Command::Punch {
+            peer,
+            node,
+            timeout,
+        } => {
+            handle_punch(&node, &peer, timeout).await?;
+        }
     }
 
+    Ok(())
+}
+
+async fn handle_punch(node: &str, peer: &str, timeout_secs: u64) -> Result<()> {
+    let url = format!("{}/v1/punch", node.trim_end_matches('/'));
+    let body = serde_json::json!({
+        "peer": peer,
+        "timeout_secs": timeout_secs,
+    });
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(timeout_secs + 5))
+        .build()?;
+    let resp = client.post(&url).json(&body).send().await?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        anyhow::bail!("punch request failed ({status}): {text}");
+    }
+    let parsed: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+    let coordinated = parsed.get("coordinated").and_then(|v| v.as_bool()).unwrap_or(false);
+    let bidirectional = parsed
+        .get("bidirectional")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let peer_addr = parsed.get("peer_addr").and_then(|v| v.as_str()).unwrap_or("-");
+    let local_port = parsed
+        .get("local_port")
+        .and_then(|v| v.as_u64())
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "-".into());
+    let error = parsed.get("error").and_then(|v| v.as_str());
+
+    println!("coordinated:   {coordinated}");
+    println!("bidirectional: {bidirectional}");
+    println!("peer_addr:     {peer_addr}");
+    println!("local_port:    {local_port}");
+    if let Some(err) = error {
+        println!("error:         {err}");
+    }
+    if coordinated && !bidirectional {
+        println!();
+        println!("relay matched both sides but no UDP traffic arrived —");
+        println!("at least one NAT looks symmetric. Relay fallback still works.");
+    }
     Ok(())
 }
 

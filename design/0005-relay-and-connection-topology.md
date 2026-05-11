@@ -100,3 +100,42 @@ Resolved during the next sprint:
 - Where to store the relay address in `peers.toml` — per-peer override vs daemon-wide default
 - Multiplexing: one websocket per peer, or one connection multiplexed for all peers?
 - Heartbeats and reconnection on websocket drop
+
+## Hole-punch protocol (implemented)
+
+The relay matches `PunchRequest` frames from the two peers and emits a
+`PunchTarget` to each side. Both sides must send their request within a
+30s window — the relay keeps unmatched halves for that long and GCs them
+on the next call.
+
+```
+peer A                  relay                   peer B
+  │                       │                       │
+  │  bind UDP port pA     │  bind UDP port pB     │
+  │ ─PunchRequest(B,pA)─▶ │                       │
+  │                       │  (stores half)        │
+  │                       │ ◀─PunchRequest(A,pB)─ │
+  │ ◀─PunchTarget(ipB,pB)─│─PunchTarget(ipA,pA)─▶ │
+  │                                               │
+  │  simultaneous UDP spray on bound sockets      │
+  │ ────── unhosted-punch-v1 (15× / 200ms) ──────▶│
+  │ ◀───── unhosted-punch-v1 (15× / 200ms) ───────│
+  │                                               │
+  │  if either side observes inbound from the     │
+  │  other's external addr → punch succeeded      │
+```
+
+Honest about limits:
+
+- The external IP the relay reports is the IP it observed on the WS (TCP)
+  connection. Most consumer NATs use the same external IP for TCP and UDP
+  from the same host; symmetric NATs do not, and those defeat this. The
+  `bidirectional` field on the `/v1/punch` response reflects what the
+  socket actually saw.
+- This first cut is diagnostic — it confirms a direct path exists. The
+  QUIC+Noise transport that actually runs over the punched channel lands
+  in a follow-up; until then, the path remains relay-routed even when
+  punching succeeds.
+- `POST /v1/punch { "peer": "<name>" }` on the daemon kicks off an
+  attempt. Same call must be made on the peer simultaneously. CLI
+  shortcut: `unhosted punch <name>`.

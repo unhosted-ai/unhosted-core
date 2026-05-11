@@ -18,6 +18,7 @@
 //!   handler via the InboundRequest mpsc receiver returned at spawn time.
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -25,7 +26,7 @@ use anyhow::{Context, Result};
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::Identity;
@@ -72,6 +73,23 @@ pub struct RelayClient {
     /// outbound payloads go through this channel to the writer task.
     out_tx: Arc<Mutex<Option<mpsc::UnboundedSender<Message>>>>,
     pending: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<ResponseEvent>>>>,
+    /// Outstanding hole-punch waiters, keyed by the peer pubkey we asked
+    /// the relay to coordinate with. Fulfilled with the peer's external
+    /// addr when the relay's matched PunchTarget frame arrives.
+    pending_punches: Arc<Mutex<HashMap<String, oneshot::Sender<SocketAddr>>>>,
+}
+
+/// Result of a hole-punch attempt.
+#[derive(Debug)]
+pub struct PunchOutcome {
+    /// External addr the relay told us about for the peer.
+    pub peer_addr: SocketAddr,
+    /// Local UDP socket we bound + held open during the attempt.
+    pub local_port: u16,
+    /// Whether a UDP packet from `peer_addr` was actually received.
+    /// `false` means the relay coordination worked but NAT(s) blocked
+    /// the punch — typically symmetric NAT on at least one side.
+    pub bidirectional: bool,
 }
 
 impl RelayClient {
@@ -80,6 +98,7 @@ impl RelayClient {
             state: Arc::new(Mutex::new(RelayState::Disabled)),
             out_tx: Arc::new(Mutex::new(None)),
             pending: Arc::new(Mutex::new(HashMap::new())),
+            pending_punches: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -93,12 +112,15 @@ impl RelayClient {
         let out_tx: Arc<Mutex<Option<mpsc::UnboundedSender<Message>>>> = Arc::new(Mutex::new(None));
         let pending: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<ResponseEvent>>>> =
             Arc::new(Mutex::new(HashMap::new()));
+        let pending_punches: Arc<Mutex<HashMap<String, oneshot::Sender<SocketAddr>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
 
         let (inbound_tx, inbound_rx) = mpsc::unbounded_channel::<InboundRequest>();
 
         let state_for_task = state.clone();
         let out_for_task = out_tx.clone();
         let pending_for_task = pending.clone();
+        let punches_for_task = pending_punches.clone();
 
         tokio::spawn(async move {
             let mut backoff_secs: u64 = 1;
@@ -109,6 +131,7 @@ impl RelayClient {
                     state_for_task.clone(),
                     out_for_task.clone(),
                     pending_for_task.clone(),
+                    punches_for_task.clone(),
                     inbound_tx.clone(),
                 )
                 .await;
@@ -139,6 +162,11 @@ impl RelayClient {
                         let _ = tx.send(ResponseEvent::Error("relay disconnected".into()));
                     }
                 }
+                {
+                    // Drop punch waiters too; their oneshots get cancelled.
+                    let mut p = punches_for_task.lock().await;
+                    p.clear();
+                }
 
                 tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
                 backoff_secs = (backoff_secs * 2).min(60);
@@ -150,6 +178,7 @@ impl RelayClient {
                 state,
                 out_tx,
                 pending,
+                pending_punches,
             },
             inbound_rx,
         )
@@ -208,6 +237,97 @@ impl RelayClient {
 
         Ok(resp_rx)
     }
+
+    /// Attempt a UDP hole-punch with `peer_pubkey` via the relay. Binds a
+    /// fresh UDP socket, asks the relay to coordinate, sends a handful of
+    /// stun-like packets at the discovered peer addr, and reports whether
+    /// any bidirectional traffic was observed.
+    ///
+    /// This is diagnostic for now — we don't yet run a real transport
+    /// over the punched channel. Once the QUIC transport lands it will
+    /// take over the socket on success.
+    pub async fn try_punch(
+        &self,
+        peer_pubkey: &str,
+        timeout: Duration,
+    ) -> Result<PunchOutcome> {
+        let out = {
+            let guard = self.out_tx.lock().await;
+            guard
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("relay not connected"))?
+        };
+
+        let sock = tokio::net::UdpSocket::bind("0.0.0.0:0").await?;
+        let local_port = sock.local_addr()?.port();
+
+        // Stash a waiter the read loop can fulfil when PunchTarget arrives.
+        let (waiter_tx, waiter_rx) = oneshot::channel::<SocketAddr>();
+        {
+            let mut p = self.pending_punches.lock().await;
+            p.insert(peer_pubkey.to_string(), waiter_tx);
+        }
+
+        let frame = serde_json::to_string(&ClientMessage::PunchRequest {
+            peer_pubkey,
+            udp_port: local_port,
+        })?;
+        out.send(Message::Text(frame.into()))
+            .map_err(|_| anyhow::anyhow!("relay writer is gone"))?;
+
+        let peer_addr = match tokio::time::timeout(timeout, waiter_rx).await {
+            Ok(Ok(addr)) => addr,
+            Ok(Err(_)) => {
+                let mut p = self.pending_punches.lock().await;
+                p.remove(peer_pubkey);
+                anyhow::bail!("punch waiter dropped before relay responded")
+            }
+            Err(_) => {
+                let mut p = self.pending_punches.lock().await;
+                p.remove(peer_pubkey);
+                anyhow::bail!("relay did not return a PunchTarget within timeout")
+            }
+        };
+
+        // Simultaneous-open. Spray a small magic packet at the peer for ~3s
+        // while listening for theirs. First inbound packet from peer_addr
+        // is enough to confirm the punch worked.
+        const MAGIC: &[u8] = b"unhosted-punch-v1";
+        let send_sock = std::sync::Arc::new(sock);
+        let send_sock_w = send_sock.clone();
+        let target = peer_addr;
+        let sprayer = tokio::spawn(async move {
+            for _ in 0..15 {
+                let _ = send_sock_w.send_to(MAGIC, target).await;
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+        });
+
+        let mut buf = [0u8; 64];
+        let bidirectional = match tokio::time::timeout(
+            Duration::from_secs(3),
+            send_sock.recv_from(&mut buf),
+        )
+        .await
+        {
+            Ok(Ok((n, from))) => {
+                tracing::info!(
+                    %from,
+                    bytes = n,
+                    "punch: received inbound UDP, hole appears open"
+                );
+                from.ip() == peer_addr.ip()
+            }
+            _ => false,
+        };
+        sprayer.abort();
+
+        Ok(PunchOutcome {
+            peer_addr,
+            local_port,
+            bidirectional,
+        })
+    }
 }
 
 // ---------------------------------------------------------------- protocol
@@ -223,6 +343,13 @@ enum ClientMessage<'a> {
     Forward {
         peer_pubkey: &'a str,
         payload: &'a str,
+    },
+    /// Ask the relay to coordinate a UDP hole-punch with `peer_pubkey`.
+    /// Both sides must send this; relay matches them up and replies with
+    /// PunchTarget on each side.
+    PunchRequest {
+        peer_pubkey: &'a str,
+        udp_port: u16,
     },
 }
 
@@ -241,6 +368,13 @@ enum ServerMessage {
     Inbound {
         from_pubkey: String,
         payload: String,
+    },
+    /// Relay matched a hole-punch pair. `addr` is the peer's externally-
+    /// reachable `ip:port`; we should send UDP packets there immediately
+    /// while the NAT mapping is fresh.
+    PunchTarget {
+        peer_pubkey: String,
+        addr: String,
     },
     Error {
         code: String,
@@ -283,6 +417,7 @@ async fn run_once(
     state: Arc<Mutex<RelayState>>,
     out_slot: Arc<Mutex<Option<mpsc::UnboundedSender<Message>>>>,
     pending: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<ResponseEvent>>>>,
+    pending_punches: Arc<Mutex<HashMap<String, oneshot::Sender<SocketAddr>>>>,
     inbound_tx: mpsc::UnboundedSender<InboundRequest>,
 ) -> Result<()> {
     {
@@ -373,6 +508,23 @@ async fn run_once(
                             &out_tx,
                         )
                         .await;
+                    }
+                    Ok(ServerMessage::PunchTarget { peer_pubkey, addr }) => {
+                        let waiter = {
+                            let mut p = pending_punches.lock().await;
+                            p.remove(&peer_pubkey)
+                        };
+                        match (waiter, addr.parse::<SocketAddr>()) {
+                            (Some(tx), Ok(sa)) => {
+                                let _ = tx.send(sa);
+                            }
+                            (Some(_), Err(e)) => {
+                                tracing::warn!(%peer_pubkey, %addr, %e, "PunchTarget addr unparseable");
+                            }
+                            (None, _) => {
+                                tracing::debug!(%peer_pubkey, "PunchTarget without waiter");
+                            }
+                        }
                     }
                     Ok(ServerMessage::Error { code, message }) => {
                         tracing::warn!(%code, %message, "relay error frame");

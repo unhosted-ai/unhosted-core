@@ -199,6 +199,7 @@ pub async fn serve(node: Node) -> Result<()> {
         .route("/v1/pair/connect", post(pair_connect_handler))
         .route("/v1/pair/short-offer", post(pair_short_offer_handler))
         .route("/v1/pair/use-code", post(pair_use_code_handler))
+        .route("/v1/punch", post(punch_handler))
         .route("/v1/identity", get(identity_handler))
         // OpenAI-compatible endpoints — any client that speaks OpenAI's HTTP
         // API (Delta, LangChain, LlamaIndex, OpenWebUI, …) can point at
@@ -885,6 +886,91 @@ async fn pair_use_code_handler(
 
     // Delegate to pair_connect logic.
     pair_connect_handler(State(state), Json(PairConnectRequest { offer })).await
+}
+
+#[derive(Deserialize)]
+struct PunchRequest {
+    /// Pubkey of an already-paired peer to attempt a hole-punch with.
+    /// Must match an entry in the peer registry (we only punch peers
+    /// we've already verified).
+    peer: String,
+    /// Overall coordination timeout (seconds). Defaults to 8.
+    #[serde(default)]
+    timeout_secs: Option<u64>,
+}
+
+#[derive(Serialize)]
+struct PunchResponse {
+    /// Was the relay able to coordinate matching PunchRequests from both
+    /// sides within the timeout?
+    coordinated: bool,
+    /// Was a UDP packet from the peer's external addr actually observed?
+    /// `false` typically means symmetric NAT on one side; we'll need to
+    /// continue using the relay fallback for that peer.
+    bidirectional: bool,
+    /// External `ip:port` the relay told us about, if coordination succeeded.
+    peer_addr: Option<String>,
+    /// Local UDP port we bound for the attempt (informational).
+    local_port: Option<u16>,
+    /// Human-readable error, when coordination failed.
+    error: Option<String>,
+}
+
+/// `POST /v1/punch` — diagnostic. Asks the relay to coordinate a UDP
+/// hole-punch with `peer` and reports whether bidirectional UDP was
+/// observed. Used to validate that a direct path is feasible before we
+/// commit a real transport (QUIC) to using it. Both sides must call this
+/// roughly simultaneously; otherwise one side will be the "first half"
+/// and time out.
+async fn punch_handler(
+    State(state): State<NodeState>,
+    Json(req): Json<PunchRequest>,
+) -> Result<axum::Json<PunchResponse>, (StatusCode, String)> {
+    // The peer must be in our registry — we only punch trusted peers.
+    let peer_pubkey: String = {
+        let reg = state
+            .registry
+            .lock()
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "registry poisoned".into()))?;
+        let matched = reg
+            .peers
+            .iter()
+            .find(|p| p.name == req.peer || p.pubkey.as_deref() == Some(req.peer.as_str()))
+            .ok_or((
+                StatusCode::NOT_FOUND,
+                format!("no peer named {}", req.peer),
+            ))?;
+        matched.pubkey.clone().ok_or((
+            StatusCode::PRECONDITION_FAILED,
+            "peer has no pubkey on file — re-pair to enable punch".into(),
+        ))?
+    };
+
+    if !matches!(state.relay.current_state().await, RelayState::Registered) {
+        return Err((
+            StatusCode::PRECONDITION_FAILED,
+            "relay not connected — start the daemon with --relay ws://... to enable punching"
+                .into(),
+        ));
+    }
+
+    let timeout = std::time::Duration::from_secs(req.timeout_secs.unwrap_or(8));
+    match state.relay.try_punch(&peer_pubkey, timeout).await {
+        Ok(outcome) => Ok(axum::Json(PunchResponse {
+            coordinated: true,
+            bidirectional: outcome.bidirectional,
+            peer_addr: Some(outcome.peer_addr.to_string()),
+            local_port: Some(outcome.local_port),
+            error: None,
+        })),
+        Err(e) => Ok(axum::Json(PunchResponse {
+            coordinated: false,
+            bidirectional: false,
+            peer_addr: None,
+            local_port: None,
+            error: Some(e.to_string()),
+        })),
+    }
 }
 
 // Server-side equivalent of `unhosted pair accept`, callable from the UI.

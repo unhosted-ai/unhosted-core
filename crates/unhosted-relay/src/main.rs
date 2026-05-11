@@ -54,10 +54,23 @@ type Tx = mpsc::UnboundedSender<Message>;
 
 #[derive(Clone)]
 struct AppState {
-    /// Map of registered pubkey (base64) → session message-sender.
+    /// Map of registered pubkey (base64) → outbound channel.
     sessions: Arc<Mutex<HashMap<String, Tx>>>,
     /// 4-letter pair codes → (offer URI, expiry). One-time, 5min TTL.
     codes: Arc<Mutex<HashMap<String, (String, std::time::Instant)>>>,
+    /// Pending hole-punch offers, keyed by (asker_pubkey, target_pubkey).
+    /// When the symmetric entry (target,asker) arrives, both sides are
+    /// notified and the pair is cleared. 30s TTL — entries get garbage-
+    /// collected on the next coordinate call.
+    pending_punches: Arc<Mutex<HashMap<(String, String), PendingPunch>>>,
+}
+
+/// Half of a hole-punch handshake — recorded when one side asks before
+/// the other has shown up. `external` is what the relay will tell the
+/// peer to dial: the WS-observed IP and the locally-bound UDP port.
+struct PendingPunch {
+    external: SocketAddr,
+    created: std::time::Instant,
 }
 
 #[tokio::main]
@@ -75,6 +88,7 @@ async fn main() -> Result<()> {
     let state = AppState {
         sessions: Arc::new(Mutex::new(HashMap::new())),
         codes: Arc::new(Mutex::new(HashMap::new())),
+        pending_punches: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let app = Router::new()
@@ -200,6 +214,14 @@ enum ClientMessage {
         peer_pubkey: String,
         payload: String,
     },
+    /// Ask the relay to coordinate a UDP hole-punch with `peer_pubkey`.
+    /// `udp_port` is the local UDP port the requester has bound and is
+    /// ready to receive on. Relay tells both sides each other's external
+    /// addr (IP from the WS connection + the supplied UDP port).
+    PunchRequest {
+        peer_pubkey: String,
+        udp_port: u16,
+    },
 }
 
 #[derive(Serialize, Debug)]
@@ -218,6 +240,13 @@ enum ServerMessage<'a> {
     Inbound {
         from_pubkey: &'a str,
         payload: &'a str,
+    },
+    /// Both sides of a hole-punch get this with each other's external
+    /// addr. Recipient should immediately send UDP packets to that addr
+    /// while the NAT mapping is fresh on both ends.
+    PunchTarget {
+        peer_pubkey: &'a str,
+        addr: &'a str,
     },
     Error {
         code: &'a str,
@@ -243,8 +272,8 @@ async fn handle_socket(socket: WebSocket, state: AppState, remote: SocketAddr) {
     }
 
     // Wait for Register.
-    let (pubkey, tx, mut rx) = match register(&mut receiver, &mut sender, &challenge, &state).await
-    {
+    let (pubkey, tx, mut rx) =
+        match register(&mut receiver, &mut sender, &challenge, &state).await {
         Ok(v) => v,
         Err(e) => {
             tracing::debug!(%remote, error = %e, "register failed");
@@ -299,6 +328,76 @@ async fn handle_socket(socket: WebSocket, state: AppState, remote: SocketAddr) {
                             })
                             .unwrap_or_default();
                             let _ = tx.send(Message::Text(err.into()));
+                        }
+                    }
+                    Ok(ClientMessage::PunchRequest {
+                        peer_pubkey,
+                        udp_port,
+                    }) => {
+                        // Both sides must submit a PunchRequest naming the
+                        // other; only when both halves arrive do we tell
+                        // each side where to send packets. This lets the
+                        // simultaneous-open work — both NATs see an
+                        // outbound UDP packet within the same window.
+                        let my_external = SocketAddr::new(remote.ip(), udp_port);
+
+                        let mut pending = state.pending_punches.lock().await;
+                        // GC stale entries.
+                        let now = std::time::Instant::now();
+                        pending.retain(|_, p| {
+                            now.duration_since(p.created)
+                                < std::time::Duration::from_secs(30)
+                        });
+
+                        // Is the other side already waiting on us?
+                        let counterpart_key = (peer_pubkey.clone(), pubkey.clone());
+                        if let Some(other) = pending.remove(&counterpart_key) {
+                            drop(pending);
+                            let sessions = state.sessions.lock().await;
+                            let peer_tx = sessions.get(&peer_pubkey).cloned();
+                            let my_tx_for_msg = tx.clone();
+
+                            // Tell me where to dial them.
+                            let to_me = serde_json::to_string(&ServerMessage::PunchTarget {
+                                peer_pubkey: &peer_pubkey,
+                                addr: &other.external.to_string(),
+                            })
+                            .unwrap_or_default();
+                            let _ = my_tx_for_msg.send(Message::Text(to_me.into()));
+
+                            // Tell them where to dial me.
+                            if let Some(peer_tx) = peer_tx {
+                                let to_them =
+                                    serde_json::to_string(&ServerMessage::PunchTarget {
+                                        peer_pubkey: &pubkey,
+                                        addr: &my_external.to_string(),
+                                    })
+                                    .unwrap_or_default();
+                                let _ = peer_tx.send(Message::Text(to_them.into()));
+                            }
+
+                            tracing::info!(
+                                from = %pubkey,
+                                to = %peer_pubkey,
+                                me = %my_external,
+                                them = %other.external,
+                                "punch coordinated"
+                            );
+                        } else {
+                            // First half — record and wait.
+                            pending.insert(
+                                (pubkey.clone(), peer_pubkey.clone()),
+                                PendingPunch {
+                                    external: my_external,
+                                    created: now,
+                                },
+                            );
+                            tracing::debug!(
+                                from = %pubkey,
+                                to = %peer_pubkey,
+                                me = %my_external,
+                                "punch first half recorded"
+                            );
                         }
                     }
                     Ok(ClientMessage::Register { .. }) => {
