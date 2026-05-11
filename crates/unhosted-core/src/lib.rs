@@ -98,6 +98,7 @@ pub async fn serve(node: Node) -> Result<()> {
     let api = AxumRouter::new()
         .route("/health", get(health))
         .route("/v1/run", post(run_handler))
+        .route("/v1/status", get(status_handler))
         .with_state(state);
 
     let app = api
@@ -119,6 +120,102 @@ pub async fn serve(node: Node) -> Result<()> {
 
 async fn health() -> &'static str {
     "ok"
+}
+
+#[derive(Serialize)]
+struct StatusResponse {
+    node: NodeStatus,
+    upstream: UpstreamStatus,
+    peers: Vec<PeerStatus>,
+    routing: RoutingStatus,
+}
+
+#[derive(Serialize)]
+struct NodeStatus {
+    addr: String,
+    version: &'static str,
+}
+
+#[derive(Serialize)]
+struct UpstreamStatus {
+    url: String,
+    reachable: bool,
+    model: Option<String>,
+}
+
+#[derive(Serialize)]
+struct PeerStatus {
+    name: String,
+    addr: String,
+    priority: u8,
+}
+
+#[derive(Serialize)]
+struct RoutingStatus {
+    targets: usize,
+    mode: &'static str,
+}
+
+async fn status_handler(State(state): State<NodeState>) -> axum::Json<StatusResponse> {
+    let upstream_url = state.node.llama_server_url.clone();
+    let (reachable, model) = probe_upstream(&upstream_url).await;
+
+    let peers = state
+        .node
+        .peers
+        .iter()
+        .map(|p| PeerStatus {
+            name: p.name.clone(),
+            addr: p.addr.to_string(),
+            priority: p.priority,
+        })
+        .collect();
+
+    axum::Json(StatusResponse {
+        node: NodeStatus {
+            addr: state.node.addr.to_string(),
+            version: env!("CARGO_PKG_VERSION"),
+        },
+        upstream: UpstreamStatus {
+            url: upstream_url,
+            reachable,
+            model,
+        },
+        peers,
+        routing: RoutingStatus {
+            targets: state.router.target_count(),
+            mode: "round-robin",
+        },
+    })
+}
+
+/// Best-effort probe of llama-server: reachable check + currently loaded
+/// model name from its OpenAI-compatible `/v1/models` endpoint. Times out
+/// fast so the status request stays snappy when the upstream is down.
+async fn probe_upstream(url: &str) -> (bool, Option<String>) {
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(800))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return (false, None),
+    };
+
+    let resp = match client.get(format!("{url}/v1/models")).send().await {
+        Ok(r) if r.status().is_success() => r,
+        _ => return (false, None),
+    };
+
+    let model = resp.json::<serde_json::Value>().await.ok().and_then(|v| {
+        v.get("data")
+            .and_then(|d| d.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|m| m.get("id"))
+            .and_then(|id| id.as_str())
+            .map(|s| s.to_string())
+    });
+
+    (true, model)
 }
 
 async fn run_handler(

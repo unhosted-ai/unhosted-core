@@ -15,68 +15,131 @@
 </head>
 <body>
 
-  <header class="app-header">
-    <a class="brand" href="/" aria-label="unhosted">
-      <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="3" width="22" height="22" aria-hidden="true">
-        <circle cx="50" cy="50" r="44" stroke-dasharray="2 6"/>
-        <circle cx="50" cy="50" r="28"/>
-        <circle cx="50" cy="50" r="12" fill="currentColor" stroke="none"/>
-      </svg>
-      <span class="brand-text">unhosted</span>
-    </a>
+  <div class="app">
 
-    <div class="status-cluster">
-      <div class="status" id="status">
-        <span class="dot" data-state="unknown"></span>
-        <span class="label" id="status-label">checking…</span>
+    <!-- ============== SIDEBAR ============== -->
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <a class="brand" href="/" aria-label="unhosted">
+          <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="3" width="22" height="22" aria-hidden="true">
+            <circle cx="50" cy="50" r="44" stroke-dasharray="2 6"/>
+            <circle cx="50" cy="50" r="28"/>
+            <circle cx="50" cy="50" r="12" fill="currentColor" stroke="none"/>
+          </svg>
+          <span class="brand-text">unhosted</span>
+        </a>
+        <button class="icon-btn" id="new-chat" title="new chat" aria-label="new chat">+</button>
       </div>
-      <div class="mode-chip">
-        <span class="dot accent"></span>
-        local
-      </div>
-    </div>
-  </header>
 
-  <main class="app-main">
+      <nav class="sidebar-section">
+        <h4>conversations</h4>
+        <ul class="chat-list" id="chat-list">
+          <li class="chat-item active" data-chat="current">new chat</li>
+        </ul>
+      </nav>
 
-    <section class="empty" id="empty-state">
-      <h1>say something to your hardware.</h1>
-      <p>this UI talks to the local <code>unhosted</code> node on port 7777, which proxies to whatever inference backend you've pointed it at. tokens stream back as the model generates them.</p>
-      <div class="suggestions">
-        <button class="chip" data-suggest="explain quantum tunneling in two sentences">explain quantum tunneling</button>
-        <button class="chip" data-suggest="write a haiku about a server humming">write a haiku</button>
-        <button class="chip" data-suggest="what's a good starter project for someone learning rust?">starter rust project</button>
-        <button class="chip" data-suggest="give me three reasons local AI matters">why local AI</button>
-      </div>
-    </section>
-
-    <section class="conversation" id="conversation" aria-live="polite">
-      <!-- messages appended here -->
-    </section>
-
-  </main>
-
-  <footer class="composer-wrap">
-    <form class="composer" id="composer" autocomplete="off">
-      <textarea
-        id="prompt"
-        name="prompt"
-        rows="1"
-        placeholder="ask anything. shift+enter for newline."
-        spellcheck="true"
-        autofocus
-      ></textarea>
-      <div class="composer-row">
-        <div class="composer-meta" id="composer-meta">
-          <span class="hint">enter to send</span>
+      <div class="sidebar-section connection" id="connection-panel">
+        <h4>connection</h4>
+        <div class="conn-row">
+          <span class="dot" id="status-dot" data-state="unknown"></span>
+          <span class="conn-state" id="status-label">checking…</span>
         </div>
-        <button type="submit" class="send" id="send" disabled>send</button>
+
+        <div class="pipeline" id="pipeline">
+          <div class="pipe-step">
+            <div class="pipe-label">model</div>
+            <div class="pipe-value" id="conn-model">—</div>
+          </div>
+          <div class="pipe-arrow" aria-hidden="true">↑</div>
+          <div class="pipe-step">
+            <div class="pipe-label">llama-server</div>
+            <div class="pipe-value" id="conn-upstream">—</div>
+          </div>
+          <div class="pipe-arrow" aria-hidden="true">↑</div>
+          <div class="pipe-step">
+            <div class="pipe-label">unhosted node</div>
+            <div class="pipe-value" id="conn-node">—</div>
+          </div>
+          <div class="pipe-arrow" aria-hidden="true">↑</div>
+          <div class="pipe-step you">
+            <div class="pipe-label">you</div>
+            <div class="pipe-value">this window</div>
+          </div>
+        </div>
+
+        <div class="privacy-note">
+          <span class="lock" aria-hidden="true">●</span>
+          all local — nothing leaves this machine.
+        </div>
+
+        <div class="peers-block" id="peers-block" hidden>
+          <h5>peers</h5>
+          <ul class="peer-list" id="peer-list"></ul>
+        </div>
       </div>
-    </form>
-    <p class="footnote">
-      open source · <a href="https://github.com/unhosted-ai/unhosted-core/blob/main/LICENSE">agpl-3.0</a> · <a href="https://github.com/unhosted-ai/unhosted-core">github</a> · prompts never leave your hardware in local mode.
-    </p>
-  </footer>
+
+      <div class="sidebar-foot">
+        <a href="/docs.html" class="foot-link">learn</a>
+        <a href="https://github.com/unhosted-ai/unhosted-core" class="foot-link">github</a>
+      </div>
+    </aside>
+
+    <!-- ============== MAIN ============== -->
+    <main class="main">
+
+      <header class="main-head">
+        <div class="topic" id="topic-label">new chat</div>
+        <div class="mode-chip">
+          <span class="dot accent"></span>
+          local
+        </div>
+      </header>
+
+      <section class="scroll" id="scroll">
+        <section class="empty" id="empty-state">
+          <div class="empty-mark" aria-hidden="true">
+            <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2.5" width="56" height="56">
+              <circle cx="50" cy="50" r="44" stroke-dasharray="2 6" opacity="0.4"/>
+              <circle cx="50" cy="50" r="28" opacity="0.7"/>
+              <circle cx="50" cy="50" r="12" fill="currentColor"/>
+            </svg>
+          </div>
+          <h1>say something to your hardware.</h1>
+          <p class="empty-sub">your prompt goes to a daemon on this machine, which calls a local llama-server, which runs the model on your own gpu / cpu. tokens stream back as the model generates them. no api key. no rate limit. nothing leaves your hardware.</p>
+
+          <div class="suggestions">
+            <button class="chip" data-suggest="explain quantum tunneling in two sentences.">explain quantum tunneling</button>
+            <button class="chip" data-suggest="write a haiku about a server humming in a closet.">write a haiku</button>
+            <button class="chip" data-suggest="give me three reasons local AI matters.">why local AI</button>
+            <button class="chip" data-suggest="what's a good starter project for someone learning rust?">starter rust project</button>
+          </div>
+        </section>
+
+        <section class="conversation" id="conversation" aria-live="polite"></section>
+      </section>
+
+      <footer class="composer-wrap">
+        <form class="composer" id="composer" autocomplete="off">
+          <textarea
+            id="prompt"
+            name="prompt"
+            rows="1"
+            placeholder="ask anything. shift+enter for newline."
+            spellcheck="true"
+            autofocus
+          ></textarea>
+          <div class="composer-row">
+            <div class="composer-meta" id="composer-meta">
+              <span class="hint">enter to send</span>
+            </div>
+            <button type="submit" class="send" id="send" disabled>send</button>
+          </div>
+        </form>
+      </footer>
+
+    </main>
+
+  </div>
 
   <script type="module" src="/ui.js"></script>
 </body>
