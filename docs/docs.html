@@ -219,7 +219,11 @@ data: {"choices":[{"delta":{"content":" there"}}], ...}
           <pre><code>curl -fsSL https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.sh | sh</code></pre>
           <p class="note"><strong>windows:</strong> open powershell and run</p>
           <pre><code>irm https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.ps1 | iex</code></pre>
-          <p class="note">auto-detects mac arm64, linux x86_64/arm64, and windows x86_64. set <code>UNHOSTED_INSTALL_DIR</code> to install elsewhere. or build from source: <code>cargo build --release</code>.</p>
+          <p class="note">auto-detects mac arm64, linux x86_64/arm64, and windows x86_64. installs both the <code>unhosted</code> daemon and the <code>unhosted-desktop</code> native shell. on linux it also drops a launcher entry; on windows it adds a start-menu shortcut; on macos it fetches the <code>.app</code> bundle into <code>/Applications</code>. set <code>UNHOSTED_INSTALL_DIR</code> to install elsewhere, or <code>UNHOSTED_NO_DESKTOP=1</code> to skip the gui. or build from source: <code>cargo build --release</code>.</p>
+          <p class="note"><strong>linux runtime deps for the gui</strong> (tao+wry uses webkit2gtk under the hood):<br>
+            debian/ubuntu: <code>sudo apt install libgtk-3-0 libsoup-3.0-0 libwebkit2gtk-4.1-0</code><br>
+            fedora: <code>sudo dnf install gtk3 libsoup3 webkit2gtk4.1</code><br>
+            arch: <code>sudo pacman -S gtk3 libsoup3 webkit2gtk-4.1</code></p>
         </li>
         <li>
           <h3>install llama.cpp</h3>

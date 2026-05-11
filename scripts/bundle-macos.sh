@@ -32,10 +32,11 @@ command -v iconutil      >/dev/null || { echo "missing iconutil (should be built
 
 # ----- build binary if needed --------------------------------------------------
 
-BIN="$ROOT/target/release/unhosted-desktop"
+BIN="${UNHOSTED_BIN:-$ROOT/target/release/unhosted-desktop}"
 if [ ! -x "$BIN" ]; then
   echo "→ cargo build --release -p unhosted-desktop"
   cargo build --release -p unhosted-desktop
+  BIN="$ROOT/target/release/unhosted-desktop"
 fi
 
 # ----- generate .icns ----------------------------------------------------------

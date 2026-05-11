@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Unhosted
+GenericName=Local AI
+Comment=Your devices, pooled. AI without the cloud.
+Exec=unhosted-desktop
+TryExec=unhosted-desktop
+Icon=unhosted
+Terminal=false
+Categories=Network;Utility;Development;
+Keywords=AI;LLM;local;mesh;p2p;
+StartupNotify=true
+StartupWMClass=unhosted
