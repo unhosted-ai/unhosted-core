@@ -1,0 +1,33 @@
+# systemd user-service for the unhosted daemon.
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   curl -fsSL https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/unhosted.service \
+#     -o ~/.config/systemd/user/unhosted.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now unhosted
+#   journalctl --user -u unhosted -f       # tail logs
+#
+# Customise: drop an override at ~/.config/systemd/user/unhosted.service.d/override.conf
+# with [Service] / Environment=... lines, e.g. UNHOSTED_RELAY=wss://...
+
+[Unit]
+Description=unhosted daemon — local AI orchestration
+Documentation=https://github.com/unhosted-ai/unhosted-core
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/unhosted serve
+Restart=on-failure
+RestartSec=3
+# Daemon binds to 127.0.0.1:7777 by default; override with --addr on the
+# ExecStart line if you want LAN reachability (and accept the tradeoff).
+Environment=RUST_LOG=unhosted_core=info,unhosted_cli=info
+# Limits so a runaway loop can't take the box down.
+MemoryMax=2G
+CPUWeight=80
+
+[Install]
+WantedBy=default.target

@@ -215,8 +215,11 @@ data: {"choices":[{"delta":{"content":" there"}}], ...}
       <ol class="steps">
         <li>
           <h3>install unhosted</h3>
+          <p class="note"><strong>macos / linux:</strong></p>
           <pre><code>curl -fsSL https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.sh | sh</code></pre>
-          <p class="note">auto-detects mac arm64/x86 and linux x86_64/arm64. installs to <code>/usr/local/bin/unhosted</code>. set <code>UNHOSTED_INSTALL_DIR</code> to install elsewhere. or build from source: <code>cargo build --release</code>.</p>
+          <p class="note"><strong>windows:</strong> open powershell and run</p>
+          <pre><code>irm https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.ps1 | iex</code></pre>
+          <p class="note">auto-detects mac arm64, linux x86_64/arm64, and windows x86_64. set <code>UNHOSTED_INSTALL_DIR</code> to install elsewhere. or build from source: <code>cargo build --release</code>.</p>
         </li>
         <li>
           <h3>install llama.cpp</h3>
@@ -245,6 +248,20 @@ data: {"choices":[{"delta":{"content":" there"}}], ...}
           <p class="note">chat ui in your browser, or run the native <code>unhosted-desktop</code> app for a window in your dock.</p>
         </li>
       </ol>
+
+      <h3>also from your phone (same wifi)</h3>
+      <p>the web ui is mobile-responsive. to reach it from a phone on the same network, restart the daemon bound to <code>0.0.0.0</code> instead of loopback:</p>
+      <pre><code>unhosted serve --addr 0.0.0.0:7777</code></pre>
+      <p>then on your phone, open <code>http://&lt;your-computer-lan-ip&gt;:7777/</code> — find the ip with <code>ifconfig</code> (mac/linux) or <code>ipconfig</code> (windows). same chat, same model, same conversation history (per-device localstorage). signed-request auth means only paired devices can use peer routing, but the web ui itself is unauthenticated on your lan — keep this off if your network is shared with people you don't trust.</p>
+
+      <h3>linux: run it as a background service (optional)</h3>
+      <p>drop in a systemd user-service so unhosted starts at login and restarts on crash:</p>
+      <pre><code>mkdir -p ~/.config/systemd/user
+curl -fsSL https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/unhosted.service \
+  -o ~/.config/systemd/user/unhosted.service
+systemctl --user daemon-reload
+systemctl --user enable --now unhosted
+journalctl --user -u unhosted -f       # follow logs</code></pre>
     </section>
 
     <section id="status">

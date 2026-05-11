@@ -22,6 +22,10 @@ pub struct DiscoveredPeer {
     pub addr: SocketAddr,
     pub host: Option<String>,
     pub version: Option<String>,
+    /// Ed25519 pubkey from the peer's mDNS TXT record, if it advertised one.
+    /// When we already know this pubkey from a previous pairing, we can
+    /// auto-restore the peer entry without a fresh pairing round.
+    pub pubkey: Option<String>,
     /// Unix-ms timestamp of when we last heard from this peer.
     pub last_seen_ms: u64,
 }
@@ -40,12 +44,20 @@ impl Discovery {
     ///
     /// `local_addr` is the address the local daemon is listening on. Used to
     /// filter ourselves out of the discovered list.
-    pub fn start(name: &str, local_addr: SocketAddr, version: &str) -> anyhow::Result<Self> {
+    pub fn start(
+        name: &str,
+        local_addr: SocketAddr,
+        version: &str,
+        pubkey: Option<&str>,
+    ) -> anyhow::Result<Self> {
         let mdns = ServiceDaemon::new().map_err(|e| anyhow::anyhow!("mdns init: {e}"))?;
 
         // ----- register the local node -----
         let mut props = HashMap::new();
         props.insert("version".to_string(), version.to_string());
+        if let Some(pk) = pubkey {
+            props.insert("pubkey".to_string(), pk.to_string());
+        }
 
         let mut info = ServiceInfo::new(
             SERVICE_TYPE,
@@ -92,12 +104,14 @@ impl Discovery {
                         let version = info
                             .get_property("version")
                             .map(|p| p.val_str().to_string());
+                        let pubkey = info.get_property("pubkey").map(|p| p.val_str().to_string());
 
                         let peer = DiscoveredPeer {
                             name: svc_name.clone(),
                             addr: sock,
                             host: Some(info.get_hostname().to_string()),
                             version,
+                            pubkey,
                             last_seen_ms: now_ms(),
                         };
 

@@ -24,6 +24,11 @@ case "$OS-$ARCH" in
   darwin-x86_64)                 TARGET="x86_64-apple-darwin" ;;
   linux-x86_64)                  TARGET="x86_64-unknown-linux-gnu" ;;
   linux-aarch64|linux-arm64)     TARGET="aarch64-unknown-linux-gnu" ;;
+  *windows*|*mingw*|*msys*|*cygwin*)
+    echo "unhosted: this script is for unix shells. on Windows, use PowerShell:"
+    echo "  irm https://raw.githubusercontent.com/$REPO/main/scripts/install.ps1 | iex"
+    exit 1
+    ;;
   *)
     echo "unhosted: unsupported platform '$OS-$ARCH'."
     echo "see https://github.com/$REPO/releases — or build from source."

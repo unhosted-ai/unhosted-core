@@ -23,10 +23,16 @@ jobs:
         include:
           - target: aarch64-apple-darwin
             os: macos-latest
+            archive: tar.gz
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+            archive: tar.gz
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
           # x86_64-apple-darwin (Intel Mac) is dropped from the matrix:
           # macos-13 runner pool queues hours behind the others, blocking
           # the release. Apple Silicon Macs run x86_64 binaries fine via
@@ -43,7 +49,9 @@ jobs:
       - name: Build CLI
         run: cargo build --release --target ${{ matrix.target }} -p unhosted-cli
 
-      - name: Stage release artifact
+      - name: Stage release artifact (unix)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
         run: |
           STAGE="unhosted-${{ matrix.target }}"
           mkdir -p "$STAGE"
@@ -52,12 +60,23 @@ jobs:
           tar -czf "${STAGE}.tar.gz" "$STAGE"
           shasum -a 256 "${STAGE}.tar.gz" > "${STAGE}.tar.gz.sha256"
 
+      - name: Stage release artifact (windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $stage = "unhosted-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/unhosted.exe" "$stage/"
+          Copy-Item LICENSE,README.md,CHANGELOG.md "$stage/"
+          Compress-Archive -Path $stage -DestinationPath "$stage.zip" -Force
+          (Get-FileHash -Algorithm SHA256 "$stage.zip").Hash + "  $stage.zip" | Set-Content "$stage.zip.sha256"
+
       - uses: actions/upload-artifact@v4
         with:
           name: unhosted-${{ matrix.target }}
           path: |
-            unhosted-${{ matrix.target }}.tar.gz
-            unhosted-${{ matrix.target }}.tar.gz.sha256
+            unhosted-${{ matrix.target }}.${{ matrix.archive }}
+            unhosted-${{ matrix.target }}.${{ matrix.archive }}.sha256
 
   release:
     name: publish release

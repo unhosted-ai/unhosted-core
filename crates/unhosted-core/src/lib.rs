@@ -130,7 +130,17 @@ pub async fn serve(node: Node) -> Result<()> {
 
     // mDNS: announce ourselves and start browsing for peers. Best-effort —
     // if it fails, the daemon still works, you just don't get auto-discovery.
-    let discovery = match Discovery::start(&node.name, node.addr, env!("CARGO_PKG_VERSION")) {
+    // Identity first — we want the pubkey to flow into mDNS announcements.
+    let identity = Identity::load_or_create().context("loading node identity")?;
+    tracing::info!(pubkey = %identity.public_b64(), "node identity loaded");
+    let pubkey_for_mdns = identity.public_b64();
+
+    let discovery = match Discovery::start(
+        &node.name,
+        node.addr,
+        env!("CARGO_PKG_VERSION"),
+        Some(&pubkey_for_mdns),
+    ) {
         Ok(d) => {
             tracing::info!(name = %node.name, "mdns discovery active");
             Some(d)
@@ -144,9 +154,6 @@ pub async fn serve(node: Node) -> Result<()> {
     let registry = Arc::new(std::sync::Mutex::new(PeerRegistry {
         peers: node.peers.clone(),
     }));
-
-    let identity = Identity::load_or_create().context("loading node identity")?;
-    tracing::info!(pubkey = %identity.public_b64(), "node identity loaded");
 
     let (relay, inbound_rx) = if let Some(url) = node.relay_url.clone() {
         tracing::info!(relay = %url, "starting relay client");
