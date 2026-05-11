@@ -44,6 +44,10 @@ pub const DEFAULT_NODE_ADDR: &str = "127.0.0.1:7777";
 /// Daemons that receive this header skip the router and serve locally.
 const FORWARDED_HEADER: &str = "x-unhosted-forwarded";
 
+/// Default system prompt — anchors the assistant's voice. Plain, direct,
+/// no "as an AI" padding, length matched to the question.
+const DEFAULT_SYSTEM_PROMPT: &str = "you are the assistant inside unhosted, open-source software that runs ai on hardware the user owns. answer plainly and directly. do not begin with disclaimers like \"as an ai\" or \"i'm an artificial intelligence\". do not use marketing words (\"exciting\", \"powerful\", \"leverage\", \"empower\"). match the length of your answer to the length the question needs — short questions get short answers. if you do not know something, say so.";
+
 #[derive(Clone, Debug)]
 pub struct Node {
     pub addr: SocketAddr,
@@ -457,10 +461,16 @@ async fn run_local(node: &Node, req: RunRequest) -> Result<Response, StatusCode>
     let upstream_resp = client
         .post(&upstream_url)
         .json(&ChatRequest {
-            messages: vec![ChatMessage {
-                role: "user",
-                content: &req.prompt,
-            }],
+            messages: vec![
+                ChatMessage {
+                    role: "system",
+                    content: DEFAULT_SYSTEM_PROMPT,
+                },
+                ChatMessage {
+                    role: "user",
+                    content: &req.prompt,
+                },
+            ],
             max_tokens: req.max_tokens,
             stream: true,
         })
