@@ -437,6 +437,53 @@ hr.divider {
 html { scroll-behavior: smooth; }
 
 /* ==========================================================================
+   motion — initial states applied only when motion.js arms the page.
+   If JS fails to load, html.motion-armed is never set and everything is
+   visible by default. See docs/motion.js for the animation orchestration.
+   ========================================================================== */
+
+html.motion-armed .wordmark,
+html.motion-armed .lede h2,
+html.motion-armed .lede .badges,
+html.motion-armed .lede .sub,
+html.motion-armed .hardware-list li,
+html.motion-armed .nav a,
+html.motion-armed .bento .card,
+html.motion-armed .story,
+html.motion-armed .next-list li,
+html.motion-armed .steps > li,
+html.motion-armed .mode,
+html.motion-armed .doc-head .kicker,
+html.motion-armed .doc-head h1,
+html.motion-armed .doc-head .lede,
+html.motion-armed .doc section h2 {
+  opacity: 0;
+  will-change: opacity, transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.motion-armed .wordmark,
+  html.motion-armed .lede h2,
+  html.motion-armed .lede .badges,
+  html.motion-armed .lede .sub,
+  html.motion-armed .hardware-list li,
+  html.motion-armed .nav a,
+  html.motion-armed .bento .card,
+  html.motion-armed .story,
+  html.motion-armed .next-list li,
+  html.motion-armed .steps > li,
+  html.motion-armed .mode,
+  html.motion-armed .doc-head .kicker,
+  html.motion-armed .doc-head h1,
+  html.motion-armed .doc-head .lede,
+  html.motion-armed .doc section h2 {
+    opacity: 1;
+    transform: none !important;
+    will-change: auto;
+  }
+}
+
+/* ==========================================================================
    docs page (docs.html) — narrow column, plain language, lots of breath
    ========================================================================== */
 

@@ -111,6 +111,32 @@ We write the way the project's user thinks. Plain. Specific. Not selling.
 
 ---
 
+## Motion
+
+Animations are subtle, fast, and skippable.
+
+### Library standard
+
+- **Vanilla / static HTML contexts** (the docs site, embedded surfaces): use [Motion](https://motion.dev/) — the vanilla-JS library by Matt Perry, same author as Framer Motion. API is nearly identical to Framer Motion; ~5 KB gzipped via CDN; no build step.
+- **React contexts** (the daemon's web UI when/if we adopt React, see [ADR 0002](design/0002-application-frontends.md)): use **Framer Motion** proper. Same mental model.
+- **Tauri desktop app**: same library as whatever the web UI uses (the desktop shell hosts the same UI).
+- **Anything else**: CSS transitions and `@keyframes`. Don't pull in a library to slide a tooltip.
+
+### Rules
+
+- **Respect `prefers-reduced-motion: reduce`.** Always. Skip animation, just reveal the element.
+- **Progressive enhancement.** If the motion script fails to load, the page must still look correct. Never hide content with CSS that only JS can reveal — only hide it once JS has *armed* the page (e.g. `html.motion-armed`).
+- **Animate cheaply.** `opacity` and `transform` only. Don't animate `width`, `height`, `top`, `left`, or anything that triggers layout.
+- **Duration: 300–600 ms** for entrances. Hovers/state transitions: 120–200 ms.
+- **Easing.** `[0.22, 1, 0.36, 1]` (a soft ease-out) by default. Avoid bouncy springs unless there's a specific reason — Unhosted is technical, not playful.
+- **No infinite loops.** No spinners, throbs, or auto-cycling animations decorating empty pages. Movement is reserved for state changes the user just caused or scroll-triggered entrances they're about to see.
+
+### Examples
+
+The docs site at `docs/index.html` and `docs/docs.html` is the reference implementation. See [`docs/motion.js`](docs/motion.js).
+
+---
+
 ## Imagery
 
 When you need a hero image and don't have a real screenshot:
