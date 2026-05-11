@@ -88,11 +88,16 @@ fn default_max_tokens() -> u32 {
 }
 
 #[derive(Serialize, Debug)]
-struct UpstreamCompletion<'a> {
-    prompt: &'a str,
-    n_predict: u32,
+struct ChatRequest<'a> {
+    messages: Vec<ChatMessage<'a>>,
+    max_tokens: u32,
     stream: bool,
-    cache_prompt: bool,
+}
+
+#[derive(Serialize, Debug)]
+struct ChatMessage<'a> {
+    role: &'a str,
+    content: &'a str,
 }
 
 pub async fn serve(node: Node) -> Result<()> {
@@ -446,16 +451,18 @@ async fn run_peer(name: &str, addr: SocketAddr, req: &RunRequest) -> Result<Resp
 /// Serve a request locally by proxying to this node's upstream llama-server,
 /// parsing its SSE stream, and emitting plain-text tokens.
 async fn run_local(node: &Node, req: RunRequest) -> Result<Response, StatusCode> {
-    let upstream_url = format!("{}/completion", node.llama_server_url);
+    let upstream_url = format!("{}/v1/chat/completions", node.llama_server_url);
     let client = reqwest::Client::new();
 
     let upstream_resp = client
         .post(&upstream_url)
-        .json(&UpstreamCompletion {
-            prompt: &req.prompt,
-            n_predict: req.max_tokens,
+        .json(&ChatRequest {
+            messages: vec![ChatMessage {
+                role: "user",
+                content: &req.prompt,
+            }],
+            max_tokens: req.max_tokens,
             stream: true,
-            cache_prompt: false,
         })
         .send()
         .await
@@ -517,7 +524,18 @@ async fn forward_event(
         let Ok(json) = serde_json::from_str::<serde_json::Value>(payload) else {
             continue;
         };
-        if let Some(content) = json.get("content").and_then(|v| v.as_str()) {
+        // OpenAI-compatible /v1/chat/completions stream shape:
+        //   { "choices": [{ "delta": { "content": "..." }, "finish_reason": null }] }
+        let choice = json
+            .get("choices")
+            .and_then(|c| c.as_array())
+            .and_then(|arr| arr.first());
+
+        if let Some(content) = choice
+            .and_then(|c| c.get("delta"))
+            .and_then(|d| d.get("content"))
+            .and_then(|v| v.as_str())
+        {
             if !content.is_empty()
                 && tx
                     .send(Ok(bytes::Bytes::copy_from_slice(content.as_bytes())))
@@ -527,7 +545,11 @@ async fn forward_event(
                 return false;
             }
         }
-        if json.get("stop").and_then(|v| v.as_bool()) == Some(true) {
+        if choice
+            .and_then(|c| c.get("finish_reason"))
+            .map(|v| !v.is_null())
+            == Some(true)
+        {
             return false;
         }
     }
