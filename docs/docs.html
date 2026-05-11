@@ -159,6 +159,11 @@ your prompt
 
       <ol class="steps">
         <li>
+          <h3>install unhosted</h3>
+          <pre><code>curl -fsSL https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.sh | sh</code></pre>
+          <p class="note">auto-detects mac arm64/x86 and linux x86_64/arm64. installs to <code>/usr/local/bin/unhosted</code>. set <code>UNHOSTED_INSTALL_DIR</code> to install elsewhere. or build from source: <code>cargo build --release</code>.</p>
+        </li>
+        <li>
           <h3>install llama.cpp</h3>
           <pre><code>brew install llama.cpp</code></pre>
           <p class="note">on linux, build it from <a href="https://github.com/ggerganov/llama.cpp">github.com/ggerganov/llama.cpp</a>. windows works too, with extra steps.</p>
@@ -178,21 +183,14 @@ curl -fL -o llama-3.2-1b.gguf \
           <p class="note"><code>-ngl 99</code> offloads all layers to gpu (metal on apple silicon, cuda on nvidia). leave that off if you don't have one.</p>
         </li>
         <li>
-          <h3>build unhosted</h3>
-          <pre><code>git clone https://github.com/unhosted-ai/unhosted-core
-cd unhosted-core
-cargo build --release</code></pre>
-          <p class="note">requires rust stable 1.75+. if you don't have rust: <code>curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh</code>.</p>
+          <h3>run the daemon</h3>
+          <pre><code>unhosted serve</code></pre>
+          <p class="note">leave this running in one terminal. log says when it's ready.</p>
         </li>
         <li>
-          <h3>run a node</h3>
-          <pre><code>./target/release/unhosted serve</code></pre>
-          <p class="note">leave this running in one terminal. it'll log when it's ready.</p>
-        </li>
-        <li>
-          <h3>send a prompt</h3>
-          <pre><code>./target/release/unhosted run "explain quantum tunneling in two sentences"</code></pre>
-          <p class="note">tokens stream to your terminal as they're generated. that's the whole demo.</p>
+          <h3>open the app</h3>
+          <pre><code>open http://127.0.0.1:7777</code></pre>
+          <p class="note">chat ui in your browser. or download the native desktop shell from the github releases page.</p>
         </li>
       </ol>
     </section>
