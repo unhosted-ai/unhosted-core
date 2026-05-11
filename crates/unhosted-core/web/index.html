@@ -192,30 +192,39 @@
           </div>
         </section>
 
-        <!-- View 2: offer (show URI for the other side to use) -->
+        <!-- View 2: offer (show 4-letter code or fall back to URI) -->
         <section class="pair-view" id="pair-view-offer" hidden>
-          <h3>share with the other device</h3>
+          <h3>share this code</h3>
           <p class="muted">
-            send this link to the person on the other device. it expires in <span id="pair-offer-ttl">300</span> seconds. anyone with this link before then can pair with you.
+            on the other device, click <strong>accept a code</strong> and type the 4 letters below. expires in <span id="pair-offer-ttl">300</span> seconds.
           </p>
-          <div class="offer-box">
-            <code id="pair-offer-uri">generating…</code>
-            <button class="copy-btn" id="pair-copy-btn" title="copy">copy</button>
-          </div>
+          <div class="pair-code" id="pair-code">····</div>
           <p class="muted small" id="pair-offer-reach"></p>
+          <details class="pair-fallback">
+            <summary>or share a long link instead</summary>
+            <div class="offer-box" style="margin-top: 8px;">
+              <code id="pair-offer-uri">—</code>
+              <button class="copy-btn" id="pair-copy-btn" title="copy">copy</button>
+            </div>
+          </details>
         </section>
 
-        <!-- View 3: accept (paste an offer they sent you) -->
+        <!-- View 3: accept (type a 4-letter code, or paste full URI) -->
         <section class="pair-view" id="pair-view-accept" hidden>
-          <h3>accept an offer</h3>
-          <p class="muted">
-            paste the <code>unhosted://pair?…</code> link the other person sent you.
-          </p>
-          <textarea id="pair-accept-input" placeholder="unhosted://pair?addr=…&token=…" rows="3"></textarea>
+          <h3>accept a code</h3>
+          <p class="muted">type the 4 letters from the other device.</p>
+          <input id="pair-code-input" class="code-input" type="text" maxlength="4" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ABCD">
           <div class="modal-actions">
             <button class="btn-primary" id="pair-accept-submit">pair</button>
           </div>
           <p class="muted small" id="pair-accept-msg"></p>
+          <details class="pair-fallback">
+            <summary>or paste a long link instead</summary>
+            <textarea id="pair-accept-input" placeholder="unhosted://pair?addr=…&token=…" rows="3" style="margin-top: 8px;"></textarea>
+            <div class="modal-actions" style="margin-top: 8px;">
+              <button class="btn-primary" id="pair-accept-uri-submit">pair from link</button>
+            </div>
+          </details>
         </section>
       </div>
     </div>

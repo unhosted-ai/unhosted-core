@@ -56,6 +56,8 @@ type Tx = mpsc::UnboundedSender<Message>;
 struct AppState {
     /// Map of registered pubkey (base64) → session message-sender.
     sessions: Arc<Mutex<HashMap<String, Tx>>>,
+    /// 4-letter pair codes → (offer URI, expiry). One-time, 5min TTL.
+    codes: Arc<Mutex<HashMap<String, (String, std::time::Instant)>>>,
 }
 
 #[tokio::main]
@@ -72,12 +74,15 @@ async fn main() -> Result<()> {
 
     let state = AppState {
         sessions: Arc::new(Mutex::new(HashMap::new())),
+        codes: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let app = Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/v1/tunnel", get(tunnel_handler))
         .route("/v1/info", get(info_handler))
+        .route("/v1/codes", axum::routing::post(create_code_handler))
+        .route("/v1/codes/{code}", get(consume_code_handler))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(cli.addr).await?;
@@ -96,6 +101,79 @@ async fn info_handler() -> axum::Json<serde_json::Value> {
         "version": env!("CARGO_PKG_VERSION"),
         "protocol": PROTOCOL_VERSION,
     }))
+}
+
+// ----- short pair codes -----------------------------------------------------
+
+const CODE_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+const CODE_ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+#[derive(serde::Deserialize)]
+struct CreateCodeRequest {
+    offer: String,
+}
+
+#[derive(serde::Serialize)]
+struct CreateCodeResponse {
+    code: String,
+    expires_in_seconds: u64,
+}
+
+async fn create_code_handler(
+    State(state): State<AppState>,
+    axum::Json(req): axum::Json<CreateCodeRequest>,
+) -> Result<axum::Json<CreateCodeResponse>, axum::http::StatusCode> {
+    let mut codes = state.codes.lock().await;
+
+    // gc expired codes opportunistically
+    let now = std::time::Instant::now();
+    codes.retain(|_, (_, exp)| now < *exp);
+
+    // generate a unique 4-letter code (collision retry up to 10x)
+    let mut tries = 0;
+    let code = loop {
+        let mut buf = [0u8; 4];
+        for b in buf.iter_mut() {
+            *b = CODE_ALPHABET
+                [(rand::Rng::gen::<u8>(&mut rand::thread_rng()) as usize) % CODE_ALPHABET.len()];
+        }
+        let candidate = String::from_utf8(buf.to_vec()).unwrap();
+        if !codes.contains_key(&candidate) {
+            break candidate;
+        }
+        tries += 1;
+        if tries > 10 {
+            return Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    codes.insert(code.clone(), (req.offer, now + CODE_TTL));
+    Ok(axum::Json(CreateCodeResponse {
+        code,
+        expires_in_seconds: CODE_TTL.as_secs(),
+    }))
+}
+
+#[derive(serde::Serialize)]
+struct ConsumeCodeResponse {
+    offer: String,
+}
+
+async fn consume_code_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(code): axum::extract::Path<String>,
+) -> Result<axum::Json<ConsumeCodeResponse>, axum::http::StatusCode> {
+    let code = code.to_ascii_uppercase();
+    let mut codes = state.codes.lock().await;
+
+    let now = std::time::Instant::now();
+    codes.retain(|_, (_, exp)| now < *exp);
+
+    let entry = codes.remove(&code);
+    match entry {
+        Some((offer, exp)) if now < exp => Ok(axum::Json(ConsumeCodeResponse { offer })),
+        _ => Err(axum::http::StatusCode::NOT_FOUND),
+    }
 }
 
 async fn tunnel_handler(

@@ -184,6 +184,8 @@ pub async fn serve(node: Node) -> Result<()> {
         .route("/v1/pair/offer", post(pair_offer_handler))
         .route("/v1/pair/accept", post(pair_accept_handler))
         .route("/v1/pair/connect", post(pair_connect_handler))
+        .route("/v1/pair/short-offer", post(pair_short_offer_handler))
+        .route("/v1/pair/use-code", post(pair_use_code_handler))
         .route("/v1/identity", get(identity_handler))
         // OpenAI-compatible endpoints — any client that speaks OpenAI's HTTP
         // API (Delta, LangChain, LlamaIndex, OpenWebUI, …) can point at
@@ -407,6 +409,12 @@ struct PairOfferResponse {
     /// of band (Signal, email, paper) to the other party.
     offer: String,
     expires_in_seconds: u64,
+    /// How the other side will reach us:
+    ///   "relay"          — works behind NAT, via the relay
+    ///   "lan"            — only works on the same LAN (no relay registered)
+    ///   "loopback_only"  — only works on the same machine (bind addr is
+    ///                      loopback and we couldn't detect a LAN IP)
+    reachability: String,
 }
 
 async fn pair_offer_handler(
@@ -434,27 +442,64 @@ async fn pair_offer_handler(
         _ => None,
     };
     let pubkey = state.identity.public_b64();
-    let offer = match relay {
+
+    // If the daemon is bound to loopback (127.0.0.1), the other side can't
+    // reach it from anywhere else. Substitute the LAN IP so the offer is
+    // usable from at least the same network.
+    let advertised_addr = advertised_addr(state.node.addr);
+    let only_loopback = advertised_addr.ip().is_loopback();
+
+    let has_relay = relay.is_some();
+    let offer = match &relay {
         Some(url) => format!(
             "unhosted://pair?addr={}&pk={}&relay={}&token={}",
-            state.node.addr,
+            advertised_addr,
             urlencode(&pubkey),
-            urlencode(&url),
+            urlencode(url),
             token
         ),
         None => format!(
             "unhosted://pair?addr={}&pk={}&token={}",
-            state.node.addr,
+            advertised_addr,
             urlencode(&pubkey),
             token
         ),
+    };
+
+    let reachability = if has_relay {
+        "relay".to_string()
+    } else if only_loopback {
+        "loopback_only".to_string()
+    } else {
+        "lan".to_string()
     };
 
     Ok(axum::Json(PairOfferResponse {
         token,
         offer,
         expires_in_seconds: PAIRING_TOKEN_TTL.as_secs(),
+        reachability,
     }))
+}
+
+/// Pick the address to put in a pair offer. If the bind address is loopback,
+/// fall back to whatever interface the OS would use to reach an external host
+/// (the standard "open a UDP socket and ask" trick — no packets sent).
+fn advertised_addr(bind: SocketAddr) -> SocketAddr {
+    if !bind.ip().is_loopback() {
+        return bind;
+    }
+    if let Some(ip) = local_lan_ip() {
+        return SocketAddr::new(ip, bind.port());
+    }
+    bind
+}
+
+fn local_lan_ip() -> Option<std::net::IpAddr> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    // Doesn't actually send packets — just resolves the routing table.
+    socket.connect("8.8.8.8:80").ok()?;
+    socket.local_addr().ok().map(|a| a.ip())
 }
 
 fn urlencode(s: &str) -> String {
@@ -538,6 +583,166 @@ async fn pair_accept_handler(
         pubkey: state.identity.public_b64(),
         addr: state.node.addr.to_string(),
     }))
+}
+
+// ---------------------------------------------------------------- short pair codes
+
+/// Convert the relay's WebSocket URL (ws:// or wss://) to its HTTP base
+/// for hitting `/v1/codes` etc. Treats `ws://host` like `http://host`.
+fn relay_http_base(relay_url: &str) -> String {
+    relay_url
+        .replacen("wss://", "https://", 1)
+        .replacen("ws://", "http://", 1)
+}
+
+#[derive(Serialize)]
+struct ShortOfferResponse {
+    code: String,
+    expires_in_seconds: u64,
+}
+
+/// `POST /v1/pair/short-offer` — generates an offer URI internally, asks the
+/// relay to store it under a 4-letter code, returns the code. The other side
+/// types the 4 letters into `pair/use-code` and the rest is automatic.
+async fn pair_short_offer_handler(
+    State(state): State<NodeState>,
+) -> Result<axum::Json<ShortOfferResponse>, (StatusCode, String)> {
+    let relay_url = state.node.relay_url.clone().ok_or((
+        StatusCode::PRECONDITION_FAILED,
+        "no relay configured. start daemon with --relay ws://... to enable short codes".into(),
+    ))?;
+
+    // Generate a fresh offer URI (reuses the long-form code path).
+    let token = {
+        use base64::Engine;
+        let mut buf = [0u8; 9];
+        rand::Rng::fill(&mut rand::thread_rng(), &mut buf);
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(buf)
+    };
+
+    let now = std::time::Instant::now();
+    {
+        let mut tokens = state
+            .pairing_tokens
+            .lock()
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "lock".into()))?;
+        tokens.retain(|_, t| now.duration_since(*t) < PAIRING_TOKEN_TTL);
+        tokens.insert(token.clone(), now);
+    }
+
+    let advertised = advertised_addr(state.node.addr);
+    let pubkey = state.identity.public_b64();
+    let offer = format!(
+        "unhosted://pair?addr={}&pk={}&relay={}&token={}",
+        advertised,
+        urlencode(&pubkey),
+        urlencode(&relay_url),
+        token
+    );
+
+    // Hand the offer to the relay, get back a short code.
+    let http_base = relay_http_base(&relay_url);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let resp = client
+        .post(format!("{}/v1/codes", http_base.trim_end_matches('/')))
+        .json(&serde_json::json!({ "offer": offer }))
+        .send()
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("relay: {e}")))?;
+
+    if !resp.status().is_success() {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!("relay HTTP {}", resp.status()),
+        ));
+    }
+    let parsed: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))?;
+
+    let code = parsed
+        .get("code")
+        .and_then(|v| v.as_str())
+        .ok_or((StatusCode::BAD_GATEWAY, "relay reply missing code".into()))?
+        .to_string();
+    let exp = parsed
+        .get("expires_in_seconds")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(300);
+
+    Ok(axum::Json(ShortOfferResponse {
+        code,
+        expires_in_seconds: exp,
+    }))
+}
+
+#[derive(Deserialize)]
+struct UseCodeRequest {
+    code: String,
+}
+
+/// `POST /v1/pair/use-code` — accepts a 4-letter code, fetches the offer from
+/// the relay, completes the pairing via the existing connect flow.
+async fn pair_use_code_handler(
+    State(state): State<NodeState>,
+    Json(req): Json<UseCodeRequest>,
+) -> Result<axum::Json<PairConnectResponse>, (StatusCode, String)> {
+    let relay_url = state.node.relay_url.clone().ok_or((
+        StatusCode::PRECONDITION_FAILED,
+        "no relay configured. start daemon with --relay ws://... to use short codes".into(),
+    ))?;
+
+    let code = req.code.trim().to_ascii_uppercase();
+    if code.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "code is empty".into()));
+    }
+
+    let http_base = relay_http_base(&relay_url);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let resp = client
+        .get(format!(
+            "{}/v1/codes/{}",
+            http_base.trim_end_matches('/'),
+            code
+        ))
+        .send()
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("relay: {e}")))?;
+
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err((
+            StatusCode::NOT_FOUND,
+            "code not found — already used, expired, or mistyped".into(),
+        ));
+    }
+    if !resp.status().is_success() {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!("relay HTTP {}", resp.status()),
+        ));
+    }
+
+    let parsed: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))?;
+    let offer = parsed
+        .get("offer")
+        .and_then(|v| v.as_str())
+        .ok_or((StatusCode::BAD_GATEWAY, "relay reply missing offer".into()))?
+        .to_string();
+
+    // Delegate to pair_connect logic.
+    pair_connect_handler(State(state), Json(PairConnectRequest { offer })).await
 }
 
 // Server-side equivalent of `unhosted pair accept`, callable from the UI.

@@ -701,6 +701,45 @@ button:disabled:hover { border-color: var(--line-strong); }
 }
 .copy-btn { padding: 6px 12px; }
 
+.pair-code {
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  font-size: 64px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-align: center;
+  padding: 24px 0;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  color: var(--fg);
+  user-select: all;
+}
+.code-input {
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-align: center;
+  padding: 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--fg);
+  text-transform: uppercase;
+  width: 100%;
+}
+.code-input:focus { outline: 0; border-color: var(--fg); }
+.pair-fallback {
+  margin-top: 8px;
+  font-size: 12px;
+}
+.pair-fallback summary {
+  cursor: pointer;
+  color: var(--mute);
+  padding: 4px 0;
+}
+.pair-fallback summary:hover { color: var(--fg); }
+
 #pair-accept-input {
   width: 100%;
   border: 1px solid var(--line-strong);

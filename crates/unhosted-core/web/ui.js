@@ -497,12 +497,15 @@ const pairEls = {
   myName: $("#pair-my-name"),
   myPubkey: $("#pair-my-pubkey"),
   myAddr: $("#pair-my-addr"),
+  code: $("#pair-code"),
+  codeInput: $("#pair-code-input"),
   offerUri: $("#pair-offer-uri"),
   offerTtl: $("#pair-offer-ttl"),
   offerReach: $("#pair-offer-reach"),
   copyBtn: $("#pair-copy-btn"),
   acceptInput: $("#pair-accept-input"),
   acceptSubmit: $("#pair-accept-submit"),
+  acceptUriSubmit: $("#pair-accept-uri-submit"),
   acceptMsg: $("#pair-accept-msg"),
   showOfferBtn: $("#pair-show-offer"),
   acceptOfferBtn: $("#pair-accept-offer"),
@@ -548,34 +551,106 @@ function closePairModal() {
 }
 
 async function requestOffer() {
-  pairEls.offerUri.textContent = "generating…";
+  if (pairEls.code) pairEls.code.textContent = "····";
+  pairEls.offerUri.textContent = "—";
   pairEls.offerReach.textContent = "";
+  if (pairTickInterval) {
+    clearInterval(pairTickInterval);
+    pairTickInterval = null;
+  }
+
+  // Prefer short-code path (needs a relay). Fall back to long URI if relay
+  // isn't configured (HTTP 412 PRECONDITION_FAILED).
+  let usedShort = false;
   try {
-    const r = await fetch("/v1/pair/offer", { method: "POST" });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const d = await r.json();
-    pairEls.offerUri.textContent = d.offer;
-    let ttl = d.expires_in_seconds;
-    pairEls.offerTtl.textContent = ttl;
-    if (pairTickInterval) clearInterval(pairTickInterval);
-    pairTickInterval = setInterval(() => {
-      ttl -= 1;
-      pairEls.offerTtl.textContent = Math.max(0, ttl);
-      if (ttl <= 0) {
-        clearInterval(pairTickInterval);
-        pairTickInterval = null;
-        pairEls.offerUri.textContent = "expired — close and reopen to generate a new one.";
-      }
-    }, 1000);
-    if (d.offer.includes("relay=")) {
+    const sr = await fetch("/v1/pair/short-offer", { method: "POST" });
+    if (sr.ok) {
+      const d = await sr.json();
+      pairEls.code.textContent = d.code;
+      let ttl = d.expires_in_seconds;
+      pairEls.offerTtl.textContent = ttl;
+      pairTickInterval = setInterval(() => {
+        ttl -= 1;
+        pairEls.offerTtl.textContent = Math.max(0, ttl);
+        if (ttl <= 0) {
+          clearInterval(pairTickInterval);
+          pairTickInterval = null;
+          pairEls.code.textContent = "····";
+        }
+      }, 1000);
       pairEls.offerReach.textContent =
-        "this offer includes your relay address — the other side can pair even if neither of you has a public IP.";
-    } else {
-      pairEls.offerReach.textContent =
-        "no relay configured — the other side must reach your address directly (LAN, public IP, or VPN).";
+        "✓ share the 4 letters. the other device types them in.";
+      pairEls.offerReach.style.color = "var(--ok)";
+      usedShort = true;
+    } else if (sr.status !== 412) {
+      throw new Error(`short HTTP ${sr.status}`);
     }
   } catch (e) {
-    pairEls.offerUri.textContent = "failed: " + (e.message || "unknown");
+    /* fall through */
+  }
+
+  // Always fetch the long URI too — for the "or share a long link" fallback.
+  try {
+    const lr = await fetch("/v1/pair/offer", { method: "POST" });
+    if (!lr.ok) throw new Error(`HTTP ${lr.status}`);
+    const d = await lr.json();
+    pairEls.offerUri.textContent = d.offer;
+    if (!usedShort) {
+      // No relay → no short code; long URI is the primary share.
+      pairEls.code.textContent = "—";
+      let ttl = d.expires_in_seconds;
+      pairEls.offerTtl.textContent = ttl;
+      pairTickInterval = setInterval(() => {
+        ttl -= 1;
+        pairEls.offerTtl.textContent = Math.max(0, ttl);
+        if (ttl <= 0) {
+          clearInterval(pairTickInterval);
+          pairTickInterval = null;
+          pairEls.offerUri.textContent = "expired — close and reopen.";
+        }
+      }, 1000);
+      if (d.reachability === "lan") {
+        pairEls.offerReach.textContent =
+          "no relay configured → no short code. share the long link. add --relay to your daemon for codes.";
+        pairEls.offerReach.style.color = "var(--mute)";
+      } else if (d.reachability === "loopback_only") {
+        pairEls.offerReach.textContent =
+          "⚠ only works on this machine. restart with --addr 0.0.0.0:7777 (lan) or --relay (internet).";
+        pairEls.offerReach.style.color = "var(--err)";
+      }
+    }
+  } catch (e) {
+    if (!usedShort) pairEls.offerUri.textContent = "failed: " + (e.message || "unknown");
+  }
+}
+
+async function acceptCode() {
+  const code = (pairEls.codeInput?.value || "").trim();
+  if (code.length < 3) {
+    pairEls.acceptMsg.textContent = "type the 4-letter code from the other device.";
+    return;
+  }
+  pairEls.acceptSubmit.disabled = true;
+  pairEls.acceptMsg.textContent = "pairing…";
+  try {
+    const r = await fetch("/v1/pair/use-code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+    if (!r.ok) {
+      const text = await r.text();
+      throw new Error(text || `HTTP ${r.status}`);
+    }
+    const d = await r.json();
+    pairEls.acceptMsg.textContent = `paired with ${d.name}.`;
+    pairEls.codeInput.value = "";
+    await refreshStatus();
+    setTimeout(closePairModal, 1500);
+  } catch (e) {
+    pairEls.acceptMsg.textContent = "failed: " + (e.message || "unknown");
+  } finally {
+    pairEls.acceptSubmit.disabled = false;
   }
 }
 
@@ -621,7 +696,13 @@ if (pairEls.modal) {
     if (e.target === pairEls.modal) closePairModal();
   });
 }
-if (pairEls.acceptSubmit) pairEls.acceptSubmit.addEventListener("click", acceptOffer);
+if (pairEls.acceptSubmit) pairEls.acceptSubmit.addEventListener("click", acceptCode);
+if (pairEls.acceptUriSubmit) pairEls.acceptUriSubmit.addEventListener("click", acceptOffer);
+if (pairEls.codeInput) {
+  pairEls.codeInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") acceptCode();
+  });
+}
 if (pairEls.copyBtn) {
   pairEls.copyBtn.addEventListener("click", async () => {
     const text = pairEls.offerUri.textContent || "";
