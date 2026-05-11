@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>
+  <string>unhosted</string>
+  <key>CFBundleDisplayName</key>
+  <string>unhosted</string>
+  <key>CFBundleIdentifier</key>
+  <string>ai.unhosted.desktop</string>
+  <key>CFBundleExecutable</key>
+  <string>unhosted-desktop</string>
+  <key>CFBundleIconFile</key>
+  <string>unhosted</string>
+  <key>CFBundleVersion</key>
+  <string>0.0.1</string>
+  <key>CFBundleShortVersionString</key>
+  <string>0.0.1</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleSignature</key>
+  <string>????</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>11.0</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSSupportsAutomaticGraphicsSwitching</key>
+  <true/>
+  <key>NSHumanReadableCopyright</key>
+  <string>AGPL-3.0 · github.com/unhosted-ai</string>
+</dict>
+</plist>

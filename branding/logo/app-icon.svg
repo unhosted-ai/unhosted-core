@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>unhosted — macOS app icon source</title>
+  <!-- Solid near-black fill. macOS rounds the corners itself, so we don't
+       draw them here; a flat square gives macOS the cleanest mask. -->
+  <rect width="1024" height="1024" fill="#0A0A0A"/>
+
+  <!-- Trust-gradient mark, centered, scaled to ~60% of canvas. -->
+  <g transform="translate(212, 212)" fill="none" stroke="#F5F5F0" stroke-width="22" stroke-linecap="round">
+    <circle cx="300" cy="300" r="266" stroke-dasharray="10 36"/>
+    <circle cx="300" cy="300" r="168"/>
+    <circle cx="300" cy="300" r="72" fill="#F5F5F0" stroke="none"/>
+  </g>
+</svg>
