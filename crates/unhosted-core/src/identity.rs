@@ -89,6 +89,52 @@ impl Identity {
         B64.encode(sig.to_bytes())
     }
 
+    /// Build an `X-Unhosted-Auth` header value over the given request body.
+    /// Format: `<pubkey>:<unix_ts>:<sig>`. Signature is over `<ts>\n<body>`.
+    pub fn sign_request(&self, body: &[u8]) -> String {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let mut to_sign = Vec::with_capacity(20 + body.len());
+        to_sign.extend_from_slice(ts.to_string().as_bytes());
+        to_sign.push(b'\n');
+        to_sign.extend_from_slice(body);
+        let sig = self.sign(&to_sign);
+        format!("{}:{}:{}", self.public_b64(), ts, sig)
+    }
+
+    /// Verify an `X-Unhosted-Auth` header. Returns the sender's pubkey on
+    /// success, or `None` if the header is malformed, the timestamp is
+    /// too far skewed (>5min), or the signature doesn't check out.
+    pub fn verify_request(header: &str, body: &[u8]) -> Option<String> {
+        let mut parts = header.splitn(3, ':');
+        let pubkey = parts.next()?;
+        let ts_str = parts.next()?;
+        let sig = parts.next()?;
+
+        let ts: u64 = ts_str.parse().ok()?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_secs();
+        let skew = now.abs_diff(ts);
+        if skew > 300 {
+            return None; // 5min replay window
+        }
+
+        let mut to_verify = Vec::with_capacity(20 + body.len());
+        to_verify.extend_from_slice(ts_str.as_bytes());
+        to_verify.push(b'\n');
+        to_verify.extend_from_slice(body);
+
+        if Self::verify(pubkey, &to_verify, sig) {
+            Some(pubkey.to_string())
+        } else {
+            None
+        }
+    }
+
     /// Verify a base64-encoded signature against a pubkey + message.
     pub fn verify(pubkey_b64: &str, message: &[u8], sig_b64: &str) -> bool {
         let Ok(pk_bytes) = B64.decode(pubkey_b64.as_bytes()) else {

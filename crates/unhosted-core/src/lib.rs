@@ -48,6 +48,12 @@ pub const DEFAULT_NODE_ADDR: &str = "127.0.0.1:7777";
 /// Daemons that receive this header skip the router and serve locally.
 const FORWARDED_HEADER: &str = "x-unhosted-forwarded";
 
+/// `X-Unhosted-Auth: <pubkey>:<ts>:<sig>` — present on requests from trusted
+/// peers. Receiver verifies the signature against the registry. If the
+/// header is present but invalid, the request is rejected outright. If
+/// absent, requests are accepted (back-compat with LAN/v0.0.x callers).
+const AUTH_HEADER: &str = "x-unhosted-auth";
+
 /// Default system prompt — anchors the assistant's voice. Plain, direct,
 /// no "as an AI" padding, length matched to the question.
 const DEFAULT_SYSTEM_PROMPT: &str = "you are the assistant inside unhosted, open-source software that runs ai on hardware the user owns. answer plainly and directly. do not begin with disclaimers like \"as an ai\" or \"i'm an artificial intelligence\". do not use marketing words (\"exciting\", \"powerful\", \"leverage\", \"empower\"). match the length of your answer to the length the question needs — short questions get short answers. if you do not know something, say so.";
@@ -1301,6 +1307,42 @@ async fn run_handler(
     headers: HeaderMap,
     Json(req): Json<RunRequest>,
 ) -> Result<Response, StatusCode> {
+    // Auth: if the caller presents an X-Unhosted-Auth header, verify it
+    // against the trusted-peer registry. Header present but invalid →
+    // 401. Header absent → accept (preserves LAN/local CLI behavior).
+    if let Some(auth_hv) = headers.get(AUTH_HEADER) {
+        let auth_str = match auth_hv.to_str() {
+            Ok(s) => s,
+            Err(_) => return Err(StatusCode::UNAUTHORIZED),
+        };
+        // Sign over the same body the sender signed: ts\n + JSON(req).
+        let body_bytes = match serde_json::to_vec(&req) {
+            Ok(b) => b,
+            Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
+        };
+        let sender_pk = match Identity::verify_request(auth_str, &body_bytes) {
+            Some(pk) => pk,
+            None => {
+                tracing::warn!("auth: signature failed or expired");
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+        };
+        // Confirm the sender is actually a trusted peer of ours.
+        let is_trusted = state
+            .registry
+            .lock()
+            .map(|r| {
+                r.peers
+                    .iter()
+                    .any(|p| p.pubkey.as_deref() == Some(sender_pk.as_str()))
+            })
+            .unwrap_or(false);
+        if !is_trusted {
+            tracing::warn!(sender = %sender_pk, "auth: pubkey signed correctly but is not paired");
+            return Err(StatusCode::FORBIDDEN);
+        }
+    }
+
     // Loop prevention: if a peer already forwarded this request to us, we
     // serve it locally and don't bounce it back into the router.
     let already_forwarded = headers.get(FORWARDED_HEADER).is_some();
@@ -1322,8 +1364,10 @@ async fn run_handler(
         }
         Target::Peer { ref name, addr } => {
             tracing::debug!(target = %name, %addr, "routing request to peer");
-            // Direct HTTP first.
-            match run_peer(name, addr, &req).await {
+            // Direct HTTP first. If the peer has a pubkey (trusted), sign
+            // the request so they can verify the sender.
+            let signing = lookup_peer_pubkey(&state.registry, name).map(|_| state.identity.clone());
+            match run_peer(name, addr, &req, signing.as_ref()).await {
                 Ok(resp) => Ok(resp),
                 Err(e) => {
                     tracing::warn!(peer = %name, error = %e, "peer direct failed");
@@ -1437,17 +1481,33 @@ async fn run_peer_via_relay(
 /// Forward a request to a peer's `/v1/run`, streaming the response body back
 /// to our caller unchanged. The peer is another `unhosted` daemon, so the
 /// response is already text/plain token stream.
-async fn run_peer(name: &str, addr: SocketAddr, req: &RunRequest) -> Result<Response> {
+///
+/// If `signing` is `Some`, attach an `X-Unhosted-Auth` header signed with
+/// our identity — the receiving peer can verify we are who we claim to be.
+async fn run_peer(
+    name: &str,
+    addr: SocketAddr,
+    req: &RunRequest,
+    signing: Option<&Identity>,
+) -> Result<Response> {
     let url = format!("http://{addr}/v1/run");
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(2))
         .build()
         .map_err(anyhow::Error::from)?;
 
-    let upstream_resp = client
+    let body_bytes = serde_json::to_vec(req).context("serializing run request")?;
+
+    let mut builder = client
         .post(&url)
         .header(FORWARDED_HEADER, "1")
-        .json(req)
+        .header("content-type", "application/json");
+    if let Some(id) = signing {
+        builder = builder.header(AUTH_HEADER, id.sign_request(&body_bytes));
+    }
+
+    let upstream_resp = builder
+        .body(body_bytes)
         .send()
         .await
         .map_err(anyhow::Error::from)?;
