@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/unhosted-core", "crates/unhosted-cli", "crates/unhosted-desktop"]
+members = ["crates/unhosted-core", "crates/unhosted-cli", "crates/unhosted-desktop", "crates/unhosted-relay"]
 
 [workspace.package]
 version = "0.0.3"
@@ -13,7 +13,7 @@ rust-version = "1.75"
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
-axum = "0.8"
+axum = { version = "0.8", features = ["ws"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
