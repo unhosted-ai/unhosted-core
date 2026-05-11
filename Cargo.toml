@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/unhosted-core", "crates/unhosted-cli", "crates/unhosted-desktop"]
 
 [workspace.package]
-version = "0.0.1"
+version = "0.0.3"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/unhosted-ai/unhosted"
