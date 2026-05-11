@@ -21,9 +21,22 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap" rel="stylesheet">
 
   <link rel="stylesheet" href="style.css">
+
+  <script>
+    // Theme bootstrap — runs before paint to avoid FOUC.
+    (function () {
+      try {
+        var stored = localStorage.getItem('unhosted-theme');
+        if (stored === 'dark' || stored === 'light') {
+          document.documentElement.dataset.theme = stored;
+        }
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body class="doc-body">
   <script type="module" src="motion.js"></script>
+  <script type="module" src="theme.js"></script>
 
   <nav class="doc-nav">
     <a class="brand-link" href="/">
@@ -38,6 +51,7 @@
       <a href="/">home</a>
       <a href="https://github.com/unhosted-ai/unhosted-core/blob/main/MANIFESTO.md">manifesto</a>
       <a href="https://github.com/unhosted-ai/unhosted-core">github</a>
+      <button class="theme-toggle" id="theme-toggle" title="toggle theme" aria-label="toggle theme"><span class="glyph">◐</span></button>
     </div>
   </nav>
 
@@ -71,19 +85,22 @@
       <h2>the three modes</h2>
       <p>unhosted has three concentric rings of trust. you decide how far the radius goes for any given request.</p>
 
-      <figure class="trust-diagram" aria-label="trust radius diagram">
-        <svg viewBox="0 0 360 360" xmlns="http://www.w3.org/2000/svg">
-          <g fill="none" stroke="currentColor">
-            <circle cx="180" cy="180" r="160" stroke-dasharray="4 12" stroke-width="2"/>
-            <circle cx="180" cy="180" r="100" stroke-width="2"/>
-            <circle cx="180" cy="180" r="44" fill="currentColor" stroke="none"/>
-          </g>
-          <g font-family="'Inter', sans-serif" font-size="13" fill="currentColor" font-weight="500">
-            <text x="180" y="184" text-anchor="middle" fill="#F5F5F0">local</text>
-            <text x="180" y="120" text-anchor="middle">trusted</text>
-            <text x="180" y="40" text-anchor="middle">public</text>
-          </g>
-        </svg>
+      <figure class="figure">
+        <div class="trust-diagram" aria-label="trust radius diagram">
+          <svg viewBox="0 0 360 360" xmlns="http://www.w3.org/2000/svg">
+            <g fill="none" stroke="currentColor">
+              <circle cx="180" cy="180" r="160" stroke-dasharray="4 12" stroke-width="2"/>
+              <circle cx="180" cy="180" r="100" stroke-width="2"/>
+              <circle cx="180" cy="180" r="44" fill="currentColor" stroke="none"/>
+            </g>
+            <g font-family="'Inter', sans-serif" font-size="13" fill="currentColor" font-weight="500">
+              <text x="180" y="184" text-anchor="middle" fill="var(--bg)">local</text>
+              <text x="180" y="120" text-anchor="middle">trusted</text>
+              <text x="180" y="40" text-anchor="middle">public</text>
+            </g>
+          </svg>
+        </div>
+        <figcaption class="figure-caption">fig. trust radius — local · trusted · public</figcaption>
       </figure>
 
       <div class="mode">
@@ -113,7 +130,8 @@
 
       <p>at v0.0.1 there's exactly one daemon and one cli, both on the same machine:</p>
 
-      <pre class="diagram">
+      <figure class="figure">
+        <pre class="diagram">
 your prompt
     │
     ▼
@@ -127,7 +145,9 @@ your prompt
                                                                        │
                                                               ◀────────┘
                                                               tokens stream
-      </pre>
+        </pre>
+        <figcaption class="figure-caption">fig. v0.0.1 single-host pipeline</figcaption>
+      </figure>
 
       <p>future versions add more daemons across more machines, then encrypted pairing between trusted peers, then a discovery layer for the public swarm. the cli &harr; daemon contract stays the same.</p>
     </section>

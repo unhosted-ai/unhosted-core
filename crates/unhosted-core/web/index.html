@@ -12,6 +12,17 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/ui.css">
+
+  <script>
+    (function () {
+      try {
+        var stored = localStorage.getItem('unhosted-theme');
+        if (stored === 'dark' || stored === 'light') {
+          document.documentElement.dataset.theme = stored;
+        }
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
 
@@ -79,8 +90,11 @@
       </div>
 
       <div class="sidebar-foot">
-        <a href="/docs.html" class="foot-link">learn</a>
-        <a href="https://github.com/unhosted-ai/unhosted-core" class="foot-link">github</a>
+        <div class="foot-links">
+          <a href="/docs.html" class="foot-link">learn</a>
+          <a href="https://github.com/unhosted-ai/unhosted-core" class="foot-link">github</a>
+        </div>
+        <button class="theme-toggle" id="theme-toggle" title="toggle theme" aria-label="toggle theme"><span class="glyph">◐</span></button>
       </div>
     </aside>
 

@@ -22,9 +22,21 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap" rel="stylesheet">
 
   <link rel="stylesheet" href="style.css">
+
+  <script>
+    (function () {
+      try {
+        var stored = localStorage.getItem('unhosted-theme');
+        if (stored === 'dark' || stored === 'light') {
+          document.documentElement.dataset.theme = stored;
+        }
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
   <script type="module" src="motion.js"></script>
+  <script type="module" src="theme.js"></script>
 
   <!-- giant cut-off wordmark + top nav -->
   <header class="hero">
@@ -37,6 +49,7 @@
       <a href="#modes">how it works</a>
       <a href="https://github.com/unhosted-ai/unhosted-core/blob/main/BRAND.md">brand</a>
       <a href="https://github.com/unhosted-ai/unhosted-core">github</a>
+      <button class="theme-toggle" id="theme-toggle" title="toggle theme" aria-label="toggle theme"><span class="glyph">◐</span></button>
     </nav>
   </header>
 

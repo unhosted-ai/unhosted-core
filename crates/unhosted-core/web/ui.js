@@ -6,6 +6,45 @@
 
 const $ = (sel) => document.querySelector(sel);
 
+// ---------------------------------------------------------------- theme toggle
+
+const THEME_KEY = "unhosted-theme";
+const THEME_GLYPHS = { auto: "◐", dark: "☾", light: "☀" };
+const THEME_LABELS = { auto: "theme · auto", dark: "theme · dark", light: "theme · light" };
+
+(function initThemeToggle() {
+  const btn = document.getElementById("theme-toggle");
+  if (!btn) return;
+  paintTheme(btn);
+  btn.addEventListener("click", () => {
+    const current = readTheme();
+    const next = current === "auto" ? "dark" : current === "dark" ? "light" : "auto";
+    if (next === "auto") {
+      delete document.documentElement.dataset.theme;
+      safeRemove();
+    } else {
+      document.documentElement.dataset.theme = next;
+      safeSet(next);
+    }
+    paintTheme(btn);
+  });
+})();
+
+function readTheme() {
+  let stored = null;
+  try { stored = localStorage.getItem(THEME_KEY); } catch (e) {}
+  return stored === "dark" || stored === "light" ? stored : "auto";
+}
+function paintTheme(btn) {
+  const t = readTheme();
+  const glyph = btn.querySelector(".glyph");
+  if (glyph) glyph.textContent = THEME_GLYPHS[t];
+  btn.title = THEME_LABELS[t];
+  btn.setAttribute("aria-label", THEME_LABELS[t]);
+}
+function safeSet(v) { try { localStorage.setItem(THEME_KEY, v); } catch (e) {} }
+function safeRemove() { try { localStorage.removeItem(THEME_KEY); } catch (e) {} }
+
 const els = {
   composer: $("#composer"),
   prompt: $("#prompt"),
