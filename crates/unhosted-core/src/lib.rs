@@ -327,6 +327,73 @@ async fn status_handler(State(state): State<NodeState>) -> axum::Json<StatusResp
     let upstream_url = state.node.llama_server_url.clone();
     let (reachable, model) = probe_upstream(&upstream_url).await;
 
+    let mut discovered = state
+        .discovery
+        .as_ref()
+        .map(|d| d.snapshot())
+        .unwrap_or_default();
+
+    // Auto-restore: if a discovered peer's pubkey matches one of our paired
+    // peers but the addr has drifted (IP change after a router reboot, e.g.),
+    // update the registry in-place so direct routing works without a fresh
+    // pairing round.
+    {
+        let mut reg = match state.registry.lock() {
+            Ok(r) => r,
+            Err(_) => {
+                return axum::Json(StatusResponse {
+                    node: NodeStatus {
+                        addr: state.node.addr.to_string(),
+                        name: state.node.name.clone(),
+                        version: env!("CARGO_PKG_VERSION"),
+                    },
+                    upstream: UpstreamStatus {
+                        url: upstream_url,
+                        reachable,
+                        model,
+                    },
+                    peers: vec![],
+                    routing: RoutingStatus {
+                        targets: state.router.target_count(),
+                        mode: "round-robin",
+                    },
+                    discovered: vec![],
+                    relay: RelayStatus {
+                        state: "error",
+                        url: None,
+                        error: Some("registry lock poisoned".into()),
+                    },
+                });
+            }
+        };
+        let mut changed = false;
+        for d in &discovered {
+            let Some(dpk) = d.pubkey.as_deref() else {
+                continue;
+            };
+            if let Some(p) = reg
+                .peers
+                .iter_mut()
+                .find(|p| p.pubkey.as_deref() == Some(dpk))
+            {
+                if p.addr != d.addr {
+                    tracing::info!(
+                        peer = %p.name,
+                        old = %p.addr,
+                        new = %d.addr,
+                        "auto-restoring paired peer addr from mDNS"
+                    );
+                    p.addr = d.addr;
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            let _ = reg.save();
+            state.router.replace_peers(&reg.peers);
+        }
+    }
+
     let peers = state
         .registry
         .lock()
@@ -342,17 +409,24 @@ async fn status_handler(State(state): State<NodeState>) -> axum::Json<StatusResp
         })
         .unwrap_or_default();
 
-    let mut discovered = state
-        .discovery
-        .as_ref()
-        .map(|d| d.snapshot())
-        .unwrap_or_default();
-
-    // Hide peers that are already in the registry — we only want to show
-    // *unpaired* discoveries in the UI.
+    // Hide peers that are already paired — match by name OR by advertised
+    // pubkey. Either signal means "we already trust this device" and we
+    // don't want to show a redundant pair button.
     let paired_names: std::collections::HashSet<String> =
         peers.iter().map(|p| p.name.clone()).collect();
-    discovered.retain(|d| !paired_names.contains(&d.name));
+    let paired_pubkeys: std::collections::HashSet<String> = state
+        .registry
+        .lock()
+        .map(|r| r.peers.iter().filter_map(|p| p.pubkey.clone()).collect())
+        .unwrap_or_default();
+    discovered.retain(|d| {
+        !paired_names.contains(&d.name)
+            && !d
+                .pubkey
+                .as_ref()
+                .map(|pk| paired_pubkeys.contains(pk))
+                .unwrap_or(false)
+    });
 
     let relay_state = state.relay.current_state().await;
     let relay = match relay_state {

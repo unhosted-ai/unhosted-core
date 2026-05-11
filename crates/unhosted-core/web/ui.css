@@ -885,9 +885,39 @@ button:focus-visible, input:focus-visible, textarea:focus-visible,
 .btn-primary:hover { background: var(--accent); border-color: var(--accent); color: var(--bg); }
 
 @media (max-width: 760px) {
+  /* phone: drop the sidebar, give the chat the full viewport. */
   .app { grid-template-columns: 1fr; }
-  .sidebar {
-    display: none; /* hide by default on mobile; toggle TBD */
+  .sidebar { display: none; }
+  .main-head, .composer-wrap { padding-left: 14px; padding-right: 14px; }
+  .scroll { padding: 0 14px; }
+
+  /* compose surface comfortable for thumbs */
+  .composer { padding: 10px 12px; border-radius: 12px; }
+  .composer textarea { font-size: 16px; min-height: 36px; }
+  .send { padding: 8px 18px; min-height: 36px; }
+
+  /* pair modal: phone-friendly. */
+  .modal-backdrop { padding: 16px; align-items: flex-end; }
+  .modal {
+    max-height: 95vh;
+    border-radius: 16px 16px 0 0;
+    width: 100%;
   }
-  .main-head, .scroll, .composer-wrap { padding-left: 16px; padding-right: 16px; }
+  .modal-head { padding: 14px 18px; }
+  .modal-body { padding: 16px; gap: 12px; }
+
+  /* the big 4-letter code: fit a phone screen without horizontal scroll. */
+  .pair-code { font-size: 52px; letter-spacing: 0.12em; padding: 18px 0; }
+  .code-input { font-size: 30px; padding: 14px; letter-spacing: 0.18em; }
+
+  /* empty-state suggestion chips wrap nicer with smaller gaps. */
+  .suggestions { gap: 6px; }
+  .chip { font-size: 12.5px; padding: 6px 10px; }
+
+  /* messages: a hair more breathing room since we lost the sidebar */
+  .conversation { gap: 18px; margin: 18px auto 24px; padding-bottom: 16px; }
+  .msg .body { font-size: 16px; }
+
+  /* status-cluster in the top header gets crowded; hide the local chip */
+  .mode-chip { display: none; }
 }
