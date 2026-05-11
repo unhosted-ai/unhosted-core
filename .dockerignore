@@ -1,0 +1,14 @@
+target/
+dist/
+.git/
+.github/
+.claude/
+docs/
+branding/
+design/
+scripts/
+*.app/
+*.icns
+*.iconset/
+node_modules/
+**/.DS_Store

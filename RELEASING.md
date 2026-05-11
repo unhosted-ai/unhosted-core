@@ -47,7 +47,24 @@ If the workflow misfires, you can also trigger it from the Actions tab:
 ## What's not in the binary
 
 - `llama.cpp` (separate install)
-- model files (separate download)
+- model files (use `unhosted pull <name>` after install)
 - the desktop wrapper (`unhosted-desktop`) — not yet shipped in releases; plan to add once we have icons and code signing sorted
 
-Both are tracked as gaps in the next milestone (`unhosted pull` for models, bundled `llama.cpp` later).
+## Docker image
+
+Pushing to `main` or tagging `v*.*.*` also triggers `.github/workflows/docker.yml`, which builds a multi-arch (amd64 + arm64) image and publishes to GitHub Container Registry:
+
+- `ghcr.io/unhosted-ai/unhosted:latest` (latest main)
+- `ghcr.io/unhosted-ai/unhosted:0.0.3` and `:0.0` (per-tag)
+
+Typical use:
+
+```bash
+docker run --rm -p 7777:7777 \
+  -v ~/.cache/unhosted:/root/.cache/unhosted \
+  -v ~/.config/unhosted:/root/.config/unhosted \
+  -e UNHOSTED_LLAMA_SERVER_URL=http://host.docker.internal:8080 \
+  ghcr.io/unhosted-ai/unhosted:latest
+```
+
+The image is daemon-only — `llama-server` and models stay on the host.

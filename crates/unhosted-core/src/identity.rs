@@ -1,0 +1,143 @@
+//! Per-node Ed25519 identity. The keypair is generated on first start and
+//! persisted to `~/.config/unhosted/identity.toml`. It survives restarts,
+//! model swaps, and IP changes — it's the stable name of *this* daemon.
+//!
+//! Used by trusted-mode pairing (v0.1.0+) to authenticate peers without
+//! a central PKI.
+
+use std::path::PathBuf;
+
+use anyhow::{Context, Result};
+use base64::{engine::general_purpose::STANDARD_NO_PAD as B64, Engine};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use rand::rngs::OsRng;
+use serde::{Deserialize, Serialize};
+
+/// On-disk shape. We store the secret as a 32-byte base64 string; the
+/// public key is derivable but cached for human inspection.
+#[derive(Serialize, Deserialize)]
+struct IdentityFile {
+    secret_b64: String,
+    public_b64: String,
+}
+
+/// In-memory identity. Cheap to clone (Arc-backed key material).
+#[derive(Clone)]
+pub struct Identity {
+    signing: std::sync::Arc<SigningKey>,
+}
+
+impl Identity {
+    /// Load the identity from disk, generating + persisting a new keypair if
+    /// none exists yet.
+    pub fn load_or_create() -> Result<Self> {
+        let path = config_path()?;
+        if path.exists() {
+            let text = std::fs::read_to_string(&path)
+                .with_context(|| format!("reading {}", path.display()))?;
+            let stored: IdentityFile =
+                toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+            let secret_bytes = B64
+                .decode(stored.secret_b64.as_bytes())
+                .context("decoding identity secret")?;
+            let secret_array: [u8; 32] = secret_bytes
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("identity secret is not 32 bytes"))?;
+            let signing = SigningKey::from_bytes(&secret_array);
+            return Ok(Self {
+                signing: std::sync::Arc::new(signing),
+            });
+        }
+
+        // generate + persist
+        let signing = SigningKey::generate(&mut OsRng);
+        let public = signing.verifying_key();
+        let file = IdentityFile {
+            secret_b64: B64.encode(signing.to_bytes()),
+            public_b64: B64.encode(public.to_bytes()),
+        };
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating {}", parent.display()))?;
+        }
+        std::fs::write(&path, toml::to_string_pretty(&file)?)
+            .with_context(|| format!("writing {}", path.display()))?;
+        // Tighten permissions on the secret file (owner-only).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
+
+        Ok(Self {
+            signing: std::sync::Arc::new(signing),
+        })
+    }
+
+    pub fn public_b64(&self) -> String {
+        B64.encode(self.signing.verifying_key().to_bytes())
+    }
+
+    pub fn sign(&self, message: &[u8]) -> String {
+        let sig: Signature = self.signing.sign(message);
+        B64.encode(sig.to_bytes())
+    }
+
+    /// Verify a base64-encoded signature against a pubkey + message.
+    pub fn verify(pubkey_b64: &str, message: &[u8], sig_b64: &str) -> bool {
+        let Ok(pk_bytes) = B64.decode(pubkey_b64.as_bytes()) else {
+            return false;
+        };
+        let pk_array: [u8; 32] = match pk_bytes.try_into() {
+            Ok(a) => a,
+            Err(_) => return false,
+        };
+        let Ok(verifying) = VerifyingKey::from_bytes(&pk_array) else {
+            return false;
+        };
+        let Ok(sig_bytes) = B64.decode(sig_b64.as_bytes()) else {
+            return false;
+        };
+        let sig_array: [u8; 64] = match sig_bytes.try_into() {
+            Ok(a) => a,
+            Err(_) => return false,
+        };
+        let signature = Signature::from_bytes(&sig_array);
+        verifying.verify(message, &signature).is_ok()
+    }
+}
+
+pub fn config_path() -> Result<PathBuf> {
+    let dir = if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        PathBuf::from(xdg)
+    } else {
+        let home = std::env::var("HOME").context("HOME env var not set")?;
+        PathBuf::from(home).join(".config")
+    };
+    Ok(dir.join("unhosted").join("identity.toml"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sign_and_verify_roundtrip() {
+        // Use an isolated config dir so we don't trample the real one.
+        let tmp = std::env::temp_dir().join(format!("unhosted-id-{}", std::process::id()));
+        std::env::set_var("XDG_CONFIG_HOME", &tmp);
+
+        let id = Identity::load_or_create().unwrap();
+        let msg = b"hello world";
+        let sig = id.sign(msg);
+
+        assert!(Identity::verify(&id.public_b64(), msg, &sig));
+        assert!(!Identity::verify(&id.public_b64(), b"different", &sig));
+
+        // load_or_create twice returns the same key (persistence works)
+        let id2 = Identity::load_or_create().unwrap();
+        assert_eq!(id.public_b64(), id2.public_b64());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}

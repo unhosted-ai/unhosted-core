@@ -79,6 +79,7 @@ mod tests {
             addr: format!("127.0.0.1:{port}").parse().unwrap(),
             priority,
             models: vec![],
+            pubkey: None,
         }
     }
 

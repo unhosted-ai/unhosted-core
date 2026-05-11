@@ -82,6 +82,33 @@ enum Command {
     },
     /// List known models and what's already cached on this machine.
     Models,
+    /// Print this node's stable Ed25519 identity (pubkey).
+    Identity,
+    /// Trusted-peer pairing (v0.1.0). Two-step out-of-band flow.
+    Pair {
+        #[command(subcommand)]
+        action: PairAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum PairAction {
+    /// Generate a pairing offer. Share the printed URI with the other
+    /// device's owner; the token expires in 5 minutes.
+    Offer {
+        /// Address of the local daemon to request the offer from.
+        #[arg(long, default_value_t = format!("http://{}", DEFAULT_NODE_ADDR))]
+        node: String,
+    },
+    /// Accept a pairing offer received from another node. Adds them as a
+    /// trusted peer (and they add you).
+    Accept {
+        /// The full `unhosted://pair?addr=...&token=...` URI from the other side.
+        offer: String,
+        /// Local daemon to register the new trusted peer with.
+        #[arg(long, default_value_t = format!("http://{}", DEFAULT_NODE_ADDR))]
+        node: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -146,9 +173,184 @@ async fn main() -> Result<()> {
         Command::Models => {
             list_models()?;
         }
+        Command::Identity => {
+            let id = unhosted_core::Identity::load_or_create()?;
+            println!("pubkey: {}", id.public_b64());
+            println!(
+                "path:   {}",
+                unhosted_core::identity::config_path()?.display()
+            );
+        }
+        Command::Pair { action } => {
+            handle_pair(action).await?;
+        }
     }
 
     Ok(())
+}
+
+async fn handle_pair(action: PairAction) -> Result<()> {
+    match action {
+        PairAction::Offer { node } => {
+            let url = format!("{}/v1/pair/offer", node.trim_end_matches('/'));
+            let client = reqwest::Client::new();
+            let resp: serde_json::Value = client
+                .post(&url)
+                .send()
+                .await
+                .with_context(|| format!("requesting offer from {url}"))?
+                .json()
+                .await
+                .context("parsing offer response")?;
+
+            let offer = resp.get("offer").and_then(|v| v.as_str()).unwrap_or("");
+            let ttl = resp
+                .get("expires_in_seconds")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+
+            println!();
+            println!("share this with the other node's owner:");
+            println!();
+            println!("    {offer}");
+            println!();
+            println!("they should run on their device:");
+            println!("    unhosted pair accept \"{offer}\"");
+            println!();
+            println!("expires in {ttl} seconds.");
+        }
+        PairAction::Accept { offer, node } => {
+            let parsed =
+                parse_offer(&offer).with_context(|| format!("parsing offer URI: {offer}"))?;
+
+            // Need our own identity + name + addr to send to the offerer.
+            let me = unhosted_core::Identity::load_or_create()?;
+            let my_name = unhosted_core::default_node_name();
+            // Parse local node's listen address from --node so we know what
+            // address to give the offerer for return-routing.
+            let my_addr = derive_listen_addr(&node)?;
+
+            // 1. Tell the OFFERER to accept us — they validate the token and
+            //    store us as a trusted peer.
+            let accept_url = format!("http://{}/v1/pair/accept", parsed.addr);
+            let body = serde_json::json!({
+                "token": parsed.token,
+                "peer_name": my_name,
+                "peer_pubkey": me.public_b64(),
+                "peer_addr": my_addr.to_string(),
+            });
+
+            let client = reqwest::Client::new();
+            let resp = client
+                .post(&accept_url)
+                .json(&body)
+                .send()
+                .await
+                .with_context(|| format!("contacting offerer at {accept_url}"))?;
+
+            if !resp.status().is_success() {
+                anyhow::bail!(
+                    "offerer rejected pairing: HTTP {} — token expired or invalid?",
+                    resp.status()
+                );
+            }
+            let confirmation: serde_json::Value = resp.json().await?;
+            let their_name = confirmation
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("(unknown)");
+            let their_pubkey = confirmation
+                .get("pubkey")
+                .and_then(|v| v.as_str())
+                .context("offerer response missing pubkey")?;
+            let their_addr = confirmation
+                .get("addr")
+                .and_then(|v| v.as_str())
+                .context("offerer response missing addr")?
+                .parse::<SocketAddr>()
+                .context("offerer response addr not parseable")?;
+
+            // 2. Now register them as a trusted peer locally too, via our
+            //    own daemon's existing POST /v1/peers endpoint.
+            let local_url = format!("{}/v1/peers", node.trim_end_matches('/'));
+            let resp = client
+                .post(&local_url)
+                .json(&serde_json::json!({
+                    "name": their_name,
+                    "addr": their_addr.to_string(),
+                    "priority": 5,
+                }))
+                .send()
+                .await
+                .with_context(|| format!("registering trusted peer at {local_url}"))?;
+            if !resp.status().is_success() {
+                anyhow::bail!("local daemon rejected peer add: HTTP {}", resp.status());
+            }
+
+            // 3. Decorate the local registry with the pubkey so requests
+            //    will eventually carry signed-auth headers. (The daemon's
+            //    /v1/peers endpoint doesn't accept pubkey yet, so we patch
+            //    the on-disk file directly.)
+            let mut reg = PeerRegistry::load()?;
+            if let Some(p) = reg.peers.iter_mut().find(|p| p.name == their_name) {
+                p.pubkey = Some(their_pubkey.to_string());
+                reg.save()?;
+            }
+
+            println!();
+            println!("paired with {their_name} ({their_addr})");
+            println!("their pubkey: {their_pubkey}");
+            println!("ours:         {}", me.public_b64());
+            println!();
+            println!("both sides now treat each other as trusted peers.");
+        }
+    }
+    Ok(())
+}
+
+struct ParsedOffer {
+    addr: SocketAddr,
+    token: String,
+}
+
+fn parse_offer(s: &str) -> Result<ParsedOffer> {
+    let s = s.trim();
+    let rest = s
+        .strip_prefix("unhosted://pair?")
+        .or_else(|| s.strip_prefix("unhosted://pair/"))
+        .context("offer must start with 'unhosted://pair?'")?;
+
+    let mut addr: Option<String> = None;
+    let mut token: Option<String> = None;
+    for kv in rest.split('&') {
+        let mut it = kv.splitn(2, '=');
+        match (it.next(), it.next()) {
+            (Some("addr"), Some(v)) => addr = Some(v.to_string()),
+            (Some("token"), Some(v)) => token = Some(v.to_string()),
+            _ => {}
+        }
+    }
+    let addr = addr.context("offer missing addr= parameter")?;
+    let token = token.context("offer missing token= parameter")?;
+    Ok(ParsedOffer {
+        addr: addr
+            .parse()
+            .context("offer addr is not a valid host:port")?,
+        token,
+    })
+}
+
+/// Derive the daemon's *listen* address from a `http://host:port` URL the
+/// CLI uses to talk to it. The pairing payload sends this to the other
+/// node so they can route back to us.
+fn derive_listen_addr(node_url: &str) -> Result<SocketAddr> {
+    let trimmed = node_url
+        .trim_start_matches("http://")
+        .trim_start_matches("https://")
+        .trim_end_matches('/');
+    trimmed
+        .parse::<SocketAddr>()
+        .with_context(|| format!("could not parse listen addr from {node_url}"))
 }
 
 // ----- model management -----------------------------------------------------
@@ -345,6 +547,7 @@ fn handle_peer(action: PeerAction) -> Result<()> {
                 addr,
                 priority,
                 models: vec![],
+                pubkey: None,
             })?;
             println!("peer added: {name} @ {addr} (priority {priority})");
             println!("config: {}", PeerRegistry::config_path()?.display());

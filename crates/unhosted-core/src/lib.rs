@@ -9,18 +9,20 @@
 //! peer is just another `unhosted serve` process. No new transport.
 
 pub mod discovery;
+pub mod identity;
 pub mod peer;
 pub mod router;
 mod web;
 
 pub use discovery::{default_node_name, DiscoveredPeer, Discovery};
+pub use identity::Identity;
 pub use peer::{Peer, PeerRegistry};
 pub use router::{Router as RouteRouter, Target};
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use axum::{
     body::Body,
     extract::State,
@@ -78,6 +80,11 @@ struct NodeState {
     router: Arc<RouteRouter>,
     registry: Arc<std::sync::Mutex<PeerRegistry>>,
     discovery: Option<Discovery>,
+    identity: Identity,
+    /// Outstanding pairing tokens issued by `POST /v1/pair/offer`. Each
+    /// expires 5 minutes after issuance. In-memory only — restart drops
+    /// them, which is the right behavior for one-time secrets.
+    pairing_tokens: Arc<std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -124,11 +131,16 @@ pub async fn serve(node: Node) -> Result<()> {
         peers: node.peers.clone(),
     }));
 
+    let identity = Identity::load_or_create().context("loading node identity")?;
+    tracing::info!(pubkey = %identity.public_b64(), "node identity loaded");
+
     let state = NodeState {
         node: Arc::new(node.clone()),
         router: router.clone(),
         registry,
         discovery,
+        identity,
+        pairing_tokens: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     let api = AxumRouter::new()
@@ -137,6 +149,8 @@ pub async fn serve(node: Node) -> Result<()> {
         .route("/v1/status", get(status_handler))
         .route("/v1/peers", post(pair_handler))
         .route("/v1/peers/{name}", axum::routing::delete(unpair_handler))
+        .route("/v1/pair/offer", post(pair_offer_handler))
+        .route("/v1/pair/accept", post(pair_accept_handler))
         .with_state(state);
 
     let app = api
@@ -274,6 +288,7 @@ async fn pair_handler(
         addr: req.addr,
         priority: req.priority,
         models: vec![],
+        pubkey: None, // LAN-discovered; trusted pairing flows through /v1/pair/accept
     };
 
     {
@@ -305,6 +320,117 @@ async fn pair_handler(
         .unwrap_or_default();
 
     Ok(axum::Json(PairResponse { ok: true, peers }))
+}
+
+// ---------------------------------------------------------------- trusted pairing (v0.1.0)
+
+const PAIRING_TOKEN_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+
+#[derive(Serialize)]
+struct PairOfferResponse {
+    /// One-time token the acceptor presents to /v1/pair/accept. 5min TTL.
+    token: String,
+    /// Compact share URI containing the addr + token; can be copy-pasted out
+    /// of band (Signal, email, paper) to the other party.
+    offer: String,
+    expires_in_seconds: u64,
+}
+
+async fn pair_offer_handler(
+    State(state): State<NodeState>,
+) -> Result<axum::Json<PairOfferResponse>, StatusCode> {
+    use base64::Engine;
+    let mut buf = [0u8; 9];
+    rand::Rng::fill(&mut rand::thread_rng(), &mut buf);
+    let token = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(buf);
+
+    let now = std::time::Instant::now();
+    {
+        let mut tokens = state
+            .pairing_tokens
+            .lock()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        tokens.retain(|_, t| now.duration_since(*t) < PAIRING_TOKEN_TTL);
+        tokens.insert(token.clone(), now);
+    }
+
+    let offer = format!("unhosted://pair?addr={}&token={}", state.node.addr, token);
+    Ok(axum::Json(PairOfferResponse {
+        token,
+        offer,
+        expires_in_seconds: PAIRING_TOKEN_TTL.as_secs(),
+    }))
+}
+
+#[derive(Deserialize)]
+struct PairAcceptRequest {
+    /// Token from the offer URI.
+    token: String,
+    /// Acceptor's own identity, name, and reachable address.
+    peer_name: String,
+    peer_pubkey: String,
+    peer_addr: SocketAddr,
+}
+
+#[derive(Serialize)]
+struct PairAcceptResponse {
+    ok: bool,
+    /// The offerer's pubkey + name, so the acceptor can save them locally
+    /// as a trusted peer in turn.
+    name: String,
+    pubkey: String,
+    addr: String,
+}
+
+async fn pair_accept_handler(
+    State(state): State<NodeState>,
+    Json(req): Json<PairAcceptRequest>,
+) -> Result<axum::Json<PairAcceptResponse>, StatusCode> {
+    // Consume the token. One-time use.
+    {
+        let mut tokens = state
+            .pairing_tokens
+            .lock()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let now = std::time::Instant::now();
+        tokens.retain(|_, t| now.duration_since(*t) < PAIRING_TOKEN_TTL);
+        if tokens.remove(&req.token).is_none() {
+            tracing::warn!(token_prefix = %&req.token.chars().take(4).collect::<String>(), "pair accept: unknown or expired token");
+            return Err(StatusCode::FORBIDDEN);
+        }
+    }
+
+    // Token valid → save the requester as a trusted peer.
+    let new_peer = Peer {
+        name: req.peer_name.clone(),
+        addr: req.peer_addr,
+        priority: 5, // trusted peers are preferred over plain LAN peers (priority 10)
+        models: vec![],
+        pubkey: Some(req.peer_pubkey.clone()),
+    };
+    {
+        let mut reg = state
+            .registry
+            .lock()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        reg.add(new_peer).map_err(|e| {
+            tracing::error!(error = %e, "pair accept: persisting peer failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+        state.router.replace_peers(&reg.peers);
+    }
+    tracing::info!(
+        name = %req.peer_name,
+        addr = %req.peer_addr,
+        "trusted peer paired"
+    );
+
+    Ok(axum::Json(PairAcceptResponse {
+        ok: true,
+        name: state.node.name.clone(),
+        pubkey: state.identity.public_b64(),
+        addr: state.node.addr.to_string(),
+    }))
 }
 
 async fn unpair_handler(

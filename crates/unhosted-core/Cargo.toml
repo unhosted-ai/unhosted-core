@@ -24,3 +24,6 @@ rust-embed.workspace = true
 mime_guess.workspace = true
 mdns-sd.workspace = true
 hostname.workspace = true
+ed25519-dalek.workspace = true
+rand.workspace = true
+base64.workspace = true

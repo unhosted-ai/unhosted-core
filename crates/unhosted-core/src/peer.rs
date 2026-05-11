@@ -27,6 +27,9 @@ pub struct Peer {
     /// Models the peer claims to serve. Empty means "ask before assuming."
     #[serde(default)]
     pub models: Vec<String>,
+    /// Base64 Ed25519 public key. Present = trusted peer; absent = LAN-only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pubkey: Option<String>,
 }
 
 fn default_priority() -> u8 {
@@ -109,28 +112,27 @@ impl PeerRegistry {
 mod tests {
     use super::*;
 
+    fn p(name: &str, port: u16, priority: u8) -> Peer {
+        Peer {
+            name: name.into(),
+            addr: format!("127.0.0.1:{port}").parse().unwrap(),
+            priority,
+            models: vec![],
+            pubkey: None,
+        }
+    }
+
     #[test]
     fn add_replaces_by_name() {
         let mut reg = PeerRegistry::default();
-        // Use a dummy save by setting XDG_CONFIG_HOME to a temp dir.
         let tmp = std::env::temp_dir().join(format!("unhosted-test-{}", std::process::id()));
         std::env::set_var("XDG_CONFIG_HOME", &tmp);
 
-        reg.add(Peer {
-            name: "thunder".into(),
-            addr: "127.0.0.1:7778".parse().unwrap(),
-            priority: 1,
-            models: vec![],
-        })
-        .unwrap();
+        reg.add(p("thunder", 7778, 1)).unwrap();
 
-        reg.add(Peer {
-            name: "thunder".into(),
-            addr: "127.0.0.1:7779".parse().unwrap(),
-            priority: 2,
-            models: vec!["llama3.2:1b".into()],
-        })
-        .unwrap();
+        let mut updated = p("thunder", 7779, 2);
+        updated.models = vec!["llama3.2:1b".into()];
+        reg.add(updated).unwrap();
 
         assert_eq!(reg.peers.len(), 1);
         assert_eq!(reg.peers[0].priority, 2);
@@ -142,26 +144,7 @@ mod tests {
     #[test]
     fn by_priority_sorts_ascending() {
         let reg = PeerRegistry {
-            peers: vec![
-                Peer {
-                    name: "a".into(),
-                    addr: "127.0.0.1:1".parse().unwrap(),
-                    priority: 5,
-                    models: vec![],
-                },
-                Peer {
-                    name: "b".into(),
-                    addr: "127.0.0.1:2".parse().unwrap(),
-                    priority: 1,
-                    models: vec![],
-                },
-                Peer {
-                    name: "c".into(),
-                    addr: "127.0.0.1:3".parse().unwrap(),
-                    priority: 3,
-                    models: vec![],
-                },
-            ],
+            peers: vec![p("a", 1, 5), p("b", 2, 1), p("c", 3, 3)],
         };
         let names: Vec<&str> = reg.by_priority().iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["b", "c", "a"]);
