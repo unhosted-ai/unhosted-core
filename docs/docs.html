@@ -165,13 +165,18 @@ your prompt
       <h3>multi-node is request distribution, not tensor parallelism</h3>
       <p>today, the multi-node layer distributes <strong>whole requests</strong> across machines. each request still runs on one gpu at a time. the win is parallel throughput across requests, automatic failover, and the trust architecture &mdash; not faster single-request inference. true tensor parallelism (splitting a single model across multiple gpus) is v0.0.4+ via llama.cpp's rpc backend.</p>
 
-      <h3>what unhosted will never do</h3>
+      <h3>what unhosted doesn't do at the daemon level</h3>
       <ul>
         <li><strong>train models</strong> &mdash; too expensive, that's meta / mistral / qwen / alibaba's job. we run inference on whatever open-weights models exist.</li>
         <li><strong>modify weights</strong> &mdash; would break the model and require trust we don't have. you can fine-tune locally with other tools (axolotl, mlx-finetune, llama.cpp itself) and then point unhosted at the result.</li>
-        <li><strong>censor responses</strong> &mdash; model-level alignment is the model's responsibility, not ours. swap models if you disagree with one's behavior.</li>
+        <li><strong>add content filters</strong> &mdash; alignment is the model's responsibility. each open-weights model ships with its own training-time alignment; we don't bolt extra filters on top. swap to a different model if a given one's behavior doesn't match what you need.</li>
         <li><strong>log prompts</strong> &mdash; they go to llama.cpp on your machine and disappear after inference. nothing is persisted by the daemon except the conversation history your browser keeps in localstorage on your device.</li>
       </ul>
+
+      <h3>your jurisdiction, your responsibility</h3>
+      <p>"no daemon-level filters" is not the same as "no rules apply." legal use is yours.</p>
+      <p>different countries treat ai output differently &mdash; the eu ai act, the uk online safety act, china's generative ai regulations, and various us state laws all impose specific obligations on operators or users. some content (csam, defamation, certain incitement) is illegal everywhere regardless of what produced it. running open-source software doesn't change any of that, same as compiling gcc doesn't grant immunity from what you write in c.</p>
+      <p>if you operate a public-mode provider node in v0.3.0+, you'll likely need to apply your own content policies and refusal logic appropriate for your jurisdiction. that policy layer is an operator concern, not a daemon concern; the plugin surface mentioned below is where it can live.</p>
 
       <h3>the deeper-ml stuff lives in a separate plugin</h3>
       <p>this division &mdash; core stays minimal, ml-shaped features go elsewhere &mdash; is deliberate. things like model swapping at runtime, alternative inference backends (vllm, mlx, candle), per-model system-prompt overrides, fine-tune hooks, quantization tools, and verifiable inference proofs will land as a <strong>separate plugin</strong> the daemon can load. opt-in, separately versioned, not part of the core binary.</p>
