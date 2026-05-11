@@ -185,6 +185,11 @@ pub async fn serve(node: Node) -> Result<()> {
         .route("/v1/pair/accept", post(pair_accept_handler))
         .route("/v1/pair/connect", post(pair_connect_handler))
         .route("/v1/identity", get(identity_handler))
+        // OpenAI-compatible endpoints — any client that speaks OpenAI's HTTP
+        // API (Delta, LangChain, LlamaIndex, OpenWebUI, …) can point at
+        // http://127.0.0.1:7777 instead of OpenAI / Ollama / llama-server.
+        .route("/v1/chat/completions", post(chat_completions_handler))
+        .route("/v1/models", get(models_handler))
         .with_state(state);
 
     let app = api
@@ -711,6 +716,136 @@ fn char_to_hex(b: u8) -> Option<u8> {
         b'A'..=b'F' => Some(b - b'A' + 10),
         _ => None,
     }
+}
+
+// ---------------------------------------------------------------- OpenAI compatibility
+
+/// `POST /v1/chat/completions` — passes the request body through to the
+/// upstream llama-server's identical endpoint and streams the response back
+/// verbatim. The OpenAI request/response shape is preserved end-to-end, so
+/// any tool that speaks OpenAI's API can use Unhosted as its backend
+/// (Delta, LangChain, LlamaIndex, OpenWebUI, …).
+///
+/// Routing: same multi-node policy as `/v1/run`. If the router picks a
+/// peer, the request is proxied to that peer's `/v1/chat/completions`.
+/// Loop prevention via `X-Unhosted-Forwarded` works the same way.
+async fn chat_completions_handler(
+    State(state): State<NodeState>,
+    headers: HeaderMap,
+    body: bytes::Bytes,
+) -> Result<Response, StatusCode> {
+    let already_forwarded = headers.get(FORWARDED_HEADER).is_some();
+    let target = if already_forwarded {
+        Target::Local
+    } else {
+        state.router.next()
+    };
+
+    match target {
+        Target::Local => proxy_chat_local(&state.node, body).await,
+        Target::Peer { ref name, addr } => match proxy_chat_peer(name, addr, &body).await {
+            Ok(r) => Ok(r),
+            Err(e) => {
+                tracing::warn!(peer = %name, error = %e, "chat: peer unreachable, falling back to local");
+                proxy_chat_local(&state.node, body).await
+            }
+        },
+    }
+}
+
+async fn proxy_chat_local(node: &Node, body: bytes::Bytes) -> Result<Response, StatusCode> {
+    let url = format!("{}/v1/chat/completions", node.llama_server_url);
+    let client = reqwest::Client::new();
+    let upstream = client
+        .post(&url)
+        .header("content-type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "chat: upstream call failed");
+            StatusCode::BAD_GATEWAY
+        })?;
+
+    let status = upstream.status();
+    if !status.is_success() {
+        tracing::error!(%status, "chat: upstream non-success");
+        return Err(StatusCode::BAD_GATEWAY);
+    }
+    let content_type = upstream
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/json")
+        .to_string();
+    let stream = upstream.bytes_stream().map(|c| match c {
+        Ok(b) => Ok::<_, std::io::Error>(b),
+        Err(e) => Err(std::io::Error::other(e.to_string())),
+    });
+    Ok(Response::builder()
+        .header("content-type", content_type)
+        .header("x-unhosted-served-by", "local")
+        .body(Body::from_stream(stream))
+        .expect("valid response"))
+}
+
+async fn proxy_chat_peer(name: &str, addr: SocketAddr, body: &bytes::Bytes) -> Result<Response> {
+    let url = format!("http://{addr}/v1/chat/completions");
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(2))
+        .build()?;
+    let upstream = client
+        .post(&url)
+        .header("content-type", "application/json")
+        .header(FORWARDED_HEADER, "1")
+        .body(body.clone())
+        .send()
+        .await?;
+    if !upstream.status().is_success() {
+        anyhow::bail!("peer {} returned {}", name, upstream.status());
+    }
+    let content_type = upstream
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/json")
+        .to_string();
+    let stream = upstream.bytes_stream().map(|c| match c {
+        Ok(b) => Ok::<_, std::io::Error>(b),
+        Err(e) => Err(std::io::Error::other(e.to_string())),
+    });
+    Ok(Response::builder()
+        .header("content-type", content_type)
+        .header("x-unhosted-served-by", format!("peer:{name}"))
+        .body(Body::from_stream(stream))
+        .expect("valid response"))
+}
+
+/// `GET /v1/models` — proxies the upstream's identical endpoint so OpenAI
+/// clients can auto-discover what model is being served.
+async fn models_handler(State(state): State<NodeState>) -> Result<Response, StatusCode> {
+    let url = format!("{}/v1/models", state.node.llama_server_url);
+    let upstream = reqwest::Client::new().get(&url).send().await.map_err(|e| {
+        tracing::error!(error = %e, "models: upstream call failed");
+        StatusCode::BAD_GATEWAY
+    })?;
+    if !upstream.status().is_success() {
+        return Err(StatusCode::BAD_GATEWAY);
+    }
+    let content_type = upstream
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/json")
+        .to_string();
+    let body_bytes = upstream
+        .bytes()
+        .await
+        .map_err(|_| StatusCode::BAD_GATEWAY)?;
+    Ok(Response::builder()
+        .header("content-type", content_type)
+        .body(Body::from(body_bytes))
+        .expect("valid response"))
 }
 
 async fn identity_handler(State(state): State<NodeState>) -> axum::Json<serde_json::Value> {

@@ -70,6 +70,7 @@
       <a href="#three-modes">the three modes</a>
       <a href="#how-it-works">how it works</a>
       <a href="#scope">what we do, and what we don't</a>
+      <a href="#clients">use as a backend (Δ delta, langchain, …)</a>
       <a href="#quickstart">quickstart</a>
       <a href="#status">what's working today</a>
       <a href="#faq">faq</a>
@@ -181,6 +182,30 @@ your prompt
       <h3>the deeper-ml stuff lives in a separate plugin</h3>
       <p>this division &mdash; core stays minimal, ml-shaped features go elsewhere &mdash; is deliberate. things like model swapping at runtime, alternative inference backends (vllm, mlx, candle), per-model system-prompt overrides, fine-tune hooks, quantization tools, and verifiable inference proofs will land as a <strong>separate plugin</strong> the daemon can load. opt-in, separately versioned, not part of the core binary.</p>
       <p class="muted small">name and shape tbd. the spec gets its own adr when we're closer to building it; today the daemon stays small and the seams for plugins are designed to come later cleanly. expect the plugin surface no earlier than v0.2.0.</p>
+    </section>
+
+    <section id="clients">
+      <h2>using unhosted as a backend for other tools</h2>
+      <p>the daemon speaks the openai http api at <code>/v1/chat/completions</code> and <code>/v1/models</code>. anything that knows how to talk to openai / ollama / llama-server can point at unhosted instead.</p>
+      <pre class="diagram">
+$ curl -sN http://127.0.0.1:7777/v1/chat/completions \
+    -H 'content-type: application/json' \
+    -d '{
+      "model": "llama3.2:1b",
+      "messages": [{"role":"user","content":"hello"}],
+      "stream": true
+    }'
+data: {"choices":[{"delta":{"content":"hi"}}], ...}
+data: {"choices":[{"delta":{"content":" there"}}], ...}
+...
+      </pre>
+      <p>known clients that work as-is:</p>
+      <ul>
+        <li><strong><a href="https://github.com/Delta-Practice/Browser">delta</a></strong> — privacy-first ai browser. point it at <code>http://127.0.0.1:7777</code> in delta's provider settings; everything below (multi-node routing, trusted peers, future public swarm) becomes transparent infrastructure.</li>
+        <li>any langchain / llamaindex / openwebui setup configured for "openai-compatible local endpoint"</li>
+        <li>any tool that auto-discovers ollama (<code>:11434</code>) or llama-server (<code>:8080</code>) — pointing it at unhosted (<code>:7777</code>) drops in the same way</li>
+      </ul>
+      <p class="muted small">the routing layer + trust radius are invisible from the client's perspective. it just sees a fast openai-compatible server. that's the point.</p>
     </section>
 
     <section id="quickstart">
