@@ -176,13 +176,23 @@ function renderActiveChat() {
   els.scroll.scrollTop = els.scroll.scrollHeight;
 }
 
+const ASSISTANT_MARK_SVG = `<svg class="mark" viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="7" aria-hidden="true">
+  <circle cx="50" cy="50" r="44" stroke-dasharray="2 6"/>
+  <circle cx="50" cy="50" r="28"/>
+  <circle cx="50" cy="50" r="12" fill="currentColor" stroke="none"/>
+</svg>`;
+
 function renderMessage(msg) {
   const node = document.createElement("article");
   node.className = `msg ${msg.role}`;
 
   const who = document.createElement("div");
   who.className = "who";
-  who.innerHTML = `<span class="dot"></span><span>${msg.role === "user" ? "you" : "unhosted"}</span>`;
+  if (msg.role === "assistant") {
+    who.innerHTML = `${ASSISTANT_MARK_SVG}<span>unhosted</span>`;
+  } else {
+    who.innerHTML = `<span class="dot"></span><span>you</span>`;
+  }
 
   const body = document.createElement("div");
   body.className = "body";

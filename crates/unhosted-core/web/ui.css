@@ -479,14 +479,32 @@ button:disabled:hover { border-color: var(--line-strong); }
 .msg .who {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 12px;
   color: var(--mute);
   font-weight: 500;
 }
 .msg .who .dot { width: 6px; height: 6px; }
 .msg.user .who .dot { background: var(--fg); }
-.msg.assistant .who .dot { background: var(--accent); }
+
+/* Assistant: trust-gradient mark stands in for the brand. The mark itself
+   pulses while a response is streaming — same visual is the "thinking"
+   indicator and the author glyph. */
+.msg .who .mark {
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+  display: inline-block;
+  flex-shrink: 0;
+  transition: transform .2s ease;
+}
+.msg.assistant.streaming .who .mark {
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 0.45; transform: scale(0.92); }
+  50%      { opacity: 1;    transform: scale(1.05); }
+}
 
 .msg .body {
   font-size: 15.5px;
