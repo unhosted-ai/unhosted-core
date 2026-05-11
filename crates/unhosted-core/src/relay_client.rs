@@ -53,8 +53,16 @@ pub enum ResponseEvent {
 pub struct InboundRequest {
     pub from_pubkey: String,
     pub req_id: String,
+    /// "run" (default, for /v1/run-equivalent inference) or
+    /// "pair_accept" (for cross-NAT trusted pairing). More kinds may
+    /// be added; unknown kinds get an Err back.
+    pub kind: String,
     pub body: serde_json::Value,
     pub response_tx: mpsc::UnboundedSender<ResponseEvent>,
+}
+
+fn default_kind() -> String {
+    "run".to_string()
 }
 
 #[derive(Clone)]
@@ -159,6 +167,17 @@ impl RelayClient {
         peer_pubkey: &str,
         body: serde_json::Value,
     ) -> Result<mpsc::UnboundedReceiver<ResponseEvent>> {
+        self.call_with_kind(peer_pubkey, "run", body).await
+    }
+
+    /// Like [`call`], but with an explicit request kind. "pair_accept" for
+    /// the trusted-pairing flow over relay; "run" for inference.
+    pub async fn call_with_kind(
+        &self,
+        peer_pubkey: &str,
+        kind: &str,
+        body: serde_json::Value,
+    ) -> Result<mpsc::UnboundedReceiver<ResponseEvent>> {
         let out = {
             let guard = self.out_tx.lock().await;
             guard
@@ -175,6 +194,7 @@ impl RelayClient {
 
         let payload = RelayPayload::ReqStart {
             id: req_id.clone(),
+            req_kind: kind.to_string(),
             body,
         };
         let payload_str = serde_json::to_string(&payload)?;
@@ -235,6 +255,10 @@ enum ServerMessage {
 enum RelayPayload {
     ReqStart {
         id: String,
+        /// Logical request kind. Defaults to "run" if absent (back-compat).
+        /// Other values: "pair_accept".
+        #[serde(default = "default_kind", rename = "req_kind")]
+        req_kind: String,
         body: serde_json::Value,
     },
     RespChunk {
@@ -383,7 +407,7 @@ async fn handle_inbound_payload(
     };
 
     match payload {
-        RelayPayload::ReqStart { id, body } => {
+        RelayPayload::ReqStart { id, req_kind, body } => {
             // Hand the inbound request up to the daemon. Build a response
             // channel; spawn a forwarder that turns ResponseEvents into
             // RespChunk/RespEnd/Err Forward messages back to the caller.
@@ -391,6 +415,7 @@ async fn handle_inbound_payload(
             let req = InboundRequest {
                 from_pubkey: from_pubkey.to_string(),
                 req_id: id.clone(),
+                kind: req_kind,
                 body,
                 response_tx: resp_tx,
             };

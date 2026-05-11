@@ -768,13 +768,6 @@ async fn pair_connect_handler(
     let parsed = parse_offer_uri(&req.offer)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("bad offer: {e}")))?;
 
-    // Tell the offerer to accept us.
-    let accept_url = format!("http://{}/v1/pair/accept", parsed.addr);
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
     let body = serde_json::json!({
         "token": parsed.token,
         "peer_name": state.node.name,
@@ -782,24 +775,55 @@ async fn pair_connect_handler(
         "peer_addr": state.node.addr.to_string(),
     });
 
-    let resp = client
-        .post(&accept_url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("offerer unreachable: {e}")))?;
+    // Try direct HTTP first. Short timeout — if the offerer's addr is
+    // unreachable (both behind NAT), we want to fail fast and fall back to
+    // relay rather than wait 30s.
+    let accept_url = format!("http://{}/v1/pair/accept", parsed.addr);
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(2))
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    if !resp.status().is_success() {
-        return Err((
-            StatusCode::BAD_GATEWAY,
-            format!("offerer rejected: HTTP {}", resp.status()),
-        ));
-    }
+    let direct_attempt = client.post(&accept_url).json(&body).send().await;
 
-    let confirmation: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("bad offerer reply: {e}")))?;
+    let confirmation: serde_json::Value = match direct_attempt {
+        Ok(resp) if resp.status().is_success() => resp
+            .json()
+            .await
+            .map_err(|e| (StatusCode::BAD_GATEWAY, format!("bad offerer reply: {e}")))?,
+        Ok(resp) => {
+            return Err((
+                StatusCode::BAD_GATEWAY,
+                format!("offerer rejected: HTTP {}", resp.status()),
+            ));
+        }
+        Err(direct_err) => {
+            // Direct didn't work. If the offer carries a relay URL AND that
+            // relay matches the one we're registered with AND the peer
+            // pubkey is in the offer, try the pair-accept-via-relay path.
+            let relay_url = parsed.relay.as_deref();
+            let our_relay = state.node.relay_url.as_deref();
+            let same_relay = match (relay_url, our_relay) {
+                (Some(a), Some(b)) => a == b,
+                _ => false,
+            };
+            let peer_pk = parsed.pubkey.as_deref();
+            let relay_ready = matches!(state.relay.current_state().await, RelayState::Registered);
+
+            if let (Some(pk), true, true) = (peer_pk, same_relay, relay_ready) {
+                tracing::info!(peer_pubkey = %pk, "pair direct failed; trying via relay");
+                pair_accept_via_relay(&state.relay, pk, &body)
+                    .await
+                    .map_err(|e| (StatusCode::BAD_GATEWAY, format!("relay pair: {e}")))?
+            } else {
+                return Err((
+                    StatusCode::BAD_GATEWAY,
+                    format!("offerer unreachable: {direct_err}"),
+                ));
+            }
+        }
+    };
 
     let their_name = confirmation
         .get("name")
@@ -1061,9 +1085,17 @@ async fn identity_handler(State(state): State<NodeState>) -> axum::Json<serde_js
     }))
 }
 
-/// Run a request that arrived over the relay against the local llama-server,
-/// streaming chunks back through the response channel.
+/// Route an inbound relay request by its `kind` to the right local handler.
 async fn dispatch_inbound_relay_request(state: NodeState, req: InboundRequest) {
+    match req.kind.as_str() {
+        "pair_accept" => dispatch_inbound_pair_accept(state, req).await,
+        _ /* "run" or unspecified */ => dispatch_inbound_run(state, req).await,
+    }
+}
+
+/// Run an inference request that arrived over the relay against the local
+/// llama-server, streaming chunks back through the response channel.
+async fn dispatch_inbound_run(state: NodeState, req: InboundRequest) {
     let run_req: RunRequest = match serde_json::from_value(req.body.clone()) {
         Ok(r) => r,
         Err(e) => {
@@ -1076,8 +1108,6 @@ async fn dispatch_inbound_relay_request(state: NodeState, req: InboundRequest) {
 
     tracing::info!(from = %req.from_pubkey, "relay-inbound /v1/run dispatch");
 
-    // Re-use run_local to actually serve the request, then capture its
-    // streaming body chunk-by-chunk and forward.
     match run_local(&state.node, run_req).await {
         Err(code) => {
             let _ = req
@@ -1104,6 +1134,96 @@ async fn dispatch_inbound_relay_request(state: NodeState, req: InboundRequest) {
             let _ = req.response_tx.send(ResponseEvent::End);
         }
     }
+}
+
+/// Handle a pair-accept request that arrived over the relay (used when the
+/// other peer can't reach us directly). Performs the same logic as the
+/// HTTP /v1/pair/accept handler and emits the response as a single chunk
+/// + End on the relay's response channel.
+async fn dispatch_inbound_pair_accept(state: NodeState, req: InboundRequest) {
+    let accept: PairAcceptRequest = match serde_json::from_value(req.body.clone()) {
+        Ok(r) => r,
+        Err(e) => {
+            let _ = req
+                .response_tx
+                .send(ResponseEvent::Error(format!("bad pair_accept body: {e}")));
+            return;
+        }
+    };
+
+    tracing::info!(
+        from = %req.from_pubkey,
+        peer = %accept.peer_name,
+        "relay-inbound /v1/pair/accept"
+    );
+
+    // Same flow as pair_accept_handler — consume the one-time token, then
+    // save the requester as a trusted peer.
+    {
+        let mut tokens = match state.pairing_tokens.lock() {
+            Ok(t) => t,
+            Err(_) => {
+                let _ = req
+                    .response_tx
+                    .send(ResponseEvent::Error("token lock poisoned".into()));
+                return;
+            }
+        };
+        let now = std::time::Instant::now();
+        tokens.retain(|_, t| now.duration_since(*t) < PAIRING_TOKEN_TTL);
+        if tokens.remove(&accept.token).is_none() {
+            let _ = req
+                .response_tx
+                .send(ResponseEvent::Error("token expired or unknown".into()));
+            return;
+        }
+    }
+
+    let new_peer = Peer {
+        name: accept.peer_name.clone(),
+        addr: accept.peer_addr,
+        priority: 5,
+        models: vec![],
+        pubkey: Some(accept.peer_pubkey.clone()),
+    };
+    {
+        let mut reg = match state.registry.lock() {
+            Ok(r) => r,
+            Err(_) => {
+                let _ = req
+                    .response_tx
+                    .send(ResponseEvent::Error("registry lock poisoned".into()));
+                return;
+            }
+        };
+        if let Err(e) = reg.add(new_peer) {
+            let _ = req
+                .response_tx
+                .send(ResponseEvent::Error(format!("persisting peer: {e}")));
+            return;
+        }
+        state.router.replace_peers(&reg.peers);
+    }
+
+    let reply = serde_json::json!({
+        "ok": true,
+        "name": state.node.name,
+        "pubkey": state.identity.public_b64(),
+        "addr": state.node.addr.to_string(),
+    });
+    let reply_str = match serde_json::to_string(&reply) {
+        Ok(s) => s,
+        Err(e) => {
+            let _ = req
+                .response_tx
+                .send(ResponseEvent::Error(format!("serializing reply: {e}")));
+            return;
+        }
+    };
+    let _ = req
+        .response_tx
+        .send(ResponseEvent::Chunk(bytes::Bytes::from(reply_str)));
+    let _ = req.response_tx.send(ResponseEvent::End);
 }
 
 async fn unpair_handler(
@@ -1244,6 +1364,36 @@ fn lookup_peer_pubkey(
         .iter()
         .find(|p| p.name == name)
         .and_then(|p| p.pubkey.clone())
+}
+
+/// Send a pair-accept payload to a trusted peer over the relay. Used by
+/// `pair_connect_handler` as a fallback when the offerer's addr is
+/// unreachable (e.g. both peers behind NAT). The peer's relay client
+/// dispatches it through `dispatch_inbound_pair_accept` and returns the
+/// same JSON shape the HTTP /v1/pair/accept handler does.
+async fn pair_accept_via_relay(
+    client: &RelayClient,
+    peer_pubkey: &str,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    let mut rx = client
+        .call_with_kind(peer_pubkey, "pair_accept", body.clone())
+        .await?;
+
+    let mut buf = Vec::new();
+    while let Some(event) = rx.recv().await {
+        match event {
+            ResponseEvent::Chunk(b) => buf.extend_from_slice(&b),
+            ResponseEvent::End => break,
+            ResponseEvent::Error(msg) => anyhow::bail!("peer rejected: {msg}"),
+        }
+    }
+    if buf.is_empty() {
+        anyhow::bail!("peer closed stream with no response");
+    }
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&buf).context("parsing peer reply as JSON")?;
+    Ok(parsed)
 }
 
 /// Send a `/v1/run`-style request to a trusted peer over the relay rather
