@@ -315,6 +315,9 @@ struct PeerStatus {
     name: String,
     addr: String,
     priority: u8,
+    /// True when the peer is paired with a known Ed25519 pubkey. Used by
+    /// the UI to badge trusted peers vs. unauthenticated LAN ones.
+    trusted: bool,
 }
 
 #[derive(Serialize)]
@@ -404,6 +407,7 @@ async fn status_handler(State(state): State<NodeState>) -> axum::Json<StatusResp
                     name: p.name.clone(),
                     addr: p.addr.to_string(),
                     priority: p.priority,
+                    trusted: p.pubkey.is_some(),
                 })
                 .collect::<Vec<_>>()
         })
@@ -526,6 +530,7 @@ async fn pair_handler(
                     name: p.name.clone(),
                     addr: p.addr.to_string(),
                     priority: p.priority,
+                    trusted: p.pubkey.is_some(),
                 })
                 .collect()
         })
@@ -1396,6 +1401,7 @@ async fn unpair_handler(
                     name: p.name.clone(),
                     addr: p.addr.to_string(),
                     priority: p.priority,
+                    trusted: p.pubkey.is_some(),
                 })
                 .collect()
         })

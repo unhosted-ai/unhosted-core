@@ -265,13 +265,23 @@ function renderStatus(s) {
       const left = document.createElement("div");
       left.style.display = "flex";
       left.style.flexDirection = "column";
-      const name = document.createElement("span");
-      name.className = "pname";
-      name.textContent = peer.name;
+
+      const nameRow = document.createElement("span");
+      nameRow.className = "pname";
+      const nameText = document.createElement("span");
+      nameText.textContent = peer.name;
+      nameRow.appendChild(nameText);
+      // Trust badge: red dot + "trusted" for paired-with-pubkey peers,
+      // muted "lan" for unauthenticated LAN peers.
+      const badge = document.createElement("span");
+      badge.className = peer.trusted ? "peer-badge trusted" : "peer-badge lan";
+      badge.textContent = peer.trusted ? "trusted" : "lan";
+      nameRow.appendChild(badge);
+
       const addr = document.createElement("span");
       addr.className = "paddr";
       addr.textContent = peer.addr;
-      left.append(name, addr);
+      left.append(nameRow, addr);
 
       const unpair = document.createElement("button");
       unpair.className = "unpair";
