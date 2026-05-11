@@ -37,6 +37,17 @@ tokio-tungstenite = { version = "0.27", features = ["rustls-tls-webpki-roots"] }
 url = "2"
 
 [profile.release]
-lto = "thin"
+opt-level = 3
+lto = "fat"
 codegen-units = 1
 strip = true
+panic = "abort"
+debug = false
+incremental = false
+
+# `release-debug`: optimized but keeps debuginfo. Useful for profiling.
+# Build with: cargo build --profile release-debug
+[profile.release-debug]
+inherits = "release"
+strip = false
+debug = "line-tables-only"
