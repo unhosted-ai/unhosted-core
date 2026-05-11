@@ -76,7 +76,9 @@ This section replaces the typical "Features" list. It's the truth about what wor
 |-------------------------------|-------------|--------------------------------------------------------------------|
 | Single-machine inference      | shipped     | v0.0.1. Wraps llama.cpp `llama-server`. Smoke-tested on M-series.  |
 | LAN cluster (request routing) | shipped     | v0.0.2. Round-robin across local + peers; verified end-to-end.     |
-| VRAM-pooling (layer splitting) | building   | v0.0.3+. Needs llama.cpp built with `-DGGML_RPC=ON`.              |
+| mDNS peer discovery + pairing | shipped     | v0.0.3. One-click pair in the app sidebar; hot-reload routing.     |
+| Model management (`unhosted pull`) | shipped | v0.0.3. Known short names + direct GGUF URL support.               |
+| VRAM-pooling (layer splitting) | building   | v0.0.4+. Needs llama.cpp built with `-DGGML_RPC=ON`.              |
 | Trusted-peer pairing          | designed    | v0.1.0. WireGuard-style.                                           |
 | Public swarm (USDC)           | designed    | v0.3.0+. See [design/0001](design/0001-public-mode-architecture.md). |
 | Verifiable inference          | research    | Optimistic + redundancy planned; ZK proofs when affordable.        |
