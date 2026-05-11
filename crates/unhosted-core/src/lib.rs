@@ -1202,19 +1202,86 @@ async fn run_handler(
         }
         Target::Peer { ref name, addr } => {
             tracing::debug!(target = %name, %addr, "routing request to peer");
+            // Direct HTTP first.
             match run_peer(name, addr, &req).await {
                 Ok(resp) => Ok(resp),
                 Err(e) => {
-                    tracing::warn!(
-                        peer = %name,
-                        error = %e,
-                        "peer unreachable, falling back to local"
-                    );
-                    run_local(&state.node, req).await
+                    tracing::warn!(peer = %name, error = %e, "peer direct failed");
+
+                    // Fall back to relay if the peer has a pubkey AND we're
+                    // currently registered with a relay. Otherwise local.
+                    let pubkey = lookup_peer_pubkey(&state.registry, name);
+                    let relay_ready =
+                        matches!(state.relay.current_state().await, RelayState::Registered);
+
+                    match (pubkey, relay_ready) {
+                        (Some(pk), true) => {
+                            tracing::info!(peer = %name, "trying via relay");
+                            match run_peer_via_relay(&state.relay, &pk, name, &req).await {
+                                Ok(resp) => Ok(resp),
+                                Err(e) => {
+                                    tracing::warn!(peer = %name, error = %e, "relay path failed; local");
+                                    run_local(&state.node, req).await
+                                }
+                            }
+                        }
+                        _ => run_local(&state.node, req).await,
+                    }
                 }
             }
         }
     }
+}
+
+/// Find a registered peer's pubkey by name. None if the peer isn't in the
+/// registry, or if it is but doesn't carry a pubkey (LAN-only / untrusted).
+fn lookup_peer_pubkey(
+    registry: &Arc<std::sync::Mutex<PeerRegistry>>,
+    name: &str,
+) -> Option<String> {
+    let reg = registry.lock().ok()?;
+    reg.peers
+        .iter()
+        .find(|p| p.name == name)
+        .and_then(|p| p.pubkey.clone())
+}
+
+/// Send a `/v1/run`-style request to a trusted peer over the relay rather
+/// than direct HTTP. Used as a fallback when the direct HTTP call fails —
+/// e.g. the peer is behind NAT.
+async fn run_peer_via_relay(
+    client: &RelayClient,
+    peer_pubkey: &str,
+    peer_name: &str,
+    req: &RunRequest,
+) -> Result<Response> {
+    let body = serde_json::to_value(req).context("serializing run request")?;
+    let mut rx = client.call(peer_pubkey, body).await?;
+
+    let (tx, body_rx) = mpsc::channel::<Result<bytes::Bytes, std::io::Error>>(64);
+    tokio::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            match event {
+                ResponseEvent::Chunk(b) => {
+                    if tx.send(Ok(b)).await.is_err() {
+                        break;
+                    }
+                }
+                ResponseEvent::End => break,
+                ResponseEvent::Error(msg) => {
+                    let _ = tx.send(Err(std::io::Error::other(msg))).await;
+                    break;
+                }
+            }
+        }
+    });
+
+    let stream = ReceiverStream::new(body_rx);
+    Ok(Response::builder()
+        .header("content-type", "text/plain; charset=utf-8")
+        .header("x-unhosted-served-by", format!("peer:{peer_name}:relay"))
+        .body(Body::from_stream(stream))
+        .expect("valid response"))
 }
 
 /// Forward a request to a peer's `/v1/run`, streaming the response body back

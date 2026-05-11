@@ -718,9 +718,13 @@ if (pairEls.copyBtn) {
     const text = pairEls.offerUri.textContent || "";
     try {
       await navigator.clipboard.writeText(text);
+      pairEls.copyBtn.classList.add("copy-success");
       const orig = pairEls.copyBtn.textContent;
-      pairEls.copyBtn.textContent = "copied!";
-      setTimeout(() => (pairEls.copyBtn.textContent = orig), 1200);
+      pairEls.copyBtn.textContent = "✓ copied";
+      setTimeout(() => {
+        pairEls.copyBtn.classList.remove("copy-success");
+        pairEls.copyBtn.textContent = orig;
+      }, 1200);
     } catch (e) {
       // fallback: select the code element
       const range = document.createRange();
