@@ -42,6 +42,17 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=unhosted
+            org.opencontainers.image.description=AI that lives where you do — open-source software that pools the computers you already own into a single inference cluster.
+            org.opencontainers.image.vendor=unhosted-ai
+            org.opencontainers.image.licenses=AGPL-3.0-or-later
+            org.opencontainers.image.documentation=https://github.com/${{ github.repository }}/blob/main/README.md
+          annotations: |
+            org.opencontainers.image.title=unhosted
+            org.opencontainers.image.description=AI that lives where you do — open-source software that pools the computers you already own into a single inference cluster.
+            org.opencontainers.image.vendor=unhosted-ai
+            org.opencontainers.image.licenses=AGPL-3.0-or-later
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -51,5 +62,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          provenance: true
+          sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max

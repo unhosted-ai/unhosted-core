@@ -68,3 +68,18 @@ docker run --rm -p 7777:7777 \
 ```
 
 The image is daemon-only — `llama-server` and models stay on the host.
+
+### What the GHCR package page shows
+
+The Dockerfile and `docker/metadata-action` together set OCI annotations that make the GitHub Packages page render with:
+
+- **Title / description** — from `org.opencontainers.image.title` / `description`
+- **Source** — auto-linked to this repo via `org.opencontainers.image.source`
+- **License** — `AGPL-3.0-or-later` via `org.opencontainers.image.licenses`
+- **README** — pulled from the repo's README.md once the source label resolves
+- **Provenance + SBOM** — attached on every build, visible under "Artifact metadata"
+
+After the first successful publish, set the package to **public** in:
+https://github.com/orgs/unhosted-ai/packages/container/unhosted/settings
+
+Once public, `docker pull ghcr.io/unhosted-ai/unhosted:latest` works without auth.

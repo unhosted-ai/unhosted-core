@@ -32,6 +32,18 @@ RUN cargo build --release -p unhosted-cli && \
     strip target/release/unhosted
 
 FROM debian:bookworm-slim
+
+# OCI annotations — picked up by GitHub Container Registry to link this
+# package to its source repository, license, and docs on the package page.
+LABEL org.opencontainers.image.title="unhosted"
+LABEL org.opencontainers.image.description="AI that lives where you do — open-source software that pools the computers you already own into a single inference cluster."
+LABEL org.opencontainers.image.source="https://github.com/unhosted-ai/unhosted-core"
+LABEL org.opencontainers.image.url="https://github.com/unhosted-ai/unhosted-core"
+LABEL org.opencontainers.image.documentation="https://github.com/unhosted-ai/unhosted-core/blob/main/README.md"
+LABEL org.opencontainers.image.licenses="AGPL-3.0-or-later"
+LABEL org.opencontainers.image.vendor="unhosted-ai"
+LABEL org.opencontainers.image.authors="Unhosted contributors <noreply@unhosted.dev>"
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
