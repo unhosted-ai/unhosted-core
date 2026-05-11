@@ -69,6 +69,7 @@
       <a href="#what-is-it">what is it</a>
       <a href="#three-modes">the three modes</a>
       <a href="#how-it-works">how it works</a>
+      <a href="#scope">what we do, and what we don't</a>
       <a href="#quickstart">quickstart</a>
       <a href="#status">what's working today</a>
       <a href="#faq">faq</a>
@@ -151,6 +152,30 @@ your prompt
       </figure>
 
       <p>future versions add more daemons across more machines, then encrypted pairing between trusted peers, then a discovery layer for the public swarm. the cli &harr; daemon contract stays the same.</p>
+    </section>
+
+    <section id="scope">
+      <h2>what we do, and what we don't</h2>
+
+      <p>this matters for understanding the trust model and what to expect.</p>
+
+      <h3>unhosted is the orchestration layer</h3>
+      <p>it doesn't do any matrix math, doesn't touch the weights, doesn't decide which token comes next. the neural network &mdash; the actual ml &mdash; runs inside llama.cpp on your hardware. unhosted routes requests to it, multiplexes across nodes, streams results back, and handles the trust and payment layers around all of that.</p>
+
+      <h3>multi-node is request distribution, not tensor parallelism</h3>
+      <p>today, the multi-node layer distributes <strong>whole requests</strong> across machines. each request still runs on one gpu at a time. the win is parallel throughput across requests, automatic failover, and the trust architecture &mdash; not faster single-request inference. true tensor parallelism (splitting a single model across multiple gpus) is v0.0.4+ via llama.cpp's rpc backend.</p>
+
+      <h3>what unhosted will never do</h3>
+      <ul>
+        <li><strong>train models</strong> &mdash; too expensive, that's meta / mistral / qwen / alibaba's job. we run inference on whatever open-weights models exist.</li>
+        <li><strong>modify weights</strong> &mdash; would break the model and require trust we don't have. you can fine-tune locally with other tools (axolotl, mlx-finetune, llama.cpp itself) and then point unhosted at the result.</li>
+        <li><strong>censor responses</strong> &mdash; model-level alignment is the model's responsibility, not ours. swap models if you disagree with one's behavior.</li>
+        <li><strong>log prompts</strong> &mdash; they go to llama.cpp on your machine and disappear after inference. nothing is persisted by the daemon except the conversation history your browser keeps in localstorage on your device.</li>
+      </ul>
+
+      <h3>the deeper-ml stuff lives in a separate plugin</h3>
+      <p>this division &mdash; core stays minimal, ml-shaped features go elsewhere &mdash; is deliberate. things like model swapping at runtime, alternative inference backends (vllm, mlx, candle), per-model system-prompt overrides, fine-tune hooks, quantization tools, and verifiable inference proofs will land as a <strong>separate plugin</strong> the daemon can load. opt-in, separately versioned, not part of the core binary.</p>
+      <p class="muted small">name and shape tbd. the spec gets its own adr when we're closer to building it; today the daemon stays small and the seams for plugins are designed to come later cleanly. expect the plugin surface no earlier than v0.2.0.</p>
     </section>
 
     <section id="quickstart">
