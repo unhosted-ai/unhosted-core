@@ -90,12 +90,13 @@ els.composer.addEventListener("submit", async (e) => {
   els.meta.innerHTML = '<span class="info">streaming…</span>';
 
   try {
-    await streamPrompt(prompt, (chunk) => {
+    const servedBy = await streamPrompt(prompt, (chunk) => {
       const bodyEl = assistant.querySelector(".body");
       bodyEl.textContent += chunk;
       // keep scrolled near the bottom while tokens arrive
       els.main.scrollTop = els.main.scrollHeight;
     });
+    if (servedBy) annotateServedBy(assistant, servedBy);
   } catch (err) {
     showError(assistant, err);
   } finally {
@@ -121,6 +122,8 @@ async function streamPrompt(prompt, onChunk) {
     throw new Error("streaming not supported by this browser");
   }
 
+  const servedBy = resp.headers.get("x-unhosted-served-by");
+
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
   for (;;) {
@@ -128,6 +131,19 @@ async function streamPrompt(prompt, onChunk) {
     if (done) break;
     onChunk(decoder.decode(value, { stream: true }));
   }
+  return servedBy;
+}
+
+function annotateServedBy(msgEl, servedBy) {
+  const tag = document.createElement("div");
+  tag.className = "served-by";
+  if (servedBy.startsWith("peer:")) {
+    const name = servedBy.slice("peer:".length);
+    tag.innerHTML = `served by <span class="peer">peer · ${escapeHtml(name)}</span>`;
+  } else {
+    tag.textContent = `served by ${servedBy}`;
+  }
+  msgEl.append(tag);
 }
 
 // ---------------------------------------------------------------- DOM helpers

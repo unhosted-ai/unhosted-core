@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/unhosted-core", "crates/unhosted-cli"]
+members = ["crates/unhosted-core", "crates/unhosted-cli", "crates/unhosted-desktop"]
 
 [workspace.package]
 version = "0.0.1"
@@ -26,6 +26,8 @@ futures = "0.3"
 bytes = "1"
 rust-embed = { version = "8", features = ["axum", "interpolate-folder-path"] }
 mime_guess = "2"
+tao = "0.31"
+wry = "0.48"
 
 [profile.release]
 lto = "thin"
