@@ -4,6 +4,7 @@
 //! v0.0.1 is single-machine only. Multi-node orchestration arrives in v0.0.2.
 
 pub mod peer;
+mod web;
 
 pub use peer::{Peer, PeerRegistry};
 
@@ -67,13 +68,29 @@ struct UpstreamCompletion<'a> {
 
 pub async fn serve(node: Node) -> Result<()> {
     let state = Arc::new(node.clone());
-    let app = Router::new()
+
+    // API routes (consumed by the CLI and the embedded web UI).
+    let api = Router::new()
         .route("/health", get(health))
         .route("/v1/run", post(run_handler))
         .with_state(state);
 
+    // The embedded web UI sits alongside the API on the same port.
+    // Specific routes match first; the wildcard at the end catches
+    // /ui.css, /ui.js, /favicon.svg, etc. and falls back to index.html
+    // for unknown paths so a future client-side router can take over.
+    let app = api
+        .route("/", get(web::serve_index))
+        .fallback(web::serve_static);
+
     let listener = tokio::net::TcpListener::bind(node.addr).await?;
-    tracing::info!(addr = %node.addr, upstream = %node.llama_server_url, "unhosted node listening");
+    tracing::info!(
+        addr = %node.addr,
+        upstream = %node.llama_server_url,
+        ui = "enabled",
+        "unhosted node listening — open http://{} in a browser",
+        node.addr
+    );
     axum::serve(listener, app).await?;
     Ok(())
 }

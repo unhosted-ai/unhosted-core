@@ -24,6 +24,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures = "0.3"
 bytes = "1"
+rust-embed = { version = "8", features = ["axum", "interpolate-folder-path"] }
+mime_guess = "2"
 
 [profile.release]
 lto = "thin"

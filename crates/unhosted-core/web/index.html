@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>unhosted</title>
+  <meta name="description" content="local AI on hardware you own.">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <meta name="theme-color" content="#F5F5F0" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0A0A0A" media="(prefers-color-scheme: dark)">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/ui.css">
+</head>
+<body>
+
+  <header class="app-header">
+    <a class="brand" href="/" aria-label="unhosted">
+      <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="3" width="22" height="22" aria-hidden="true">
+        <circle cx="50" cy="50" r="44" stroke-dasharray="2 6"/>
+        <circle cx="50" cy="50" r="28"/>
+        <circle cx="50" cy="50" r="12" fill="currentColor" stroke="none"/>
+      </svg>
+      <span class="brand-text">unhosted</span>
+    </a>
+
+    <div class="status-cluster">
+      <div class="status" id="status">
+        <span class="dot" data-state="unknown"></span>
+        <span class="label" id="status-label">checking…</span>
+      </div>
+      <div class="mode-chip">
+        <span class="dot accent"></span>
+        local
+      </div>
+    </div>
+  </header>
+
+  <main class="app-main">
+
+    <section class="empty" id="empty-state">
+      <h1>say something to your hardware.</h1>
+      <p>this UI talks to the local <code>unhosted</code> node on port 7777, which proxies to whatever inference backend you've pointed it at. tokens stream back as the model generates them.</p>
+      <div class="suggestions">
+        <button class="chip" data-suggest="explain quantum tunneling in two sentences">explain quantum tunneling</button>
+        <button class="chip" data-suggest="write a haiku about a server humming">write a haiku</button>
+        <button class="chip" data-suggest="what's a good starter project for someone learning rust?">starter rust project</button>
+        <button class="chip" data-suggest="give me three reasons local AI matters">why local AI</button>
+      </div>
+    </section>
+
+    <section class="conversation" id="conversation" aria-live="polite">
+      <!-- messages appended here -->
+    </section>
+
+  </main>
+
+  <footer class="composer-wrap">
+    <form class="composer" id="composer" autocomplete="off">
+      <textarea
+        id="prompt"
+        name="prompt"
+        rows="1"
+        placeholder="ask anything. shift+enter for newline."
+        spellcheck="true"
+        autofocus
+      ></textarea>
+      <div class="composer-row">
+        <div class="composer-meta" id="composer-meta">
+          <span class="hint">enter to send</span>
+        </div>
+        <button type="submit" class="send" id="send" disabled>send</button>
+      </div>
+    </form>
+    <p class="footnote">
+      open source · <a href="https://github.com/unhosted-ai/unhosted-core/blob/main/LICENSE">agpl-3.0</a> · <a href="https://github.com/unhosted-ai/unhosted-core">github</a> · prompts never leave your hardware in local mode.
+    </p>
+  </footer>
+
+  <script type="module" src="/ui.js"></script>
+</body>
+</html>
