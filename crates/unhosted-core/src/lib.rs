@@ -18,7 +18,7 @@ mod web;
 pub use discovery::{default_node_name, DiscoveredPeer, Discovery};
 pub use identity::Identity;
 pub use peer::{Peer, PeerRegistry};
-pub use relay_client::{RelayClient, RelayState};
+pub use relay_client::{InboundRequest, RelayClient, RelayState, ResponseEvent};
 pub use router::{Router as RouteRouter, Target};
 
 use std::net::SocketAddr;
@@ -142,11 +142,12 @@ pub async fn serve(node: Node) -> Result<()> {
     let identity = Identity::load_or_create().context("loading node identity")?;
     tracing::info!(pubkey = %identity.public_b64(), "node identity loaded");
 
-    let relay = if let Some(url) = node.relay_url.clone() {
+    let (relay, inbound_rx) = if let Some(url) = node.relay_url.clone() {
         tracing::info!(relay = %url, "starting relay client");
-        RelayClient::spawn(identity.clone(), url)
+        let (client, rx) = RelayClient::spawn(identity.clone(), url);
+        (client, Some(rx))
     } else {
-        RelayClient::disabled()
+        (RelayClient::disabled(), None)
     };
 
     let state = NodeState {
@@ -159,6 +160,21 @@ pub async fn serve(node: Node) -> Result<()> {
         relay,
     };
 
+    // Dispatcher for inbound relay requests: peer sent us a request via the
+    // relay; run it locally and stream chunks back through the relay's
+    // response channel.
+    if let Some(mut rx) = inbound_rx {
+        let state_for_inbound = state.clone();
+        tokio::spawn(async move {
+            while let Some(req) = rx.recv().await {
+                let state = state_for_inbound.clone();
+                tokio::spawn(async move {
+                    dispatch_inbound_relay_request(state, req).await;
+                });
+            }
+        });
+    }
+
     let api = AxumRouter::new()
         .route("/health", get(health))
         .route("/v1/run", post(run_handler))
@@ -167,6 +183,8 @@ pub async fn serve(node: Node) -> Result<()> {
         .route("/v1/peers/{name}", axum::routing::delete(unpair_handler))
         .route("/v1/pair/offer", post(pair_offer_handler))
         .route("/v1/pair/accept", post(pair_accept_handler))
+        .route("/v1/pair/connect", post(pair_connect_handler))
+        .route("/v1/identity", get(identity_handler))
         .with_state(state);
 
     let app = api
@@ -404,12 +422,46 @@ async fn pair_offer_handler(
         tokens.insert(token.clone(), now);
     }
 
-    let offer = format!("unhosted://pair?addr={}&token={}", state.node.addr, token);
+    // Include relay info if we're registered, so the accepting side can
+    // reach us when neither end has a public IP.
+    let relay = match state.relay.current_state().await {
+        RelayState::Registered => state.node.relay_url.clone(),
+        _ => None,
+    };
+    let pubkey = state.identity.public_b64();
+    let offer = match relay {
+        Some(url) => format!(
+            "unhosted://pair?addr={}&pk={}&relay={}&token={}",
+            state.node.addr,
+            urlencode(&pubkey),
+            urlencode(&url),
+            token
+        ),
+        None => format!(
+            "unhosted://pair?addr={}&pk={}&token={}",
+            state.node.addr,
+            urlencode(&pubkey),
+            token
+        ),
+    };
+
     Ok(axum::Json(PairOfferResponse {
         token,
         offer,
         expires_in_seconds: PAIRING_TOKEN_TTL.as_secs(),
     }))
+}
+
+fn urlencode(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '~') {
+                c.to_string()
+            } else {
+                format!("%{:02X}", c as u8)
+            }
+        })
+        .collect()
 }
 
 #[derive(Deserialize)]
@@ -481,6 +533,237 @@ async fn pair_accept_handler(
         pubkey: state.identity.public_b64(),
         addr: state.node.addr.to_string(),
     }))
+}
+
+// Server-side equivalent of `unhosted pair accept`, callable from the UI.
+// Parses an offer URI, contacts the offerer, and registers both sides
+// locally + remotely. Reuses the existing HTTP-based handshake.
+#[derive(Deserialize)]
+struct PairConnectRequest {
+    offer: String,
+}
+
+#[derive(Serialize)]
+struct PairConnectResponse {
+    ok: bool,
+    name: String,
+    pubkey: String,
+    addr: String,
+}
+
+async fn pair_connect_handler(
+    State(state): State<NodeState>,
+    Json(req): Json<PairConnectRequest>,
+) -> Result<axum::Json<PairConnectResponse>, (StatusCode, String)> {
+    let parsed = parse_offer_uri(&req.offer)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("bad offer: {e}")))?;
+
+    // Tell the offerer to accept us.
+    let accept_url = format!("http://{}/v1/pair/accept", parsed.addr);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let body = serde_json::json!({
+        "token": parsed.token,
+        "peer_name": state.node.name,
+        "peer_pubkey": state.identity.public_b64(),
+        "peer_addr": state.node.addr.to_string(),
+    });
+
+    let resp = client
+        .post(&accept_url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("offerer unreachable: {e}")))?;
+
+    if !resp.status().is_success() {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!("offerer rejected: HTTP {}", resp.status()),
+        ));
+    }
+
+    let confirmation: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("bad offerer reply: {e}")))?;
+
+    let their_name = confirmation
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("(unknown)")
+        .to_string();
+    let their_pubkey = confirmation
+        .get("pubkey")
+        .and_then(|v| v.as_str())
+        .ok_or((
+            StatusCode::BAD_GATEWAY,
+            "offerer omitted pubkey".to_string(),
+        ))?
+        .to_string();
+    let their_addr_str = confirmation
+        .get("addr")
+        .and_then(|v| v.as_str())
+        .ok_or((StatusCode::BAD_GATEWAY, "offerer omitted addr".to_string()))?
+        .to_string();
+    let their_addr: SocketAddr = their_addr_str
+        .parse()
+        .map_err(|e: std::net::AddrParseError| (StatusCode::BAD_GATEWAY, e.to_string()))?;
+
+    // Register locally with the pubkey set, so we treat this peer as trusted.
+    {
+        let mut reg = state
+            .registry
+            .lock()
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "lock".into()))?;
+        reg.add(Peer {
+            name: their_name.clone(),
+            addr: their_addr,
+            priority: 5,
+            models: vec![],
+            pubkey: Some(their_pubkey.clone()),
+        })
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        state.router.replace_peers(&reg.peers);
+    }
+
+    tracing::info!(name = %their_name, addr = %their_addr, "trusted peer paired via UI");
+
+    Ok(axum::Json(PairConnectResponse {
+        ok: true,
+        name: their_name,
+        pubkey: their_pubkey,
+        addr: their_addr_str,
+    }))
+}
+
+struct ParsedOfferUri {
+    addr: SocketAddr,
+    token: String,
+    #[allow(dead_code)] // wired up when pair-over-relay lands
+    pubkey: Option<String>,
+    #[allow(dead_code)] // wired up when pair-over-relay lands
+    relay: Option<String>,
+}
+
+fn parse_offer_uri(s: &str) -> Result<ParsedOfferUri> {
+    let s = s.trim();
+    let rest = s
+        .strip_prefix("unhosted://pair?")
+        .or_else(|| s.strip_prefix("unhosted://pair/"))
+        .context("offer must start with 'unhosted://pair?'")?;
+
+    let mut addr: Option<String> = None;
+    let mut token: Option<String> = None;
+    let mut pubkey: Option<String> = None;
+    let mut relay: Option<String> = None;
+    for kv in rest.split('&') {
+        let mut it = kv.splitn(2, '=');
+        let key = it.next().unwrap_or("");
+        let raw = it.next().unwrap_or("");
+        let val = urldecode(raw);
+        match key {
+            "addr" => addr = Some(val),
+            "token" => token = Some(val),
+            "pk" => pubkey = Some(val),
+            "relay" => relay = Some(val),
+            _ => {}
+        }
+    }
+    Ok(ParsedOfferUri {
+        addr: addr
+            .context("offer missing addr=")?
+            .parse()
+            .context("addr not valid host:port")?,
+        token: token.context("offer missing token=")?,
+        pubkey,
+        relay,
+    })
+}
+
+fn urldecode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hi = char_to_hex(bytes[i + 1]);
+            let lo = char_to_hex(bytes[i + 2]);
+            if let (Some(h), Some(l)) = (hi, lo) {
+                out.push((h << 4) | l);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| s.to_string())
+}
+
+fn char_to_hex(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
+async fn identity_handler(State(state): State<NodeState>) -> axum::Json<serde_json::Value> {
+    axum::Json(serde_json::json!({
+        "name": state.node.name,
+        "pubkey": state.identity.public_b64(),
+        "addr": state.node.addr.to_string(),
+    }))
+}
+
+/// Run a request that arrived over the relay against the local llama-server,
+/// streaming chunks back through the response channel.
+async fn dispatch_inbound_relay_request(state: NodeState, req: InboundRequest) {
+    let run_req: RunRequest = match serde_json::from_value(req.body.clone()) {
+        Ok(r) => r,
+        Err(e) => {
+            let _ = req
+                .response_tx
+                .send(ResponseEvent::Error(format!("bad request body: {e}")));
+            return;
+        }
+    };
+
+    tracing::info!(from = %req.from_pubkey, "relay-inbound /v1/run dispatch");
+
+    // Re-use run_local to actually serve the request, then capture its
+    // streaming body chunk-by-chunk and forward.
+    match run_local(&state.node, run_req).await {
+        Err(code) => {
+            let _ = req
+                .response_tx
+                .send(ResponseEvent::Error(format!("local upstream: {code}")));
+        }
+        Ok(resp) => {
+            let mut body = resp.into_body().into_data_stream();
+            while let Some(chunk) = body.next().await {
+                match chunk {
+                    Ok(b) => {
+                        if req.response_tx.send(ResponseEvent::Chunk(b)).is_err() {
+                            return;
+                        }
+                    }
+                    Err(e) => {
+                        let _ = req
+                            .response_tx
+                            .send(ResponseEvent::Error(format!("local stream: {e}")));
+                        return;
+                    }
+                }
+            }
+            let _ = req.response_tx.send(ResponseEvent::End);
+        }
+    }
 }
 
 async fn unpair_handler(

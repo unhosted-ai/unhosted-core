@@ -47,6 +47,14 @@
         <ul class="chat-list" id="chat-list"></ul>
       </nav>
 
+      <div class="sidebar-section">
+        <h4>pair another device</h4>
+        <div class="pair-actions">
+          <button class="pair-btn" id="pair-show-offer">show my offer</button>
+          <button class="pair-btn" id="pair-accept-offer">accept an offer</button>
+        </div>
+      </div>
+
       <div class="sidebar-section" id="discovered-section" hidden>
         <h4>discovered on this network</h4>
         <ul class="discovered-list" id="discovered-list"></ul>
@@ -156,6 +164,61 @@
 
     </main>
 
+  </div>
+
+  <!-- Pair modal: shared by both "show offer" and "accept offer" flows -->
+  <div class="modal-backdrop" id="pair-modal" hidden>
+    <div class="modal">
+      <header class="modal-head">
+        <h2 id="pair-modal-title">pair another device</h2>
+        <button class="modal-close" id="pair-modal-close" aria-label="close">✕</button>
+      </header>
+
+      <div class="modal-body" id="pair-modal-body">
+        <!-- View 1: identity (your node) -->
+        <section class="pair-view" id="pair-view-identity">
+          <h3>this is you</h3>
+          <div class="kv">
+            <label>node name</label>
+            <code id="pair-my-name">—</code>
+          </div>
+          <div class="kv">
+            <label>pubkey</label>
+            <code id="pair-my-pubkey">—</code>
+          </div>
+          <div class="kv">
+            <label>address</label>
+            <code id="pair-my-addr">—</code>
+          </div>
+        </section>
+
+        <!-- View 2: offer (show URI for the other side to use) -->
+        <section class="pair-view" id="pair-view-offer" hidden>
+          <h3>share with the other device</h3>
+          <p class="muted">
+            send this link to the person on the other device. it expires in <span id="pair-offer-ttl">300</span> seconds. anyone with this link before then can pair with you.
+          </p>
+          <div class="offer-box">
+            <code id="pair-offer-uri">generating…</code>
+            <button class="copy-btn" id="pair-copy-btn" title="copy">copy</button>
+          </div>
+          <p class="muted small" id="pair-offer-reach"></p>
+        </section>
+
+        <!-- View 3: accept (paste an offer they sent you) -->
+        <section class="pair-view" id="pair-view-accept" hidden>
+          <h3>accept an offer</h3>
+          <p class="muted">
+            paste the <code>unhosted://pair?…</code> link the other person sent you.
+          </p>
+          <textarea id="pair-accept-input" placeholder="unhosted://pair?addr=…&token=…" rows="3"></textarea>
+          <div class="modal-actions">
+            <button class="btn-primary" id="pair-accept-submit">pair</button>
+          </div>
+          <p class="muted small" id="pair-accept-msg"></p>
+        </section>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="/ui.js"></script>

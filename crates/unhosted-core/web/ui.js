@@ -485,6 +485,167 @@ function truncate(s, n) {
   return s.slice(0, n - 1) + "…";
 }
 
+// ---------------------------------------------------------------- pair modal
+
+const pairEls = {
+  modal: $("#pair-modal"),
+  close: $("#pair-modal-close"),
+  title: $("#pair-modal-title"),
+  viewIdentity: $("#pair-view-identity"),
+  viewOffer: $("#pair-view-offer"),
+  viewAccept: $("#pair-view-accept"),
+  myName: $("#pair-my-name"),
+  myPubkey: $("#pair-my-pubkey"),
+  myAddr: $("#pair-my-addr"),
+  offerUri: $("#pair-offer-uri"),
+  offerTtl: $("#pair-offer-ttl"),
+  offerReach: $("#pair-offer-reach"),
+  copyBtn: $("#pair-copy-btn"),
+  acceptInput: $("#pair-accept-input"),
+  acceptSubmit: $("#pair-accept-submit"),
+  acceptMsg: $("#pair-accept-msg"),
+  showOfferBtn: $("#pair-show-offer"),
+  acceptOfferBtn: $("#pair-accept-offer"),
+};
+
+let pairTickInterval = null;
+
+function openPairModal(mode) {
+  if (!pairEls.modal) return;
+  pairEls.modal.hidden = false;
+  pairEls.viewOffer.hidden = mode !== "offer";
+  pairEls.viewAccept.hidden = mode !== "accept";
+  pairEls.viewIdentity.hidden = false; // always show identity at top
+
+  pairEls.title.textContent =
+    mode === "offer" ? "show my offer" : "accept an offer";
+
+  // Fill identity.
+  fetch("/v1/identity")
+    .then((r) => r.json())
+    .then((d) => {
+      pairEls.myName.textContent = d.name || "—";
+      pairEls.myPubkey.textContent = d.pubkey || "—";
+      pairEls.myAddr.textContent = d.addr || "—";
+    })
+    .catch(() => {});
+
+  if (mode === "offer") {
+    requestOffer();
+  } else {
+    pairEls.acceptInput.value = "";
+    pairEls.acceptMsg.textContent = "";
+    pairEls.acceptInput.focus();
+  }
+}
+
+function closePairModal() {
+  pairEls.modal.hidden = true;
+  if (pairTickInterval) {
+    clearInterval(pairTickInterval);
+    pairTickInterval = null;
+  }
+}
+
+async function requestOffer() {
+  pairEls.offerUri.textContent = "generating…";
+  pairEls.offerReach.textContent = "";
+  try {
+    const r = await fetch("/v1/pair/offer", { method: "POST" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    pairEls.offerUri.textContent = d.offer;
+    let ttl = d.expires_in_seconds;
+    pairEls.offerTtl.textContent = ttl;
+    if (pairTickInterval) clearInterval(pairTickInterval);
+    pairTickInterval = setInterval(() => {
+      ttl -= 1;
+      pairEls.offerTtl.textContent = Math.max(0, ttl);
+      if (ttl <= 0) {
+        clearInterval(pairTickInterval);
+        pairTickInterval = null;
+        pairEls.offerUri.textContent = "expired — close and reopen to generate a new one.";
+      }
+    }, 1000);
+    if (d.offer.includes("relay=")) {
+      pairEls.offerReach.textContent =
+        "this offer includes your relay address — the other side can pair even if neither of you has a public IP.";
+    } else {
+      pairEls.offerReach.textContent =
+        "no relay configured — the other side must reach your address directly (LAN, public IP, or VPN).";
+    }
+  } catch (e) {
+    pairEls.offerUri.textContent = "failed: " + (e.message || "unknown");
+  }
+}
+
+async function acceptOffer() {
+  const offer = pairEls.acceptInput.value.trim();
+  if (!offer.startsWith("unhosted://pair?")) {
+    pairEls.acceptMsg.textContent = "looks invalid — expected 'unhosted://pair?…'";
+    return;
+  }
+  pairEls.acceptSubmit.disabled = true;
+  pairEls.acceptMsg.textContent = "pairing…";
+  try {
+    const r = await fetch("/v1/pair/connect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ offer }),
+    });
+    if (!r.ok) {
+      const text = await r.text();
+      throw new Error(text || `HTTP ${r.status}`);
+    }
+    const d = await r.json();
+    pairEls.acceptMsg.textContent = `paired with ${d.name} (${d.addr}).`;
+    pairEls.acceptInput.value = "";
+    await refreshStatus(); // sidebar's peers section updates
+    setTimeout(closePairModal, 1500);
+  } catch (e) {
+    pairEls.acceptMsg.textContent = "failed: " + (e.message || "unknown");
+  } finally {
+    pairEls.acceptSubmit.disabled = false;
+  }
+}
+
+if (pairEls.showOfferBtn) {
+  pairEls.showOfferBtn.addEventListener("click", () => openPairModal("offer"));
+}
+if (pairEls.acceptOfferBtn) {
+  pairEls.acceptOfferBtn.addEventListener("click", () => openPairModal("accept"));
+}
+if (pairEls.close) pairEls.close.addEventListener("click", closePairModal);
+if (pairEls.modal) {
+  pairEls.modal.addEventListener("click", (e) => {
+    if (e.target === pairEls.modal) closePairModal();
+  });
+}
+if (pairEls.acceptSubmit) pairEls.acceptSubmit.addEventListener("click", acceptOffer);
+if (pairEls.copyBtn) {
+  pairEls.copyBtn.addEventListener("click", async () => {
+    const text = pairEls.offerUri.textContent || "";
+    try {
+      await navigator.clipboard.writeText(text);
+      const orig = pairEls.copyBtn.textContent;
+      pairEls.copyBtn.textContent = "copied!";
+      setTimeout(() => (pairEls.copyBtn.textContent = orig), 1200);
+    } catch (e) {
+      // fallback: select the code element
+      const range = document.createRange();
+      range.selectNodeContents(pairEls.offerUri);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  });
+}
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && pairEls.modal && !pairEls.modal.hidden) {
+    closePairModal();
+  }
+});
+
 // ---------------------------------------------------------------- boot
 
 renderChatList();

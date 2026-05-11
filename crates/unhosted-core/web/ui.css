@@ -596,6 +596,134 @@ button:disabled:hover { border-color: var(--line-strong); }
    responsive
    ========================================================================== */
 
+/* ==========================================================================
+   pair another device — sidebar buttons + modal
+   ========================================================================== */
+
+.pair-actions { display: flex; flex-direction: column; gap: 6px; }
+.pair-btn {
+  text-align: left;
+  font-size: 13px;
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--fg);
+  border-radius: 8px;
+}
+.pair-btn:hover { border-color: var(--fg); color: var(--accent); }
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 32px;
+}
+.modal-backdrop[hidden] { display: none; }
+.modal {
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  width: 100%;
+  max-width: 520px;
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.modal-head h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.modal-close {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--mute);
+  font-size: 14px;
+}
+.modal-close:hover { color: var(--fg); background: var(--surface); border-radius: 6px; }
+
+.modal-body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+.pair-view { display: flex; flex-direction: column; gap: 12px; }
+.pair-view[hidden] { display: none; }
+.pair-view h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.pair-view .muted { color: var(--mute); font-size: 13px; margin: 0; line-height: 1.45; }
+.pair-view .small { font-size: 12px; }
+
+.kv { display: flex; flex-direction: column; gap: 3px; }
+.kv label {
+  font-size: 11px;
+  color: var(--mute);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+.kv code {
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  font-size: 12.5px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  padding: 6px 8px;
+  border-radius: 6px;
+  word-break: break-all;
+  color: var(--fg);
+}
+
+.offer-box {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+.offer-box code {
+  flex: 1;
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  font-size: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  padding: 8px 10px;
+  border-radius: 6px;
+  word-break: break-all;
+  color: var(--fg);
+  user-select: all;
+}
+.copy-btn { padding: 6px 12px; }
+
+#pair-accept-input {
+  width: 100%;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--surface);
+  color: var(--fg);
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  font-size: 12.5px;
+  resize: vertical;
+}
+#pair-accept-input:focus { outline: 0; border-color: var(--fg); }
+
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.btn-primary {
+  background: var(--fg);
+  color: var(--bg);
+  border-color: var(--fg);
+  padding: 7px 18px;
+  font-weight: 500;
+}
+.btn-primary:hover { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+
 @media (max-width: 760px) {
   .app { grid-template-columns: 1fr; }
   .sidebar {
