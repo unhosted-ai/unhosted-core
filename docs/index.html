@@ -170,6 +170,7 @@ open http://127.0.0.1:7777</code></pre>
         <span class="label">local</span>
       </div>
       <p>your devices, your network. no internet required, no payment, no rate limit.</p>
+      <a class="more" href="docs.html#modes">learn how local works →</a>
     </article>
 
     <article class="card card-trusted">
@@ -185,6 +186,7 @@ open http://127.0.0.1:7777</code></pre>
         <span class="label">trusted</span>
       </div>
       <p>friends, family, team. end-to-end encrypted. paired explicitly. no payment.</p>
+      <a class="more" href="#network">how pairing works →</a>
     </article>
 
     <article class="card card-public">
@@ -200,6 +202,7 @@ open http://127.0.0.1:7777</code></pre>
         <span class="label">public</span>
       </div>
       <p>strangers' idle gpus, paid in usdc per token. opt-in safety net. you set the ceiling.</p>
+      <a class="more" href="https://github.com/unhosted-ai/unhosted-core/blob/main/design/0001-public-mode-architecture.md">read the design →</a>
     </article>
 
     <article class="card card-honest">
@@ -209,6 +212,7 @@ open http://127.0.0.1:7777</code></pre>
         <span class="label">honest benchmarks</span>
       </div>
       <p>real numbers per hardware combo. reproducible. updated. no marketing language.</p>
+      <a class="more" href="#status">what's shipped today →</a>
     </article>
 
     <article class="card card-open">
@@ -218,6 +222,7 @@ open http://127.0.0.1:7777</code></pre>
         <span class="label">open source</span>
       </div>
       <p>agpl-3.0. read it, fork it, audit it. you can't host it as a paid service and pretend you wrote it.</p>
+      <a class="more" href="https://github.com/unhosted-ai/unhosted-core/blob/main/LICENSE">read the license →</a>
     </article>
 
     <article class="card card-private">
@@ -232,6 +237,7 @@ open http://127.0.0.1:7777</code></pre>
         <span class="label">no telemetry by default</span>
       </div>
       <p>opt-in only. plain-english explanation of exactly what gets sent, every time.</p>
+      <a class="more" href="#network">privacy details →</a>
     </article>
 
   </section>
@@ -574,7 +580,66 @@ your prompt
       <h3>download</h3>
       <a class="view-all" href="https://github.com/unhosted-ai/unhosted-core/releases">all releases</a>
     </div>
-    <p class="sub">pre-built binaries for mac, linux, raspberry pi, and windows. each tarball contains both the <code>unhosted</code> daemon and the <code>unhosted-desktop</code> gui shell (native window, no electron — tao + wry, ~12 mb). you'll also need a local model runtime — <a href="docs.html#install">llama.cpp, ollama, or lm studio</a> — the daemon detects whichever is running.</p>
+    <p class="sub">two ways to install: <strong>double-click</strong> the bundle for your os, or <strong>paste one line</strong> into a terminal. both fetch the same v0.0.5 binaries. you'll also need a local model runtime — <a href="docs.html#install">llama.cpp, ollama, or lm studio</a> — the daemon auto-detects whichever is running.</p>
+
+    <!-- easy install: auto-detects the visitor's OS and shows the right
+         primary CTA (double-click installer) + the copy-paste one-liner. -->
+    <div class="easy-install" id="easy-install" data-os="auto">
+      <div class="ei-cards">
+        <!-- macOS: prefer .dmg (released from v0.0.6+), fall back to the
+             .tar.gz containing unhosted.app. The "all releases" link in
+             the section head gives advanced users every asset. -->
+        <a class="ei-card ei-mac" href="https://github.com/unhosted-ai/unhosted-core/releases/latest">
+          <div class="ei-card-os">macos</div>
+          <div class="ei-card-action">
+            <strong>download .dmg / .app</strong>
+            <span class="ei-card-sub">open · drag to applications · double-click</span>
+          </div>
+          <div class="ei-card-meta">apple silicon · ~7&nbsp;MB</div>
+        </a>
+        <a class="ei-card ei-windows" href="https://github.com/unhosted-ai/unhosted-core/releases/latest/download/unhosted-x86_64-pc-windows-msvc.zip">
+          <div class="ei-card-os">windows</div>
+          <div class="ei-card-action">
+            <strong>download zip</strong>
+            <span class="ei-card-sub">extract · double-click <code>unhosted-desktop.exe</code></span>
+          </div>
+          <div class="ei-card-meta">x86_64 · ~6&nbsp;MB</div>
+        </a>
+        <a class="ei-card ei-linux" href="https://github.com/unhosted-ai/unhosted-core/releases/latest/download/unhosted-x86_64-unknown-linux-gnu.tar.gz">
+          <div class="ei-card-os">linux</div>
+          <div class="ei-card-action">
+            <strong>download tarball</strong>
+            <span class="ei-card-sub">extract · run <code>./unhosted-desktop</code></span>
+          </div>
+          <div class="ei-card-meta">x86_64 / arm64 · ~6&nbsp;MB</div>
+        </a>
+      </div>
+
+      <div class="ei-or"><span>or paste one line in a terminal</span></div>
+
+      <div class="ei-terminals">
+        <div class="ei-term ei-term-unix">
+          <div class="ei-term-label">
+            <span class="ei-term-os">macos / linux</span>
+            <button class="ei-copy" type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.sh | sh">copy</button>
+          </div>
+          <pre><code>curl -fsSL https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.sh | sh</code></pre>
+        </div>
+        <div class="ei-term ei-term-win">
+          <div class="ei-term-label">
+            <span class="ei-term-os">windows · powershell</span>
+            <button class="ei-copy" type="button" data-copy="irm https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.ps1 | iex">copy</button>
+          </div>
+          <pre><code>irm https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.ps1 | iex</code></pre>
+        </div>
+      </div>
+
+      <p class="ei-foot">all installers fetch the latest <code>v0.0.5</code> tarball from <a href="https://github.com/unhosted-ai/unhosted-core/releases/latest">github releases</a>. nothing leaves your machine after install — see <a href="#network">network &amp; security</a>.</p>
+    </div>
+
+    <details class="dl-advanced">
+      <summary>advanced: every per-os artifact</summary>
+      <p class="sub">if you want to pin a version, host a mirror, or grab a specific arch (raspberry pi 5, intel mac via rosetta, docker), here's every artifact the release ships:</p>
 
     <div class="download-grid">
 
@@ -716,6 +781,7 @@ curl -fsSL https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scri
         <p class="muted-note">useful for servers, ci, raspberry pi mesh nodes — anywhere a native window doesn't make sense.</p>
       </div>
     </div>
+    </details>
   </section>
 
   <hr class="divider">
@@ -912,13 +978,60 @@ $ unhosted run llama3.1:70b "..."
         <p><a href="https://github.com/unhosted-ai/unhosted-core/blob/main/LICENSE">agpl-3.0</a>. read it, fork it, audit it. <a href="https://github.com/unhosted-ai/unhosted-core/blob/main/SECURITY.md">security</a>.</p>
         <p class="badges">
           <span class="badge">pre-alpha</span>
-          <span class="badge">v0.0.4</span>
+          <span class="badge">v0.0.5</span>
         </p>
       </div>
 
     </div>
-    <div class="copy">© 2026 unhosted</div>
+    <div class="copy">
+      © 2026 unhosted ·
+      built by <a href="https://sinhaankur.com" target="_blank" rel="noopener">sinhaankur.com</a> ·
+      open-source pet project, kept light on purpose
+    </div>
   </footer>
+
+  <script>
+    // OS auto-detect for the easy-install panel. Highlights the card
+    // matching navigator.platform / userAgentData so the visitor sees
+    // "their" download as the primary one. Falls back to no-op when
+    // the API isn't available (which is fine — every card is reachable).
+    (function () {
+      var panel = document.getElementById("easy-install");
+      if (!panel) return;
+      var ua = (navigator.userAgent || "").toLowerCase();
+      var os = "unknown";
+      if (/mac|darwin/.test(ua)) os = "mac";
+      else if (/win/.test(ua)) os = "windows";
+      else if (/linux|x11/.test(ua)) os = "linux";
+      panel.setAttribute("data-os", os);
+    })();
+
+    // Copy buttons in the terminal blocks.
+    document.querySelectorAll(".ei-copy").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var text = btn.getAttribute("data-copy") || "";
+        var done = function () {
+          var orig = btn.textContent;
+          btn.textContent = "copied";
+          btn.classList.add("copied");
+          setTimeout(function () { btn.textContent = orig; btn.classList.remove("copied"); }, 1200);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(done).catch(function () {
+            // fallback for permission-denied / file:// — select the sibling <pre>.
+            var pre = btn.parentElement && btn.parentElement.nextElementSibling;
+            if (pre) {
+              var range = document.createRange();
+              range.selectNodeContents(pre);
+              var sel = window.getSelection();
+              sel.removeAllRanges();
+              sel.addRange(range);
+            }
+          });
+        }
+      });
+    });
+  </script>
 
 </body>
 </html>

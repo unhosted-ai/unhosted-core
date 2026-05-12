@@ -106,6 +106,15 @@ jobs:
           tar -czf "$APP_ARCHIVE" -C dist unhosted.app
           shasum -a 256 "$APP_ARCHIVE" > "${APP_ARCHIVE}.sha256"
 
+          # Also produce a .dmg — the actual "double-click installer"
+          # experience users expect on macOS. Same .app inside, just
+          # wrapped in a mountable disk image with a Drag-To-Applications
+          # shortcut. hdiutil is built into macOS, no extra deps.
+          bash scripts/build-dmg.sh
+          DMG_ASSET="unhosted-${{ matrix.target }}.dmg"
+          mv dist/unhosted.dmg "$DMG_ASSET"
+          shasum -a 256 "$DMG_ASSET" > "${DMG_ASSET}.sha256"
+
       - name: Stage release artifact (windows)
         if: matrix.kind == 'windows'
         shell: pwsh
@@ -126,6 +135,8 @@ jobs:
             unhosted-${{ matrix.target }}.${{ matrix.archive }}.sha256
             unhosted-macos-app-${{ matrix.target }}.tar.gz
             unhosted-macos-app-${{ matrix.target }}.tar.gz.sha256
+            unhosted-${{ matrix.target }}.dmg
+            unhosted-${{ matrix.target }}.dmg.sha256
           if-no-files-found: ignore
 
   release:

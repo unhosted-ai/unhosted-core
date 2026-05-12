@@ -132,6 +132,71 @@ function paintTheme(btn) {
 function safeSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 function safeRemove(k) { try { localStorage.removeItem(k); } catch (e) {} }
 
+// ---------------------------------------------------------------- icons
+//
+// Inline SVG set. Tiny, theme-aware (stroke=currentColor), and shared
+// across the UI. Use icon("name") to get an SVG string; place it inside
+// any element and the surrounding color will paint it.
+
+const ICONS = {
+  plus:    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><line x1="8" y1="3" x2="8" y2="13"/><line x1="3" y1="8" x2="13" y2="8"/></svg>',
+  trash:   '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h10"/><path d="M5 4V3a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 11 3v1"/><path d="M4.5 4l.5 9a1.5 1.5 0 0 0 1.5 1.5h3A1.5 1.5 0 0 0 11 13l.5-9"/><line x1="7" y1="7" x2="7" y2="12"/><line x1="9" y1="7" x2="9" y2="12"/></svg>',
+  send:    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2L7 9"/><path d="M14 2L9.5 14.5L7 9L1.5 6.5L14 2Z"/></svg>',
+  copy:    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M3 11V3.5A1.5 1.5 0 0 1 4.5 2H11"/></svg>',
+  check:   '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5L6.5 12L13 4.5"/></svg>',
+  x:       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/></svg>',
+  edit:    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 2.5L13.5 5L5 13.5H2.5V11L11 2.5Z"/></svg>',
+  device:  '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="11" height="8" rx="1"/><line x1="5.5" y1="14" x2="10.5" y2="14"/><line x1="8" y1="11" x2="8" y2="14"/></svg>',
+  qr:      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><rect x="2" y="2" width="4.5" height="4.5"/><rect x="9.5" y="2" width="4.5" height="4.5"/><rect x="2" y="9.5" width="4.5" height="4.5"/><rect x="9.5" y="9.5" width="2" height="2"/><rect x="12.5" y="12.5" width="1.5" height="1.5"/></svg>',
+  link:    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 9.5L9 7.5"/><path d="M9.5 4.5L11 3a2.5 2.5 0 0 1 3.5 3.5L13 8"/><path d="M6.5 11.5L5 13a2.5 2.5 0 0 1-3.5-3.5L3 8"/></svg>',
+  unlink:  '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 4.5L11 3a2.5 2.5 0 0 1 3.5 3.5L13 8"/><path d="M6.5 11.5L5 13a2.5 2.5 0 0 1-3.5-3.5L3 8"/><line x1="2" y1="2" x2="14" y2="14"/></svg>',
+  chat:    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4A1.5 1.5 0 0 1 4 2.5h8A1.5 1.5 0 0 1 13.5 4v6A1.5 1.5 0 0 1 12 11.5H6L3 14.5V11.5A1.5 1.5 0 0 1 1.5 10V4"/></svg>',
+  network: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="3" r="1.5"/><circle cx="3" cy="12" r="1.5"/><circle cx="13" cy="12" r="1.5"/><line x1="8" y1="4.5" x2="3" y2="10.5"/><line x1="8" y1="4.5" x2="13" y2="10.5"/></svg>',
+  globe:   '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><ellipse cx="8" cy="8" rx="3" ry="6"/><line x1="2" y1="8" x2="14" y2="8"/></svg>',
+  shield:  '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.5L2.5 4v5c0 3 2.5 5 5.5 5.5C11 14 13.5 12 13.5 9V4L8 1.5z"/></svg>',
+  sun:     '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="3"/><line x1="8" y1="1.5" x2="8" y2="3"/><line x1="8" y1="13" x2="8" y2="14.5"/><line x1="1.5" y1="8" x2="3" y2="8"/><line x1="13" y1="8" x2="14.5" y2="8"/><line x1="3.5" y1="3.5" x2="4.5" y2="4.5"/><line x1="11.5" y1="11.5" x2="12.5" y2="12.5"/><line x1="3.5" y1="12.5" x2="4.5" y2="11.5"/><line x1="11.5" y1="4.5" x2="12.5" y2="3.5"/></svg>',
+  moon:    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 9.5A6 6 0 0 1 6.5 3a4.5 4.5 0 1 0 6.5 6.5z"/></svg>',
+  auto:    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 2.5v11" stroke-dasharray="0"/><path d="M8 2.5a5.5 5.5 0 0 1 0 11z" fill="currentColor"/></svg>',
+  refresh: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 4.5h4v4"/><path d="M2 8a6 6 0 0 1 10-4.5L14 5"/><path d="M14 11.5h-4v-4"/><path d="M14 8a6 6 0 0 1-10 4.5L2 11"/></svg>',
+  brand:   '<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><circle cx="50" cy="50" r="44" stroke-dasharray="2 6"/><circle cx="50" cy="50" r="28"/><circle cx="50" cy="50" r="12" fill="currentColor" stroke="none"/></svg>',
+};
+
+function icon(name) { return ICONS[name] || ""; }
+
+// ---------------------------------------------------------------- chat grouping
+//
+// Chats are kept newest-first in store.chats. The sidebar groups them
+// into time buckets to make a long list scannable. The buckets are
+// computed from the chat's most-recent activity, not its creation time
+// — a week-old conversation that got a new message today is "today".
+
+function chatActivityTs(chat) {
+  // Most recent activity timestamp. Falls back to createdAt for old
+  // chats persisted before we tracked message timestamps.
+  const last = chat.messages && chat.messages.length > 0 ? chat.messages[chat.messages.length - 1] : null;
+  return (last && last.ts) || chat.updatedAt || chat.createdAt || 0;
+}
+
+function startOfDay(ts) {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function chatGroup(chat) {
+  const now = Date.now();
+  const todayStart = startOfDay(now);
+  const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
+  const weekStart = todayStart - 6 * 24 * 60 * 60 * 1000;
+  const monthStart = todayStart - 29 * 24 * 60 * 60 * 1000;
+  const ts = chatActivityTs(chat);
+  if (ts >= todayStart) return { key: "today", label: "today", rank: 0 };
+  if (ts >= yesterdayStart) return { key: "yesterday", label: "yesterday", rank: 1 };
+  if (ts >= weekStart) return { key: "week", label: "earlier this week", rank: 2 };
+  if (ts >= monthStart) return { key: "month", label: "earlier this month", rank: 3 };
+  return { key: "older", label: "older", rank: 4 };
+}
+
 // ---------------------------------------------------------------- elements
 
 const els = {
@@ -226,6 +291,23 @@ function switchToChat(id) {
   renderActiveChat();
 }
 
+function deleteChat(id) {
+  const idx = store.chats.findIndex((c) => c.id === id);
+  if (idx < 0) return;
+  const chat = store.chats[idx];
+  const label = chat.title && chat.title !== "new chat" ? `"${truncate(chat.title, 32)}"` : "this chat";
+  // Minimal confirmation: a chat is reversible only via the trash bin,
+  // and we don't have one. So we ask once — yes/no is the trash bin.
+  if (!confirm(`delete ${label}? this can't be undone.`)) return;
+  store.chats.splice(idx, 1);
+  if (store.activeId === id) {
+    store.activeId = store.chats.length > 0 ? store.chats[0].id : null;
+  }
+  saveStore();
+  renderChatList();
+  renderActiveChat();
+}
+
 // ---------------------------------------------------------------- rendering
 
 function renderChatList() {
@@ -237,14 +319,53 @@ function renderChatList() {
     els.chatList.append(li);
     return;
   }
+
+  // Group by recency. store.chats is already newest-first, so we walk
+  // in order and emit a group header each time the bucket changes.
+  let currentGroup = null;
   for (const chat of store.chats) {
-    const li = document.createElement("li");
-    li.className = "chat-item" + (chat.id === store.activeId ? " active" : "");
-    li.dataset.chatId = chat.id;
-    li.textContent = chat.title || "new chat";
-    li.addEventListener("click", () => switchToChat(chat.id));
-    els.chatList.append(li);
+    const group = chatGroup(chat);
+    if (currentGroup !== group.key) {
+      currentGroup = group.key;
+      const header = document.createElement("li");
+      header.className = "chat-group-head";
+      header.textContent = group.label;
+      els.chatList.append(header);
+    }
+    els.chatList.append(buildChatItem(chat));
   }
+}
+
+function buildChatItem(chat) {
+  const li = document.createElement("li");
+  li.className = "chat-item" + (chat.id === store.activeId ? " active" : "");
+  li.dataset.chatId = chat.id;
+
+  // Left: brand glyph + title, fills the row, switches chat on click.
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "chat-item-main";
+  button.innerHTML =
+    '<span class="chat-icon" aria-hidden="true">' + icon("chat") + "</span>" +
+    '<span class="chat-title"></span>';
+  button.querySelector(".chat-title").textContent = chat.title || "new chat";
+  button.addEventListener("click", () => switchToChat(chat.id));
+  li.append(button);
+
+  // Right: trash icon, hover-revealed, deletes the chat after confirm.
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "chat-item-del";
+  del.title = "delete chat";
+  del.setAttribute("aria-label", "delete chat");
+  del.innerHTML = icon("trash");
+  del.addEventListener("click", (e) => {
+    e.stopPropagation();
+    deleteChat(chat.id);
+  });
+  li.append(del);
+
+  return li;
 }
 
 function renderActiveChat() {
@@ -383,8 +504,9 @@ function renderStatus(s) {
 
       const unpair = document.createElement("button");
       unpair.className = "unpair";
-      unpair.textContent = "unpair";
       unpair.title = `unpair ${peer.name}`;
+      unpair.setAttribute("aria-label", `unpair ${peer.name}`);
+      unpair.innerHTML = icon("unlink") + '<span class="unpair-label">unpair</span>';
       unpair.addEventListener("click", () => unpairPeer(peer.name));
 
       li.append(left, unpair);
@@ -418,7 +540,9 @@ function renderStatus(s) {
 
         const pair = document.createElement("button");
         pair.className = "pair";
-        pair.textContent = "pair";
+        pair.title = `pair with ${d.name}`;
+        pair.setAttribute("aria-label", `pair with ${d.name}`);
+        pair.innerHTML = icon("link") + '<span class="pair-label">pair</span>';
         pair.addEventListener("click", () => pairPeer(d));
 
         li.append(left, pair);
@@ -496,11 +620,21 @@ els.composer.addEventListener("submit", async (e) => {
   if (!prompt || streaming) return;
 
   const chat = ensureActiveChat();
-  const userMsg = { role: "user", text: prompt };
+  const now = Date.now();
+  const userMsg = { role: "user", text: prompt, ts: now };
   chat.messages.push(userMsg);
+  chat.updatedAt = now;
   if (chat.messages.length === 1) {
     chat.title = truncate(prompt, 48);
     els.topic.textContent = chat.title;
+  }
+  // Move the active chat to the top of the list — the recency groups
+  // ("today" etc.) only mean something if the list reflects activity
+  // order, not creation order.
+  const idx = store.chats.findIndex((c) => c.id === chat.id);
+  if (idx > 0) {
+    store.chats.splice(idx, 1);
+    store.chats.unshift(chat);
   }
   saveStore();
   renderChatList();
@@ -511,7 +645,7 @@ els.composer.addEventListener("submit", async (e) => {
   els.prompt.value = "";
   autoresize();
 
-  const assistantMsg = { role: "assistant", text: "" };
+  const assistantMsg = { role: "assistant", text: "", ts: Date.now() };
   chat.messages.push(assistantMsg);
   const assistantNode = renderMessage(assistantMsg);
   assistantNode.classList.add("streaming");
@@ -888,16 +1022,19 @@ if (pairEls.codeInput) {
   });
 }
 if (pairEls.copyBtn) {
+  // Cache the original innerHTML once so the success-flash can restore
+  // it exactly — we now have an icon + label, so swapping textContent
+  // would destroy the SVG.
+  const copyBtnOrig = pairEls.copyBtn.innerHTML;
   pairEls.copyBtn.addEventListener("click", async () => {
     const text = pairEls.offerUri.textContent || "";
     try {
       await navigator.clipboard.writeText(text);
       pairEls.copyBtn.classList.add("copy-success");
-      const orig = pairEls.copyBtn.textContent;
-      pairEls.copyBtn.textContent = "✓ copied";
+      pairEls.copyBtn.innerHTML = icon("check") + '<span>copied</span>';
       setTimeout(() => {
         pairEls.copyBtn.classList.remove("copy-success");
-        pairEls.copyBtn.textContent = orig;
+        pairEls.copyBtn.innerHTML = copyBtnOrig;
       }, 1200);
     } catch (e) {
       // fallback: select the code element

@@ -1965,3 +1965,573 @@ details a { color: var(--accent); }
   .doc-footer { flex-direction: column; gap: 12px; align-items: flex-start; }
   .trust-diagram { width: 220px; height: 220px; }
 }
+
+/* ==========================================================================
+   layout normalization — placed last so it overrides earlier per-section
+   rules. The page has many sections written one at a time; this block
+   gives them a single vertical rhythm and a consistent section-head
+   pattern. Without it, the eye does what users have described as
+   "going left and right" — paddings vary from 0 to 80px top and from
+   16 to 96px bottom, and section heads alternate between left+right
+   layouts and stacked layouts.
+   ========================================================================== */
+
+:root {
+  --section-pad-top: 72px;
+  --section-pad-bot: 24px;
+  --section-rhythm: 16px; /* gap between head, sub, and content */
+}
+
+/* shared vertical rhythm */
+.quickstart,
+.modes-section,
+.howitworks,
+.status,
+.netsec,
+.download,
+.backend-use,
+.milestones,
+.faq {
+  padding-top: var(--section-pad-top);
+  padding-bottom: var(--section-pad-bot);
+}
+
+/* the pitch has a giant wordmark above it; keep more breathing room */
+.pitch {
+  padding-top: 56px;
+  padding-bottom: 56px;
+}
+
+/* divider treatment — let the divider carry the visual break instead
+   of multiple sections all trying to pad themselves. */
+hr.divider {
+  margin: 8px var(--pad);
+  border-top-color: var(--line);
+  opacity: 0.6;
+}
+
+/* anchor target offset — scrolling to #how etc. should NOT land flush
+   against the divider above. */
+#modes,
+#how,
+#status,
+#network,
+#download,
+#backend,
+#quickstart,
+#faq,
+#desktop {
+  scroll-margin-top: 24px;
+}
+
+/* unified section-head pattern. All sections use:
+     <div class="head">
+       <h3>title</h3>
+       <a class="view-all" href="...">link</a>
+     </div>
+   On wide screens the link sits to the right of the title. On narrow
+   screens it stacks under the title (less visual zigzag). The title
+   weight and color are unified — earlier rules set wildly different
+   sizes (22px vs 20px) which is what makes the page feel chaotic. */
+.quickstart .head,
+.modes-section .head,
+.howitworks .head,
+.status .head,
+.netsec .head,
+.download .head,
+.backend-use .head,
+.milestones .head,
+.faq .head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px 18px;
+  margin-bottom: 14px;
+}
+.quickstart .head h3,
+.modes-section .head h3,
+.howitworks .head h3,
+.status .head h3,
+.netsec .head h3,
+.download .head h3,
+.backend-use .head h3,
+.milestones .head h3,
+.faq .head h3 {
+  font-size: clamp(22px, 2.2vw, 28px);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  margin: 0;
+  flex: 0 1 auto;
+}
+.quickstart .head .view-all,
+.modes-section .head .view-all,
+.howitworks .head .view-all,
+.status .head .view-all,
+.netsec .head .view-all,
+.download .head .view-all,
+.backend-use .head .view-all,
+.milestones .head .view-all,
+.faq .head .view-all {
+  margin-left: auto;
+  font-size: 13.5px;
+  color: var(--mute);
+  text-decoration: none;
+  letter-spacing: 0.02em;
+  opacity: 0.8;
+  transition: color .15s ease, opacity .15s ease;
+}
+.quickstart .head .view-all::after,
+.modes-section .head .view-all::after,
+.howitworks .head .view-all::after,
+.status .head .view-all::after,
+.netsec .head .view-all::after,
+.download .head .view-all::after,
+.backend-use .head .view-all::after,
+.milestones .head .view-all::after,
+.faq .head .view-all::after {
+  content: " →";
+  display: inline-block;
+  margin-left: 4px;
+  transition: transform .15s ease;
+}
+.quickstart .head .view-all:hover,
+.modes-section .head .view-all:hover,
+.howitworks .head .view-all:hover,
+.status .head .view-all:hover,
+.netsec .head .view-all:hover,
+.download .head .view-all:hover,
+.backend-use .head .view-all:hover,
+.milestones .head .view-all:hover,
+.faq .head .view-all:hover {
+  color: var(--accent);
+  opacity: 1;
+}
+.quickstart .head .view-all:hover::after,
+.modes-section .head .view-all:hover::after,
+.howitworks .head .view-all:hover::after,
+.status .head .view-all:hover::after,
+.netsec .head .view-all:hover::after,
+.download .head .view-all:hover::after,
+.backend-use .head .view-all:hover::after,
+.milestones .head .view-all:hover::after,
+.faq .head .view-all:hover::after {
+  transform: translateX(2px);
+}
+
+/* shared sub-paragraph rhythm — these floated around in size and color
+   across sections, contributing to the "every section looks different"
+   feeling. */
+.section-sub,
+.quickstart .sub,
+.netsec .sub,
+.download .sub,
+.desktop-install .sub,
+.howitworks > .section-sub {
+  font-size: 15.5px;
+  line-height: 1.6;
+  color: var(--fg);
+  max-width: 760px;
+  margin: 0 0 28px;
+}
+
+/* tame ASCII diagrams — they were pushing the page wider than the
+   viewport on narrow screens. Smaller mono font, contained scroll. */
+.hiw-diagram,
+.netsec-diagram {
+  font-size: 11.5px;
+  line-height: 1.5;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+  padding-bottom: 4px;
+}
+.hiw-figure,
+.netsec-figure {
+  max-width: 100%;
+  overflow: hidden;
+}
+
+/* how-it-works numbered blocks — the 80px left column was pushing the
+   content right and creating the "drifting right" sensation. Flatten
+   on smaller screens; tighten the column on wider ones. */
+.hiw-block {
+  grid-template-columns: 56px 1fr;
+  gap: 20px;
+  padding: 32px 0;
+}
+@media (max-width: 760px) {
+  .hiw-block {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 24px 0;
+  }
+  .hiw-num {
+    padding-top: 0;
+    font-size: 12px;
+  }
+}
+
+/* pitch hardware sidebar — was right-aligned at 280px which pulled the
+   eye right after the lede. Make it sit lower, smaller, and ALIGN
+   with the lede on wide screens so the page reads as a single column
+   with a footnote, not two competing columns. */
+.pitch {
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 56px;
+}
+.lede-side {
+  align-self: start;
+  padding-top: 8px;
+  font-size: 14.5px;
+}
+.lede-side .side-head { font-size: 11.5px; margin-bottom: 6px; }
+.lede-side .hardware-list { font-size: 14.5px; line-height: 1.7; }
+.lede-side .runtime-list { font-size: 14px; line-height: 1.7; }
+.lede-side .side-note { font-size: 12.5px; }
+
+/* hero CTA buttons — center vertically with the install one-liner and
+   ensure they don't overflow the lede column on medium widths. */
+.hero-cta { flex-wrap: wrap; row-gap: 10px; }
+.hero-cta .btn { min-height: 40px; }
+.hero-oneliner {
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 12px;
+}
+.hero-oneliner pre { max-width: 100%; }
+
+/* mode cards — make each one clickable into docs. The user wanted
+   "each click explaining". Keep the original card content visible,
+   add a "learn more →" affordance that appears on hover and is
+   always-visible on touch / keyboard focus. */
+.bento .card {
+  position: relative;
+  cursor: default;
+}
+.bento .card .more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12.5px;
+  color: var(--mute);
+  text-decoration: none;
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity .15s ease, transform .15s ease, color .15s ease;
+  margin-top: auto;
+  padding-top: 8px;
+  letter-spacing: 0.02em;
+  font-weight: 500;
+  align-self: flex-start;
+}
+.bento .card:hover .more,
+.bento .card:focus-within .more {
+  opacity: 1;
+  transform: translateY(0);
+  color: var(--accent);
+}
+.bento .card-local .more { color: rgba(245, 245, 240, 0.6); }
+.bento .card-local:hover .more,
+.bento .card-local:focus-within .more { color: var(--bg); }
+@media (hover: none) {
+  /* touch devices: always visible (no hover to reveal it). */
+  .bento .card .more { opacity: 1; transform: none; }
+}
+
+/* responsive layout normalization */
+@media (max-width: 980px) {
+  .pitch { grid-template-columns: 1fr; gap: 32px; }
+  .lede-side { padding-top: 0; }
+  .lede-side .side-head,
+  .lede-side .hardware-list,
+  .lede-side .runtime-list,
+  .lede-side .side-note { text-align: left; }
+  .hero-oneliner { grid-template-columns: 1fr; gap: 6px; }
+  .hero-cta { gap: 8px; }
+}
+@media (max-width: 700px) {
+  :root {
+    --section-pad-top: 48px;
+    --section-pad-bot: 12px;
+  }
+  hr.divider { margin: 4px var(--pad); }
+}
+
+/* ==========================================================================
+   easy install — OS-aware primary CTA + copy-paste one-liners.
+   Three cards (Mac / Windows / Linux) all visible; the JS sets
+   data-os on the wrapper, and CSS promotes the matching card.
+   ========================================================================== */
+
+.easy-install {
+  margin: 0 0 28px;
+}
+.ei-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 22px;
+}
+.ei-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px 22px 20px;
+  border: 1px solid var(--card-line);
+  border-radius: 14px;
+  background: var(--card);
+  text-decoration: none;
+  color: var(--fg);
+  transition: transform .15s ease, border-color .15s ease, background .15s ease;
+  position: relative;
+  min-height: 150px;
+}
+.ei-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--fg);
+  color: var(--fg);
+  text-decoration: none;
+}
+.ei-card-os {
+  font-size: 12px;
+  color: var(--mute);
+  letter-spacing: 0.06em;
+  font-weight: 500;
+}
+.ei-card-action {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ei-card-action strong {
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+}
+.ei-card-sub {
+  font-size: 13px;
+  color: var(--mute);
+  line-height: 1.45;
+}
+.ei-card-sub code {
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  background: rgba(10, 10, 10, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.ei-card-meta {
+  margin-top: auto;
+  font-size: 11.5px;
+  color: var(--mute);
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  letter-spacing: 0.02em;
+}
+
+/* OS-promoted card: bold border, accent strong text, "your os" badge */
+.easy-install[data-os="mac"]     .ei-mac,
+.easy-install[data-os="windows"] .ei-windows,
+.easy-install[data-os="linux"]   .ei-linux {
+  background: var(--fg);
+  color: var(--bg);
+  border-color: var(--fg);
+}
+.easy-install[data-os="mac"]     .ei-mac     .ei-card-os,
+.easy-install[data-os="windows"] .ei-windows .ei-card-os,
+.easy-install[data-os="linux"]   .ei-linux   .ei-card-os {
+  color: rgba(245, 245, 240, 0.7);
+}
+.easy-install[data-os="mac"]     .ei-mac     .ei-card-action strong,
+.easy-install[data-os="windows"] .ei-windows .ei-card-action strong,
+.easy-install[data-os="linux"]   .ei-linux   .ei-card-action strong {
+  color: var(--bg);
+}
+.easy-install[data-os="mac"]     .ei-mac     .ei-card-sub,
+.easy-install[data-os="windows"] .ei-windows .ei-card-sub,
+.easy-install[data-os="linux"]   .ei-linux   .ei-card-sub,
+.easy-install[data-os="mac"]     .ei-mac     .ei-card-meta,
+.easy-install[data-os="windows"] .ei-windows .ei-card-meta,
+.easy-install[data-os="linux"]   .ei-linux   .ei-card-meta {
+  color: rgba(245, 245, 240, 0.62);
+}
+.easy-install[data-os="mac"]     .ei-mac     .ei-card-sub code,
+.easy-install[data-os="windows"] .ei-windows .ei-card-sub code,
+.easy-install[data-os="linux"]   .ei-linux   .ei-card-sub code {
+  background: rgba(245, 245, 240, 0.12);
+  color: var(--bg);
+}
+.easy-install[data-os="mac"]     .ei-mac::after,
+.easy-install[data-os="windows"] .ei-windows::after,
+.easy-install[data-os="linux"]   .ei-linux::after {
+  content: "your os";
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* "or paste one line in a terminal" divider */
+.ei-or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  color: var(--mute);
+  letter-spacing: 0.02em;
+}
+.ei-or::before,
+.ei-or::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--card-line);
+}
+
+/* paste-this-line panels */
+.ei-terminals {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.ei-term {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ei-term-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.ei-term-os {
+  font-size: 11.5px;
+  color: var(--mute);
+  letter-spacing: 0.04em;
+}
+.ei-copy {
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--mute);
+  background: transparent;
+  border: 1px solid var(--card-line);
+  border-radius: 6px;
+  padding: 2px 9px;
+  cursor: pointer;
+  transition: border-color .12s ease, color .12s ease;
+  letter-spacing: 0.04em;
+}
+.ei-copy:hover { border-color: var(--fg); color: var(--fg); }
+.ei-copy.copied { border-color: var(--accent); color: var(--accent); }
+.ei-term pre {
+  margin: 0;
+  background: var(--fg);
+  color: var(--bg);
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  overflow-x: auto;
+}
+.ei-term code { font-family: inherit; }
+.ei-foot {
+  font-size: 13px;
+  color: var(--mute);
+  margin: 0;
+  line-height: 1.55;
+}
+.ei-foot a { color: var(--fg); text-decoration-color: var(--mute); }
+.ei-foot a:hover { color: var(--accent); }
+.ei-foot code {
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  font-size: 12px;
+  background: rgba(10, 10, 10, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* advanced download fold — hides the 6-card matrix and per-OS desktop
+   install behind a summary, so the easy-install panel above can be
+   the primary thing the visitor sees. */
+.dl-advanced {
+  border: 1px solid var(--card-line);
+  border-radius: 12px;
+  padding: 14px 18px;
+  background: var(--card);
+  margin-top: 8px;
+}
+.dl-advanced[open] {
+  padding-bottom: 22px;
+}
+.dl-advanced summary {
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  list-style: none;
+  position: relative;
+  padding-right: 24px;
+  color: var(--fg);
+}
+.dl-advanced summary::-webkit-details-marker { display: none; }
+.dl-advanced summary::after {
+  content: "+";
+  position: absolute;
+  right: 0;
+  top: -2px;
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  font-size: 16px;
+  color: var(--mute);
+  font-weight: 400;
+}
+.dl-advanced[open] summary::after { content: "−"; }
+.dl-advanced > .sub {
+  margin-top: 14px;
+  font-size: 14px;
+  color: var(--mute);
+}
+
+/* dark-mode code background overrides for the new blocks */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .ei-card-sub code,
+  :root:not([data-theme="light"]) .ei-foot code {
+    background: rgba(245, 245, 240, 0.08);
+    color: var(--fg);
+  }
+}
+:root[data-theme="dark"] .ei-card-sub code,
+:root[data-theme="dark"] .ei-foot code {
+  background: rgba(245, 245, 240, 0.08);
+  color: var(--fg);
+}
+
+@media (max-width: 760px) {
+  .ei-cards { grid-template-columns: 1fr; }
+  .ei-terminals { grid-template-columns: 1fr; }
+  .ei-card { min-height: 0; }
+}
+
+/* ==========================================================================
+   footer — lighter, with credit. Keep it modest; this is a pet project.
+   ========================================================================== */
+
+.footer .copy {
+  font-size: 13px;
+  color: var(--mute);
+  margin-top: 56px;
+  line-height: 1.6;
+}
+.footer .copy a {
+  color: var(--fg);
+  text-decoration: underline;
+  text-decoration-color: var(--mute);
+  text-underline-offset: 3px;
+}
+.footer .copy a:hover { color: var(--accent); text-decoration-color: var(--accent); }
