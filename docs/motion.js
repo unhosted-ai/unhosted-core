@@ -29,6 +29,7 @@ if (prefersReduced) {
 } else {
   runEntrance();
   runScrollIn();
+  runQuickstartRail();
 }
 
 function revealAll() {
@@ -127,4 +128,75 @@ function safeAnimate(selector, keyframes, options) {
   const els = document.querySelectorAll(selector);
   if (els.length === 0) return;
   animate(els, keyframes, options);
+}
+
+/* Quickstart progression — the "sliding 1-2-3" feel.
+   When .quickstart scrolls into view:
+     1. the rail fill grows from 0% to 100% width over 900ms
+     2. the three numbered dots pulse in sequence as the fill passes them
+     3. the three step cards stagger-fade in from below.
+   Each .qs-step also gets a hover handler that emphasizes the matching
+   dot, so the rail stays the index of focus while you read. */
+function runQuickstartRail() {
+  const rail = document.querySelector(".qs-rail");
+  const fill = document.querySelector("[data-qs-fill]");
+  const dots = Array.from(document.querySelectorAll(".qs-rail-dot"));
+  const steps = Array.from(document.querySelectorAll(".qs-step"));
+  if (!rail || !fill || dots.length === 0) return;
+
+  // Hover wiring stays available regardless of motion-reduced.
+  steps.forEach((step, i) => {
+    const dot = dots[i];
+    if (!dot) return;
+    const focus = () => dots.forEach((d, j) => d.classList.toggle("is-active", j === i));
+    const blur = () => dots.forEach((d) => d.classList.remove("is-active"));
+    step.addEventListener("mouseenter", focus);
+    step.addEventListener("mouseleave", blur);
+    step.addEventListener("focusin", focus);
+    step.addEventListener("focusout", blur);
+    dot.addEventListener("mouseenter", () =>
+      step.scrollIntoView({ block: "nearest", behavior: "smooth" }),
+    );
+  });
+
+  // Entrance animation: fill the rail, light the dots in sequence,
+  // stagger the cards. Triggered on first viewport entry.
+  inView(
+    rail,
+    () => {
+      animate(
+        fill,
+        { width: ["0%", "100%"] },
+        { duration: 0.95, ease: [0.22, 1, 0.36, 1] },
+      );
+
+      // each dot lights up as the fill sweeps past it. The thresholds
+      // (0%, 50%, 100%) align with the three rail positions.
+      const stops = [0, 0.5, 1];
+      dots.forEach((dot, i) => {
+        animate(
+          dot,
+          { opacity: [0.4, 1] },
+          { duration: 0.3, delay: stops[i] * 0.9, ease: "linear" },
+        );
+        // small pulse to mark "reached this step"
+        const numEl = dot.querySelector("span");
+        if (numEl) {
+          animate(
+            numEl,
+            { transform: ["scale(0.85)", "scale(1.08)", "scale(1)"] },
+            { duration: 0.45, delay: stops[i] * 0.9, ease: [0.34, 1.56, 0.64, 1] },
+          );
+        }
+      });
+
+      // cards stagger in from below as the rail lights them up.
+      animate(
+        steps,
+        { opacity: [0, 1], transform: ["translateY(14px)", "translateY(0)"] },
+        { duration: 0.5, delay: stagger(0.18, { start: 0.15 }), ease: [0.22, 1, 0.36, 1] },
+      );
+    },
+    { amount: 0.3 },
+  );
 }

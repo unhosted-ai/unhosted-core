@@ -112,37 +112,54 @@
     </aside>
   </section>
 
-  <!-- quickstart strip: three commands to get inference flowing -->
+  <!-- quickstart: three commands to get inference flowing.
+       A progress strip at the top connects the three steps so the
+       flow reads as 01 → 02 → 03 instead of three siblings. Motion
+       animates the connector line growing through the dots when the
+       section scrolls into view, and the cards stagger in below. -->
   <section class="quickstart" id="quickstart">
     <div class="head">
       <h3>quickstart</h3>
       <a class="view-all" href="docs.html#quickstart">long version with screenshots</a>
     </div>
+
+    <!-- timeline strip: three numbered dots connected by a line.
+         data-qs-line is animated to grow from 0 to 100% by motion.js. -->
+    <div class="qs-rail" aria-hidden="true">
+      <div class="qs-rail-track">
+        <div class="qs-rail-fill" data-qs-fill></div>
+      </div>
+      <div class="qs-rail-dots">
+        <a href="#qs-1" class="qs-rail-dot" data-qs-dot="1"><span>01</span><em>install</em></a>
+        <a href="#qs-2" class="qs-rail-dot" data-qs-dot="2"><span>02</span><em>backend</em></a>
+        <a href="#qs-3" class="qs-rail-dot" data-qs-dot="3"><span>03</span><em>serve</em></a>
+      </div>
+    </div>
+
     <ol class="qs-steps">
-      <li class="qs-step">
+      <li class="qs-step" id="qs-1">
         <div class="qs-num">01</div>
         <h4>install unhosted</h4>
-        <p>one binary, ~12&nbsp;mb. cli daemon + native desktop shell in the same tarball.</p>
+        <p>one binary, ~12&nbsp;mb. cli daemon + native desktop shell.</p>
         <pre><code>curl -fsSL https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.sh | sh</code></pre>
         <p class="qs-note">windows: <code>irm …/install.ps1 | iex</code>. or <a href="#download">grab the tarball</a>.</p>
       </li>
-      <li class="qs-step">
+      <li class="qs-step" id="qs-2">
         <div class="qs-num">02</div>
         <h4>start a model runtime</h4>
-        <p>pick one — all three speak the same openai-compatible api.</p>
-        <pre><code>brew install llama.cpp
-unhosted pull llama3.2:3b
-llama-server -m ~/.cache/unhosted/models/llama3.2-3b.gguf --port 8080 -ngl 99</code></pre>
-        <p class="qs-note">already running ollama or lm studio? skip this step — <code>unhosted doctor</code> will find them.</p>
+        <p>pick one. all three speak the same openai-compatible api.</p>
+        <pre><code>brew install llama.cpp &amp;&amp; \
+unhosted pull llama3.2:3b</code></pre>
+        <p class="qs-note">already running ollama or lm studio? <code>unhosted doctor</code> finds them.</p>
       </li>
-      <li class="qs-step">
+      <li class="qs-step" id="qs-3">
         <div class="qs-num">03</div>
         <h4>serve + chat</h4>
-        <p>daemon on <code>:7777</code>, web ui in your browser, optional native window on top.</p>
+        <p>daemon on <code>:7777</code>, ui in your browser.</p>
         <pre><code>unhosted serve
 # in another shell:
 open http://127.0.0.1:7777</code></pre>
-        <p class="qs-note">other devices on the same wifi discover this node over mdns automatically.</p>
+        <p class="qs-note">other devices on the same wifi discover this node via mdns.</p>
       </li>
     </ol>
   </section>
@@ -156,36 +173,48 @@ open http://127.0.0.1:7777</code></pre>
     <p class="section-sub">trust isn't binary. these are three concentric layers — each strictly contains the one before it. you opt into each one explicitly, and traffic never crosses an unhosted server (there isn't one). click any layer below to see what's inside it.</p>
 
     <!-- relational diagram: the actual trust radius, one figure, labelled.
-         each ring is hover-highlightable + clickable; clicking opens the
-         <details> for the matching mode card below. -->
+         labels sit OUTSIDE each ring on a flag-leader line so they
+         don't collide with the ring strokes. each ring is clickable
+         to scroll to its matching mode card below. -->
     <figure class="radius-diagram" aria-label="trust radius">
-      <svg viewBox="0 0 360 360" role="img" aria-labelledby="radius-title">
+      <svg viewBox="0 0 480 360" role="img" aria-labelledby="radius-title">
         <title id="radius-title">trust radius: local inside trusted inside public</title>
 
-        <!-- outermost: public -->
-        <a href="#mode-public" class="ring ring-public">
-          <circle cx="180" cy="180" r="160" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 8"/>
-          <text x="180" y="34" text-anchor="middle" class="ring-label">public · pay-per-token</text>
-          <text x="180" y="52" text-anchor="middle" class="ring-note">strangers' idle gpus · usdc settlement</text>
-        </a>
+        <!-- centered rings on the LEFT of the viewBox; labels float on the RIGHT -->
+        <g class="rings">
+          <a href="#mode-public" class="ring ring-public">
+            <circle cx="180" cy="180" r="160" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="3 7"/>
+          </a>
+          <a href="#mode-trusted" class="ring ring-trusted">
+            <circle cx="180" cy="180" r="106" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          </a>
+          <a href="#mode-local" class="ring ring-local">
+            <circle cx="180" cy="180" r="58" fill="currentColor"/>
+          </a>
+        </g>
 
-        <!-- middle: trusted -->
-        <a href="#mode-trusted" class="ring ring-trusted">
-          <circle cx="180" cy="180" r="110" fill="none" stroke="currentColor" stroke-width="1.5"/>
-          <text x="180" y="88" text-anchor="middle" class="ring-label">trusted · free, encrypted</text>
-          <text x="180" y="106" text-anchor="middle" class="ring-note">friends · family · team</text>
-        </a>
-
-        <!-- innermost: local -->
-        <a href="#mode-local" class="ring ring-local">
-          <circle cx="180" cy="180" r="60" fill="currentColor"/>
-          <text x="180" y="174" text-anchor="middle" class="ring-label inside">local</text>
-          <text x="180" y="192" text-anchor="middle" class="ring-note inside">free · private · default</text>
-        </a>
-
-        <!-- "you" marker at the center -->
-        <circle cx="180" cy="220" r="3" fill="var(--bg)"/>
-        <text x="180" y="240" text-anchor="middle" class="ring-you">you</text>
+        <!-- ring labels: positioned in the bottom-left of each ring,
+             OUTSIDE the next inner ring so nothing overlaps -->
+        <g class="ring-labels">
+          <!-- public: top-right of the outer ring, outside the dashed circle -->
+          <a href="#mode-public">
+            <line x1="270" y1="60" x2="330" y2="40" class="leader"/>
+            <text x="338" y="36" class="ring-label">public</text>
+            <text x="338" y="52" class="ring-note">pay-per-token · strangers' gpus</text>
+          </a>
+          <!-- trusted: right side, in the band between trusted and public -->
+          <a href="#mode-trusted">
+            <line x1="286" y1="180" x2="340" y2="180" class="leader"/>
+            <text x="348" y="178" class="ring-label">trusted</text>
+            <text x="348" y="194" class="ring-note">free · encrypted · friends, family</text>
+          </a>
+          <!-- local: inside the filled circle -->
+          <text x="180" y="184" text-anchor="middle" class="ring-label inside">local</text>
+          <text x="180" y="200" text-anchor="middle" class="ring-note inside">free · private · default</text>
+          <!-- "you" marker near the bottom of the local fill -->
+          <circle cx="180" cy="224" r="2.5" fill="var(--bg)"/>
+          <text x="180" y="240" text-anchor="middle" class="ring-you">you</text>
+        </g>
       </svg>
       <figcaption>each ring strictly contains the one inside it. flow falls back outward only when you ask it to — local first, trusted second, public last.</figcaption>
     </figure>
