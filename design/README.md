@@ -22,3 +22,4 @@ Each ADR has:
 - [`0004-trusted-mode.md`](0004-trusted-mode.md) — Ed25519 pairing, signed requests, peer registry
 - [`0005-relay-and-connection-topology.md`](0005-relay-and-connection-topology.md) — direct / hole-punched / relay attempts
 - [`0006-public-mode-onboarding-and-wallet.md`](0006-public-mode-onboarding-and-wallet.md) — public-mode account model + wallet binding + first-90s flow
+- [`0007-security-hardening.md`](0007-security-hardening.md) — local bearer auth, replay defense, relay caps + rate limits

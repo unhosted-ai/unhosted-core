@@ -8,6 +8,7 @@
 //! Peer protocol is the same HTTP API the CLI uses (`POST /v1/run`), so a
 //! peer is just another `unhosted serve` process. No new transport.
 
+pub mod auth;
 pub mod discovery;
 pub mod identity;
 pub mod peer;
@@ -15,6 +16,7 @@ pub mod relay_client;
 pub mod router;
 mod web;
 
+pub use auth::{AuthOutcome, LocalToken, ReplayGuard};
 pub use discovery::{default_node_name, DiscoveredPeer, Discovery};
 pub use identity::Identity;
 pub use peer::{Peer, PeerRegistry};
@@ -99,6 +101,12 @@ struct NodeState {
     /// them, which is the right behavior for one-time secrets.
     pairing_tokens: Arc<std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>>,
     relay: RelayClient,
+    /// Local bearer token. Required by sensitive endpoints when the
+    /// caller isn't on loopback and isn't a signed peer.
+    local_token: LocalToken,
+    /// Replay-protection store for signed peer requests. Keeps a
+    /// (pubkey, ts, sig_prefix) set with TTL == verify-window.
+    replay_guard: Arc<std::sync::Mutex<ReplayGuard>>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -163,6 +171,9 @@ pub async fn serve(node: Node) -> Result<()> {
         (RelayClient::disabled(), None)
     };
 
+    let local_token = LocalToken::load_or_create().context("loading local API token")?;
+    let replay_guard = Arc::new(std::sync::Mutex::new(ReplayGuard::new()));
+
     let state = NodeState {
         node: Arc::new(node.clone()),
         router: router.clone(),
@@ -171,6 +182,8 @@ pub async fn serve(node: Node) -> Result<()> {
         identity,
         pairing_tokens: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         relay,
+        local_token: local_token.clone(),
+        replay_guard,
     };
 
     // Dispatcher for inbound relay requests: peer sent us a request via the
@@ -201,6 +214,7 @@ pub async fn serve(node: Node) -> Result<()> {
         .route("/v1/pair/use-code", post(pair_use_code_handler))
         .route("/v1/punch", post(punch_handler))
         .route("/v1/identity", get(identity_handler))
+        .route("/v1/auth/token", get(auth_token_handler))
         // OpenAI-compatible endpoints — any client that speaks OpenAI's HTTP
         // API (Delta, LangChain, LlamaIndex, OpenWebUI, …) can point at
         // http://127.0.0.1:7777 instead of OpenAI / Ollama / llama-server.
@@ -222,12 +236,106 @@ pub async fn serve(node: Node) -> Result<()> {
         "unhosted node listening — open http://{} in a browser",
         node.addr
     );
-    axum::serve(listener, app).await?;
+
+    // Loud advisory when bound to a non-loopback addr: the LAN can reach
+    // sensitive endpoints, so the user needs the bearer token to drive
+    // the UI from another device. Loopback callers (the desktop shell,
+    // the CLI on the same machine) don't need it.
+    if !node.addr.ip().is_loopback() {
+        print_lan_security_banner(node.addr, local_token.value());
+    }
+
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
     Ok(())
+}
+
+fn print_lan_security_banner(bind: SocketAddr, token: &str) {
+    eprintln!();
+    eprintln!("───────────────────────────────────────────────────────────────");
+    eprintln!(" unhosted is reachable on the LAN at {bind}");
+    eprintln!();
+    eprintln!(" sensitive endpoints (/v1/run, /v1/peers, /v1/pair/*, …)");
+    eprintln!(" require either a paired-peer signature OR this bearer:");
+    eprintln!();
+    eprintln!("   {token}");
+    eprintln!();
+    eprintln!(" to reach this node from your phone, open:");
+    eprintln!("   http://<this-machine-ip>:{}?t={token}", bind.port());
+    eprintln!(" (the UI stashes the token in localStorage after the first load)");
+    eprintln!();
+    eprintln!(" rotate the token by deleting ~/.config/unhosted/api-token.txt");
+    eprintln!(" and restarting the daemon.");
+    eprintln!("───────────────────────────────────────────────────────────────");
+    eprintln!();
 }
 
 async fn health() -> &'static str {
     "ok"
+}
+
+impl NodeState {
+    /// Classify an incoming request. Handlers decide what to do with the
+    /// outcome — read-only endpoints accept `LoopbackUnauthed`; state-
+    /// mutating ones require `is_authed()`.
+    fn classify(
+        &self,
+        headers: &HeaderMap,
+        peer_addr: Option<std::net::IpAddr>,
+        body: &[u8],
+    ) -> AuthOutcome {
+        auth::classify(
+            headers,
+            peer_addr,
+            body,
+            &self.registry,
+            &self.local_token,
+            &self.replay_guard,
+        )
+    }
+}
+
+/// Convert an auth outcome into either a pass-through (Ok) or an HTTP error.
+/// `require_local_user_only` rejects authenticated paired-peer requests too —
+/// used for endpoints that should never be reachable to peers (e.g. unpair).
+fn require_auth(outcome: &AuthOutcome, require_local_user_only: bool) -> Result<(), StatusCode> {
+    match outcome {
+        AuthOutcome::Peer(_) if !require_local_user_only => Ok(()),
+        AuthOutcome::Peer(_) => Err(StatusCode::FORBIDDEN),
+        AuthOutcome::Local | AuthOutcome::LoopbackUnauthed => Ok(()),
+        AuthOutcome::Rejected(why) => {
+            tracing::warn!(reason = %why, "auth rejected");
+            Err(StatusCode::UNAUTHORIZED)
+        }
+        AuthOutcome::Missing => {
+            tracing::warn!("auth missing — LAN access without bearer or signed peer");
+            Err(StatusCode::UNAUTHORIZED)
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct AuthTokenResponse {
+    token: String,
+}
+
+/// `GET /v1/auth/token` — returns the local bearer token. Strictly
+/// loopback-only; nothing else gets to read it. The web UI calls this
+/// on first load (when it has no cached token) so the embedded shell
+/// + browser tabs on the same machine just work.
+async fn auth_token_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+) -> Result<axum::Json<AuthTokenResponse>, StatusCode> {
+    if !remote.ip().is_loopback() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    Ok(axum::Json(AuthTokenResponse {
+        token: state.local_token.value().to_string(),
+    }))
 }
 
 /// CORS policy. Default is local-only — explicit allow-list extends it to
@@ -327,7 +435,14 @@ struct RoutingStatus {
     mode: &'static str,
 }
 
-async fn status_handler(State(state): State<NodeState>) -> axum::Json<StatusResponse> {
+async fn status_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<axum::Json<StatusResponse>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, false)?;
+
     let upstream_url = state.node.llama_server_url.clone();
     let (reachable, model) = probe_upstream(&upstream_url).await;
 
@@ -345,7 +460,7 @@ async fn status_handler(State(state): State<NodeState>) -> axum::Json<StatusResp
         let mut reg = match state.registry.lock() {
             Ok(r) => r,
             Err(_) => {
-                return axum::Json(StatusResponse {
+                return Ok(axum::Json(StatusResponse {
                     node: NodeStatus {
                         addr: state.node.addr.to_string(),
                         name: state.node.name.clone(),
@@ -367,7 +482,7 @@ async fn status_handler(State(state): State<NodeState>) -> axum::Json<StatusResp
                         url: None,
                         error: Some("registry lock poisoned".into()),
                     },
-                });
+                }));
             }
         };
         let mut changed = false;
@@ -457,7 +572,7 @@ async fn status_handler(State(state): State<NodeState>) -> axum::Json<StatusResp
         },
     };
 
-    axum::Json(StatusResponse {
+    Ok(axum::Json(StatusResponse {
         node: NodeStatus {
             addr: state.node.addr.to_string(),
             name: state.node.name.clone(),
@@ -475,7 +590,7 @@ async fn status_handler(State(state): State<NodeState>) -> axum::Json<StatusResp
         },
         discovered,
         relay,
-    })
+    }))
 }
 
 #[derive(Deserialize)]
@@ -498,8 +613,16 @@ struct PairResponse {
 
 async fn pair_handler(
     State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(req): Json<PairRequest>,
 ) -> Result<axum::Json<PairResponse>, StatusCode> {
+    // Body irrelevant: this endpoint is local-user-only, so peer-signed
+    // requests get rejected by require_auth(_, true) regardless.
+    let _ = &req;
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+
     let new_peer = Peer {
         name: req.name.clone(),
         addr: req.addr,
@@ -562,7 +685,12 @@ struct PairOfferResponse {
 
 async fn pair_offer_handler(
     State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
 ) -> Result<axum::Json<PairOfferResponse>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+
     use base64::Engine;
     let mut buf = [0u8; 9];
     rand::Rng::fill(&mut rand::thread_rng(), &mut buf);
@@ -749,7 +877,14 @@ struct ShortOfferResponse {
 /// types the 4 letters into `pair/use-code` and the rest is automatic.
 async fn pair_short_offer_handler(
     State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
 ) -> Result<axum::Json<ShortOfferResponse>, (StatusCode, String)> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    if require_auth(&outcome, true).is_err() {
+        return Err((StatusCode::UNAUTHORIZED, "unauthorized".into()));
+    }
+
     let relay_url = state.node.relay_url.clone().ok_or((
         StatusCode::PRECONDITION_FAILED,
         "no relay configured. start daemon with --relay ws://... to enable short codes".into(),
@@ -833,8 +968,16 @@ struct UseCodeRequest {
 /// the relay, completes the pairing via the existing connect flow.
 async fn pair_use_code_handler(
     State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(req): Json<UseCodeRequest>,
 ) -> Result<axum::Json<PairConnectResponse>, (StatusCode, String)> {
+    let _ = &req;
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    if require_auth(&outcome, true).is_err() {
+        return Err((StatusCode::UNAUTHORIZED, "unauthorized".into()));
+    }
+
     let relay_url = state.node.relay_url.clone().ok_or((
         StatusCode::PRECONDITION_FAILED,
         "no relay configured. start daemon with --relay ws://... to use short codes".into(),
@@ -885,7 +1028,7 @@ async fn pair_use_code_handler(
         .to_string();
 
     // Delegate to pair_connect logic.
-    pair_connect_handler(State(state), Json(PairConnectRequest { offer })).await
+    do_pair_connect(state, offer).await
 }
 
 #[derive(Deserialize)]
@@ -924,8 +1067,16 @@ struct PunchResponse {
 /// and time out.
 async fn punch_handler(
     State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(req): Json<PunchRequest>,
 ) -> Result<axum::Json<PunchResponse>, (StatusCode, String)> {
+    let _ = &req;
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    if require_auth(&outcome, true).is_err() {
+        return Err((StatusCode::UNAUTHORIZED, "unauthorized".into()));
+    }
+
     // The peer must be in our registry — we only punch trusted peers.
     let peer_pubkey: String = {
         let reg = state
@@ -991,9 +1142,26 @@ struct PairConnectResponse {
 
 async fn pair_connect_handler(
     State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(req): Json<PairConnectRequest>,
 ) -> Result<axum::Json<PairConnectResponse>, (StatusCode, String)> {
-    let parsed = parse_offer_uri(&req.offer)
+    let _ = &req;
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    if require_auth(&outcome, true).is_err() {
+        return Err((StatusCode::UNAUTHORIZED, "unauthorized".into()));
+    }
+    do_pair_connect(state, req.offer).await
+}
+
+/// Underlying connect logic. Separate from the HTTP handler so internal
+/// callers (e.g. pair_use_code_handler, which already authed) can reuse
+/// it without re-authing.
+async fn do_pair_connect(
+    state: NodeState,
+    offer: String,
+) -> Result<axum::Json<PairConnectResponse>, (StatusCode, String)> {
+    let parsed = parse_offer_uri(&offer)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("bad offer: {e}")))?;
 
     let body = serde_json::json!({
@@ -1188,9 +1356,13 @@ fn char_to_hex(b: u8) -> Option<u8> {
 /// Loop prevention via `X-Unhosted-Forwarded` works the same way.
 async fn chat_completions_handler(
     State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     body: bytes::Bytes,
 ) -> Result<Response, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &body);
+    require_auth(&outcome, false)?;
+
     let already_forwarded = headers.get(FORWARDED_HEADER).is_some();
     let target = if already_forwarded {
         Target::Local
@@ -1280,7 +1452,14 @@ async fn proxy_chat_peer(name: &str, addr: SocketAddr, body: &bytes::Bytes) -> R
 
 /// `GET /v1/models` — proxies the upstream's identical endpoint so OpenAI
 /// clients can auto-discover what model is being served.
-async fn models_handler(State(state): State<NodeState>) -> Result<Response, StatusCode> {
+async fn models_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<Response, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, false)?;
+
     let url = format!("{}/v1/models", state.node.llama_server_url);
     let upstream = reqwest::Client::new().get(&url).send().await.map_err(|e| {
         tracing::error!(error = %e, "models: upstream call failed");
@@ -1305,12 +1484,19 @@ async fn models_handler(State(state): State<NodeState>) -> Result<Response, Stat
         .expect("valid response"))
 }
 
-async fn identity_handler(State(state): State<NodeState>) -> axum::Json<serde_json::Value> {
-    axum::Json(serde_json::json!({
+async fn identity_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<axum::Json<serde_json::Value>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, false)?;
+
+    Ok(axum::Json(serde_json::json!({
         "name": state.node.name,
         "pubkey": state.identity.public_b64(),
         "addr": state.node.addr.to_string(),
-    }))
+    })))
 }
 
 /// Route an inbound relay request by its `kind` to the right local handler.
@@ -1456,8 +1642,13 @@ async fn dispatch_inbound_pair_accept(state: NodeState, req: InboundRequest) {
 
 async fn unpair_handler(
     State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     axum::extract::Path(name): axum::extract::Path<String>,
 ) -> Result<axum::Json<PairResponse>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+
     let removed = {
         let mut reg = state
             .registry
@@ -1527,44 +1718,15 @@ async fn probe_upstream(url: &str) -> (bool, Option<String>) {
 
 async fn run_handler(
     State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Json(req): Json<RunRequest>,
 ) -> Result<Response, StatusCode> {
-    // Auth: if the caller presents an X-Unhosted-Auth header, verify it
-    // against the trusted-peer registry. Header present but invalid →
-    // 401. Header absent → accept (preserves LAN/local CLI behavior).
-    if let Some(auth_hv) = headers.get(AUTH_HEADER) {
-        let auth_str = match auth_hv.to_str() {
-            Ok(s) => s,
-            Err(_) => return Err(StatusCode::UNAUTHORIZED),
-        };
-        // Sign over the same body the sender signed: ts\n + JSON(req).
-        let body_bytes = match serde_json::to_vec(&req) {
-            Ok(b) => b,
-            Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
-        };
-        let sender_pk = match Identity::verify_request(auth_str, &body_bytes) {
-            Some(pk) => pk,
-            None => {
-                tracing::warn!("auth: signature failed or expired");
-                return Err(StatusCode::UNAUTHORIZED);
-            }
-        };
-        // Confirm the sender is actually a trusted peer of ours.
-        let is_trusted = state
-            .registry
-            .lock()
-            .map(|r| {
-                r.peers
-                    .iter()
-                    .any(|p| p.pubkey.as_deref() == Some(sender_pk.as_str()))
-            })
-            .unwrap_or(false);
-        if !is_trusted {
-            tracing::warn!(sender = %sender_pk, "auth: pubkey signed correctly but is not paired");
-            return Err(StatusCode::FORBIDDEN);
-        }
-    }
+    // Auth: paired peer (signed header) OR local bearer OR loopback.
+    // Same body the sender signed: serialized JSON of the request.
+    let body_bytes = serde_json::to_vec(&req).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let outcome = state.classify(&headers, Some(remote.ip()), &body_bytes);
+    require_auth(&outcome, false)?;
 
     // Loop prevention: if a peer already forwarded this request to us, we
     // serve it locally and don't bounce it back into the router.

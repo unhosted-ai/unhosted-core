@@ -6,6 +6,93 @@
 
 const $ = (sel) => document.querySelector(sel);
 
+// ---------------------------------------------------------------- auth bootstrap
+//
+// The daemon requires either a paired-peer signature OR a local bearer
+// token for sensitive endpoints when bound to a non-loopback address.
+// The UI never sees the peer-signed path; it just attaches the bearer
+// on every `/v1/*` fetch.
+//
+// Token sources, in order:
+//   1. `?t=<token>` query string — set when the user opens the URL the
+//      daemon prints on startup for phone access. We stash it in
+//      localStorage and strip it from the URL bar so it doesn't leak
+//      into screenshots / shares.
+//   2. localStorage — set by step 1 on a previous visit.
+//   3. `GET /v1/auth/token` — only succeeds from loopback. On the
+//      desktop shell / a browser on the same machine this is how the
+//      first-time-ever flow gets its token without the user typing it.
+
+const API_TOKEN_KEY = "unhosted-api-token";
+
+(function bootstrapToken() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = params.get("t");
+    if (fromUrl) {
+      localStorage.setItem(API_TOKEN_KEY, fromUrl);
+      params.delete("t");
+      const cleanQuery = params.toString();
+      const cleanUrl =
+        window.location.pathname + (cleanQuery ? "?" + cleanQuery : "") + window.location.hash;
+      window.history.replaceState({}, document.title, cleanUrl);
+    }
+  } catch (e) { /* localStorage / history may be unavailable */ }
+})();
+
+function getApiToken() {
+  try { return localStorage.getItem(API_TOKEN_KEY); } catch (e) { return null; }
+}
+
+async function tryFetchLoopbackToken() {
+  // Only attempt once per page load. If we're on the desktop shell or a
+  // browser on the same host, this succeeds and primes the cache.
+  try {
+    const r = await fetch("/v1/auth/token", { cache: "no-store" });
+    if (r.ok) {
+      const j = await r.json();
+      if (j && j.token) {
+        localStorage.setItem(API_TOKEN_KEY, j.token);
+        return j.token;
+      }
+    }
+  } catch (e) { /* network down or non-loopback — fine, will retry on next reload */ }
+  return null;
+}
+
+// Monkey-patch fetch for same-origin /v1/* calls to attach the bearer.
+// Bare fetch() elsewhere (cross-origin, static assets) is untouched.
+(function patchFetch() {
+  const orig = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    try {
+      const url = typeof input === "string" ? input : input.url;
+      const isApi = url && (url.startsWith("/v1/") || url.startsWith(window.location.origin + "/v1/"));
+      const isTokenFetch = url && url.includes("/v1/auth/token");
+      if (isApi && !isTokenFetch) {
+        const token = getApiToken();
+        if (token) {
+          init = init || {};
+          const headers = new Headers(init.headers || {});
+          if (!headers.has("Authorization")) {
+            headers.set("Authorization", "Bearer " + token);
+          }
+          init.headers = headers;
+        }
+      }
+    } catch (e) { /* fall through to original fetch */ }
+    return orig(input, init);
+  };
+})();
+
+// Kick off the loopback-token primer in the background. If it succeeds,
+// subsequent fetches will pick it up; if it fails (we're on a phone),
+// we either already have a token from `?t=` or the user will see 401s
+// and the empty-state will hint at the URL to reopen.
+if (!getApiToken()) {
+  tryFetchLoopbackToken();
+}
+
 // ---------------------------------------------------------------- theme toggle
 
 const THEME_KEY = "unhosted-theme";

@@ -52,6 +52,14 @@ struct Cli {
 
 type Tx = mpsc::UnboundedSender<Message>;
 
+// Resource caps — set conservatively, override per deploy via env if needed.
+const MAX_SESSIONS: usize = 10_000;
+const MAX_SESSIONS_PER_IP: usize = 8;
+/// Token-bucket window for `/v1/codes/{code}` lookups, per source IP.
+/// At 8 attempts / 60s, a 32^4 (~1M) space takes >2 years to brute-force.
+const CODE_LOOKUP_BURST: u32 = 8;
+const CODE_LOOKUP_WINDOW_SECS: u64 = 60;
+
 #[derive(Clone)]
 struct AppState {
     /// Map of registered pubkey (base64) → outbound channel.
@@ -63,6 +71,12 @@ struct AppState {
     /// notified and the pair is cleared. 30s TTL — entries get garbage-
     /// collected on the next coordinate call.
     pending_punches: Arc<Mutex<HashMap<(String, String), PendingPunch>>>,
+    /// Per-IP session count, used to enforce MAX_SESSIONS_PER_IP.
+    /// Decremented when a session ends.
+    ip_sessions: Arc<Mutex<HashMap<std::net::IpAddr, u32>>>,
+    /// Code-lookup rate-limit state. `(window_start, count)` per IP.
+    /// Cheap manual sliding window; fancier limiter not worth pulling.
+    code_rate: Arc<Mutex<HashMap<std::net::IpAddr, (std::time::Instant, u32)>>>,
 }
 
 /// Half of a hole-punch handshake — recorded when one side asks before
@@ -89,6 +103,8 @@ async fn main() -> Result<()> {
         sessions: Arc::new(Mutex::new(HashMap::new())),
         codes: Arc::new(Mutex::new(HashMap::new())),
         pending_punches: Arc::new(Mutex::new(HashMap::new())),
+        ip_sessions: Arc::new(Mutex::new(HashMap::new())),
+        code_rate: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let app = Router::new()
@@ -175,8 +191,34 @@ struct ConsumeCodeResponse {
 
 async fn consume_code_handler(
     State(state): State<AppState>,
+    ConnectInfo(remote): ConnectInfo<SocketAddr>,
     axum::extract::Path(code): axum::extract::Path<String>,
 ) -> Result<axum::Json<ConsumeCodeResponse>, axum::http::StatusCode> {
+    // Rate-limit per source IP. 4-letter codes only have ~20 bits of
+    // entropy; without throttling, the space is hammerable in seconds.
+    {
+        let mut rates = state.code_rate.lock().await;
+        let now = std::time::Instant::now();
+        let window = std::time::Duration::from_secs(CODE_LOOKUP_WINDOW_SECS);
+        let entry = rates.entry(remote.ip()).or_insert((now, 0));
+        if now.duration_since(entry.0) >= window {
+            *entry = (now, 0);
+        }
+        entry.1 += 1;
+        if entry.1 > CODE_LOOKUP_BURST {
+            tracing::warn!(
+                ip = %remote.ip(),
+                count = entry.1,
+                "rate-limited code lookup"
+            );
+            return Err(axum::http::StatusCode::TOO_MANY_REQUESTS);
+        }
+        // Opportunistic GC of stale entries.
+        if rates.len() > 4096 {
+            rates.retain(|_, (start, _)| now.duration_since(*start) < window);
+        }
+    }
+
     let code = code.to_ascii_uppercase();
     let mut codes = state.codes.lock().await;
 
@@ -257,6 +299,27 @@ enum ServerMessage<'a> {
 // ----- session ---------------------------------------------------------------
 
 async fn handle_socket(socket: WebSocket, state: AppState, remote: SocketAddr) {
+    // Enforce connection caps before doing any work. Total sessions and
+    // per-IP sessions. A floods-from-one-source DoS attempts to exhaust
+    // FD / memory; per-IP caps keep one bad actor from monopolizing.
+    {
+        let sessions = state.sessions.lock().await;
+        if sessions.len() >= MAX_SESSIONS {
+            tracing::warn!(%remote, "rejecting: relay at session cap");
+            drop(sessions);
+            return;
+        }
+        drop(sessions);
+
+        let mut ip_count = state.ip_sessions.lock().await;
+        let current = ip_count.entry(remote.ip()).or_insert(0);
+        if *current >= MAX_SESSIONS_PER_IP as u32 {
+            tracing::warn!(%remote, count = %current, "rejecting: per-IP session cap");
+            return;
+        }
+        *current += 1;
+    }
+
     let (mut sender, mut receiver) = socket.split();
 
     // Issue a random challenge the client must sign with their pubkey.
@@ -287,6 +350,14 @@ async fn handle_socket(socket: WebSocket, state: AppState, remote: SocketAddr) {
                     .into(),
                 ))
                 .await;
+            // Release the per-IP slot we tentatively reserved.
+            let mut ip_count = state.ip_sessions.lock().await;
+            if let Some(c) = ip_count.get_mut(&remote.ip()) {
+                *c = c.saturating_sub(1);
+                if *c == 0 {
+                    ip_count.remove(&remote.ip());
+                }
+            }
             return;
         }
     };
@@ -422,6 +493,15 @@ async fn handle_socket(socket: WebSocket, state: AppState, remote: SocketAddr) {
     {
         let mut sessions = state.sessions.lock().await;
         sessions.remove(&pubkey);
+    }
+    {
+        let mut ip_count = state.ip_sessions.lock().await;
+        if let Some(c) = ip_count.get_mut(&remote.ip()) {
+            *c = c.saturating_sub(1);
+            if *c == 0 {
+                ip_count.remove(&remote.ip());
+            }
+        }
     }
     send_task.abort();
     tracing::info!(%remote, %pubkey, "peer disconnected");
