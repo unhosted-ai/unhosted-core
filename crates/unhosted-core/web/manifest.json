@@ -1,0 +1,21 @@
+{
+  "name": "unhosted",
+  "short_name": "unhosted",
+  "description": "ai that lives where you do. local-first chat against a daemon running on your own hardware.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "orientation": "any",
+  "background_color": "#F5F5F0",
+  "theme_color": "#F5F5F0",
+  "categories": ["productivity", "utilities", "developer"],
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -199,11 +199,17 @@ open http://127.0.0.1:7777</code></pre>
 
       <article class="card card-local" id="mode-local">
         <div class="art" aria-hidden="true">
-          <!-- "you" — a single solid device on a closed home boundary -->
-          <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2.2">
-            <rect x="14" y="14" width="72" height="72" rx="8" stroke-dasharray="2 5" opacity="0.45"/>
-            <rect x="34" y="40" width="32" height="22" rx="2" fill="currentColor"/>
-            <line x1="42" y1="62" x2="58" y2="62" stroke-width="3"/>
+          <!-- local: a laptop in profile (screen + base), with a small
+               own-network wifi arc above it. Story: one device, on
+               its own network. -->
+          <svg viewBox="0 0 80 80" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">
+            <!-- laptop screen: solid filled -->
+            <rect x="20" y="22" width="40" height="26" rx="2" fill="currentColor"/>
+            <!-- laptop base / hinge -->
+            <path d="M12 54 L68 54 L62 48 L18 48 Z" stroke-width="2"/>
+            <!-- local wifi arcs (top-right of the screen, indicates "own network") -->
+            <path d="M50 18 Q55 14 60 18" opacity="0.6"/>
+            <path d="M53 21 Q55 19 57 21" opacity="0.6"/>
           </svg>
         </div>
         <div class="meta">
@@ -224,14 +230,19 @@ open http://127.0.0.1:7777</code></pre>
 
       <article class="card card-trusted" id="mode-trusted">
         <div class="art" aria-hidden="true">
-          <!-- "two paired devices" — two solid nodes connected by a key/link -->
-          <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2.2">
-            <rect x="14" y="34" width="26" height="32" rx="2" fill="currentColor" opacity="0.85"/>
-            <rect x="60" y="34" width="26" height="32" rx="2" fill="currentColor" opacity="0.45"/>
-            <path d="M40 50 L60 50" stroke-width="2.5"/>
-            <circle cx="50" cy="50" r="4" fill="none" stroke-width="2"/>
-            <line x1="42" y1="66" x2="34" y2="66" stroke-width="2"/>
-            <line x1="62" y1="66" x2="74" y2="66" stroke-width="2"/>
+          <!-- trusted: two laptops side by side, joined by a thick
+               line with a small open circle in the middle (the
+               "pair handshake"). Two devices, one paired link. -->
+          <svg viewBox="0 0 80 80" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">
+            <!-- left laptop -->
+            <rect x="6" y="30" width="22" height="16" rx="2" fill="currentColor"/>
+            <path d="M2 50 L32 50 L30 46 L4 46 Z" fill="currentColor" opacity="0.85"/>
+            <!-- right laptop -->
+            <rect x="52" y="30" width="22" height="16" rx="2" fill="currentColor"/>
+            <path d="M48 50 L78 50 L76 46 L50 46 Z" fill="currentColor" opacity="0.85"/>
+            <!-- the paired link: thick line + open circle handshake -->
+            <line x1="28" y1="38" x2="52" y2="38" stroke-width="2.4"/>
+            <circle cx="40" cy="38" r="4" fill="var(--bg)" stroke="currentColor" stroke-width="2.2"/>
           </svg>
         </div>
         <div class="meta">
@@ -253,21 +264,29 @@ open http://127.0.0.1:7777</code></pre>
 
       <article class="card card-public" id="mode-public">
         <div class="art" aria-hidden="true">
-          <!-- "you among many" — center solid node with a scatter of unpaired nodes around -->
-          <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="50" cy="50" r="6" fill="currentColor"/>
-            <circle cx="22" cy="28" r="3" fill="currentColor" opacity="0.45"/>
-            <circle cx="80" cy="22" r="3" fill="currentColor" opacity="0.45"/>
-            <circle cx="18" cy="68" r="3" fill="currentColor" opacity="0.45"/>
-            <circle cx="82" cy="74" r="3" fill="currentColor" opacity="0.45"/>
-            <circle cx="50" cy="14" r="3" fill="currentColor" opacity="0.45"/>
-            <circle cx="50" cy="86" r="3" fill="currentColor" opacity="0.45"/>
-            <line x1="50" y1="50" x2="22" y2="28" stroke-dasharray="2 3" opacity="0.4"/>
-            <line x1="50" y1="50" x2="80" y2="22" stroke-dasharray="2 3" opacity="0.4"/>
-            <line x1="50" y1="50" x2="18" y2="68" stroke-dasharray="2 3" opacity="0.4"/>
-            <line x1="50" y1="50" x2="82" y2="74" stroke-dasharray="2 3" opacity="0.4"/>
-            <line x1="50" y1="50" x2="50" y2="14" stroke-dasharray="2 3" opacity="0.4"/>
-            <line x1="50" y1="50" x2="50" y2="86" stroke-dasharray="2 3" opacity="0.4"/>
+          <!-- public: center "you" device (filled, larger) surrounded
+               by 6 outlined provider devices in a hex pattern. Thin
+               dashed lines from center to a couple of them suggest
+               "you connect to whichever is cheapest under your
+               ceiling" — not all at once. -->
+          <svg viewBox="0 0 80 80" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+            <!-- center: you -->
+            <rect x="32" y="32" width="16" height="16" rx="2" fill="currentColor"/>
+            <!-- surrounding provider devices, outlined -->
+            <rect x="6"  y="10" width="12" height="9" rx="1.5"/>
+            <rect x="62" y="10" width="12" height="9" rx="1.5"/>
+            <rect x="6"  y="61" width="12" height="9" rx="1.5"/>
+            <rect x="62" y="61" width="12" height="9" rx="1.5"/>
+            <rect x="34" y="2"  width="12" height="7" rx="1"/>
+            <rect x="34" y="71" width="12" height="7" rx="1"/>
+            <!-- partial connection lines (not to every node — public
+                 picks ONE provider per request) -->
+            <line x1="33" y1="35" x2="18"  y2="19" stroke-dasharray="2 3" opacity="0.55"/>
+            <line x1="47" y1="35" x2="62"  y2="19" stroke-dasharray="2 3" opacity="0.55"/>
+            <line x1="40" y1="32" x2="40"  y2="9"  stroke-dasharray="2 3" opacity="0.55"/>
+            <line x1="40" y1="48" x2="40"  y2="71" stroke-dasharray="2 3" opacity="0.3"/>
+            <line x1="33" y1="45" x2="18"  y2="61" stroke-dasharray="2 3" opacity="0.3"/>
+            <line x1="47" y1="45" x2="62"  y2="61" stroke-dasharray="2 3" opacity="0.3"/>
           </svg>
         </div>
         <div class="meta">
@@ -296,12 +315,17 @@ open http://127.0.0.1:7777</code></pre>
 
       <article class="card card-honest">
         <div class="art" aria-hidden="true">
-          <!-- "47 tok/s" — kept as the iconic number, but smaller -->
-          <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M14 70 L30 50 L46 60 L62 30 L86 28" stroke-width="2.5"/>
-            <line x1="14" y1="82" x2="86" y2="82" opacity="0.4"/>
-            <line x1="14" y1="82" x2="14" y2="18" opacity="0.4"/>
-            <circle cx="62" cy="30" r="3" fill="currentColor"/>
+          <!-- honest benchmarks: four bars of varying height on a
+               baseline. Reads as a chart, not a logo. -->
+          <svg viewBox="0 0 80 80" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square">
+            <!-- bars, filled -->
+            <rect x="12" y="46" width="11" height="20" fill="currentColor"/>
+            <rect x="26" y="32" width="11" height="34" fill="currentColor"/>
+            <rect x="40" y="38" width="11" height="28" fill="currentColor"/>
+            <rect x="54" y="22" width="11" height="44" fill="currentColor"/>
+            <!-- axes -->
+            <line x1="8"  y1="66" x2="70" y2="66" stroke-width="1.6"/>
+            <line x1="8"  y1="14" x2="8"  y2="66" stroke-width="1.6"/>
           </svg>
         </div>
         <div class="meta">
@@ -313,14 +337,19 @@ open http://127.0.0.1:7777</code></pre>
 
       <article class="card card-open">
         <div class="art" aria-hidden="true">
-          <!-- branches + leaves — fork it, audit it -->
-          <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="30" cy="22" r="6" fill="currentColor"/>
-            <circle cx="30" cy="78" r="6" fill="currentColor"/>
-            <circle cx="74" cy="50" r="6" fill="none" stroke-width="2.5"/>
-            <path d="M30 28 L30 72" />
-            <path d="M30 50 Q40 50 50 50 Q62 50 68 50" />
-            <line x1="68" y1="50" x2="74" y2="50" stroke-width="2.5"/>
+          <!-- open source: the canonical git-fork glyph. Two
+               filled nodes on the main branch, one open node on
+               the forked branch, joined by a clean bezier. -->
+          <svg viewBox="0 0 80 80" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round">
+            <!-- main branch line -->
+            <line x1="22" y1="22" x2="22" y2="58"/>
+            <!-- branch off curve -->
+            <path d="M22 36 Q22 22 38 22 L52 22"/>
+            <!-- nodes -->
+            <circle cx="22" cy="18" r="5" fill="currentColor"/>
+            <circle cx="22" cy="62" r="5" fill="currentColor"/>
+            <circle cx="58" cy="22" r="5" fill="var(--bg)"/>
+            <circle cx="58" cy="22" r="5" fill="none"/>
           </svg>
         </div>
         <div class="meta">
@@ -332,11 +361,18 @@ open http://127.0.0.1:7777</code></pre>
 
       <article class="card card-private">
         <div class="art" aria-hidden="true">
-          <!-- eye with strike-through — "no telemetry" -->
-          <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M14 50 Q50 22 86 50 Q50 78 14 50 Z"/>
-            <circle cx="50" cy="50" r="10"/>
-            <line x1="20" y1="20" x2="80" y2="80" stroke-width="3"/>
+          <!-- no telemetry: an eye with a clear diagonal slash. The
+               iris is solid for visual weight; the slash crosses
+               the full glyph so the "no" reads unambiguously. -->
+          <svg viewBox="0 0 80 80" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round">
+            <!-- eye shape -->
+            <path d="M8 40 Q40 16 72 40 Q40 64 8 40 Z"/>
+            <!-- iris, filled -->
+            <circle cx="40" cy="40" r="7" fill="currentColor"/>
+            <!-- diagonal slash, drawn over a small background gap so
+                 it visually cuts the eye in two -->
+            <line x1="14" y1="10" x2="66" y2="70" stroke-width="3.6" stroke="var(--bg)"/>
+            <line x1="14" y1="10" x2="66" y2="70" stroke-width="2.4"/>
           </svg>
         </div>
         <div class="meta">

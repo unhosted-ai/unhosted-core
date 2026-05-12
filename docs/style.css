@@ -2626,11 +2626,11 @@ hr.divider {
   border-color: var(--card-line);
 }
 .bento-modes .card .art {
-  height: 72px;
+  height: 96px;
   align-items: flex-start;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
-.bento-modes .card .art svg { width: 56px; height: 56px; color: var(--fg); opacity: 0.9; }
+.bento-modes .card .art svg { width: 80px; height: 80px; color: var(--fg); opacity: 1; }
 
 /* a 2px accent bar on the top edge that subtly differentiates each
    mode without inverting the whole card. local: solid accent (the
@@ -2781,8 +2781,8 @@ hr.divider {
   background: var(--card);
   border: 1px solid var(--card-line);
 }
-.bento-promises .card .art { height: 64px; }
-.bento-promises .card .art svg { width: 52px; height: 52px; color: var(--fg); opacity: 0.85; }
+.bento-promises .card .art { height: 84px; }
+.bento-promises .card .art svg { width: 72px; height: 72px; color: var(--fg); opacity: 0.92; }
 
 /* responsive */
 @media (max-width: 760px) {
