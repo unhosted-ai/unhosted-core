@@ -11,6 +11,7 @@
 pub mod auth;
 pub mod discovery;
 pub mod identity;
+pub mod paths;
 pub mod peer;
 pub mod relay_client;
 pub mod router;

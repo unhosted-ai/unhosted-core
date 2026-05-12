@@ -45,15 +45,11 @@ pub struct PeerRegistry {
 
 impl PeerRegistry {
     /// Where the registry is stored on disk.
-    /// Honors `XDG_CONFIG_HOME`; falls back to `~/.config/unhosted/peers.toml`.
+    /// Honors `XDG_CONFIG_HOME` everywhere; falls back to
+    /// `~/.config/unhosted/peers.toml` on Unix and
+    /// `%USERPROFILE%\.config\unhosted\peers.toml` on Windows.
     pub fn config_path() -> Result<PathBuf> {
-        let dir = if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-            PathBuf::from(xdg)
-        } else {
-            let home = std::env::var("HOME").context("HOME env var not set")?;
-            PathBuf::from(home).join(".config")
-        };
-        Ok(dir.join("unhosted").join("peers.toml"))
+        crate::paths::config_file("peers.toml")
     }
 
     /// Load from disk. Returns an empty registry if no config file exists.

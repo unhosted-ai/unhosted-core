@@ -166,13 +166,7 @@ impl Identity {
 }
 
 pub fn config_path() -> Result<PathBuf> {
-    let dir = if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        PathBuf::from(xdg)
-    } else {
-        let home = std::env::var("HOME").context("HOME env var not set")?;
-        PathBuf::from(home).join(".config")
-    };
-    Ok(dir.join("unhosted").join("identity.toml"))
+    crate::paths::config_file("identity.toml")
 }
 
 #[cfg(test)]

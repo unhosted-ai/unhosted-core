@@ -198,13 +198,7 @@ impl LocalToken {
 }
 
 pub fn token_path() -> Result<PathBuf> {
-    let dir = if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        PathBuf::from(xdg)
-    } else {
-        let home = std::env::var("HOME").context("HOME env var not set")?;
-        PathBuf::from(home).join(".config")
-    };
-    Ok(dir.join("unhosted").join("api-token.txt"))
+    crate::paths::config_file("api-token.txt")
 }
 
 /// Classify an incoming request. Pure-ish — only mutates the replay

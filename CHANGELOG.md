@@ -6,6 +6,21 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.6] — 2026-05-12
+
+### Fixed
+- **Windows: `unhosted serve` now starts.** The daemon previously aborted at startup on every Windows machine with `Error: HOME env var not set` — peer registry, identity, and the local API token all read `HOME` directly, which doesn't exist on Windows (it's `USERPROFILE` there). Surfaced by the new release smoke test on `windows-latest`. New `paths::home_dir()` tries `HOME → USERPROFILE → HOMEDRIVE+HOMEPATH` in order. `--version` and `doctor` already worked; the bug only hit `serve` because only it touches the peer registry.
+
+### Added
+- **macOS `.dmg` installer.** v0.0.6 onwards ships `unhosted-aarch64-apple-darwin.dmg` as a release asset — actual double-click install, no tarball-and-drag dance. `scripts/build-dmg.sh` wraps the `.app` via `hdiutil`.
+- **Release smoke-test CI** (`.github/workflows/smoke-release.yml`). Triggers on every release publish. Downloads the artifact for macOS, Linux x86_64/arm64, and Windows; runs `--version` + `doctor`, then starts the daemon and asserts `/health` returns 200 and `/v1/run` returns the structured 503 when no runtime is up. Catches platform-specific regressions before they reach users.
+
+### Page
+- **Modes section rebuilt.** The three "mode" cards used near-identical concentric-circle icons. Replaced with a real relational trust-radius diagram (one figure, three labelled rings, clickable to scroll), three visually distinct mode icons (single device / paired devices / you-among-mesh), and a `<details>` "what does that actually mean?" expansion under each card with hardware / network / privacy / cost / flow as a key-value list.
+- **Status pills on mode cards** (`shipped · v0.0.1`, `building · v0.0.4`, `designed · v0.3.0+`).
+- **Margins fixed.** Single `--prose-max: 720px` for all sub-paragraphs (was: 620 / 720 / 760 / 820 mixed), `--pad` clamps `24px → 64px` via viewport width, `--max` reduced 1320 → 1240px.
+- **Footer credit.** `built by sinhaankur.com · open-source pet project, kept light on purpose`.
+
 ## [0.0.5] — 2026-05-12
 
 ### Fixed
