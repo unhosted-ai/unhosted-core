@@ -3054,6 +3054,265 @@ hr.divider {
   max-width: var(--max);
 }
 
+/* ==========================================================================
+   phone install — iphone + android PWA setup with a QR generator.
+   The daemon's web UI is a Progressive Web App; users install it by
+   pointing safari/chrome at http://<host-lan-ip>:7777 and adding to
+   home screen. Typing the IP on a phone is friction — the QR removes it.
+   ========================================================================== */
+
+.phone-install {
+  margin-top: 36px;
+  padding-top: 32px;
+  border-top: 1px solid var(--card-line);
+}
+.phone-head {
+  margin-bottom: 22px;
+}
+.phone-head h4 {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0 0 8px;
+}
+.phone-head p {
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--fg);
+  opacity: 0.78;
+  margin: 0;
+  max-width: 720px;
+}
+
+.phone-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.phone-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 18px 24px;
+  background: var(--card);
+  border: 1px solid var(--card-line);
+  border-radius: 12px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform .15s ease, border-color .15s ease, background .15s ease;
+}
+.phone-btn:hover { transform: translateY(-1px); border-color: var(--fg); }
+.phone-btn.is-active {
+  background: var(--fg);
+  color: var(--bg);
+  border-color: var(--fg);
+}
+.phone-btn .phone-glyph {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.phone-panel {
+  border: 1px solid var(--card-line);
+  border-radius: 12px;
+  background: var(--card);
+  padding: 22px;
+}
+.phone-panel[hidden] { display: none; }
+
+.phone-grid {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+/* QR column */
+.phone-qr {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+}
+.phone-qr-canvas {
+  width: 200px;
+  height: 200px;
+  border: 1px dashed var(--card-line);
+  border-radius: 10px;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+}
+.phone-qr-canvas svg {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+.phone-qr-hint {
+  font-size: 11.5px;
+  color: var(--mute);
+  text-align: center;
+  line-height: 1.45;
+  padding: 0 6px;
+}
+.phone-qr-input-wrap {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.phone-input-label {
+  font-size: 11.5px;
+  color: var(--mute);
+  letter-spacing: 0.04em;
+}
+.phone-qr-input {
+  width: 100%;
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  font-size: 13px;
+  padding: 8px 10px;
+  border: 1px solid var(--card-line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  outline: none;
+  transition: border-color .12s ease;
+}
+.phone-qr-input:focus { border-color: var(--fg); }
+.phone-qr-url {
+  font-size: 12px;
+  color: var(--mute);
+  margin: 0;
+  word-break: break-all;
+  text-align: center;
+  width: 100%;
+}
+.phone-qr-url code {
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  font-size: 12px;
+  background: rgba(10, 10, 10, 0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--fg);
+}
+
+/* Steps column */
+.phone-steps {
+  list-style: none;
+  counter-reset: phone-step;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.phone-steps li {
+  counter-increment: phone-step;
+  padding-left: 32px;
+  position: relative;
+  font-size: 14.5px;
+  line-height: 1.55;
+}
+.phone-steps li::before {
+  content: counter(phone-step, decimal-leading-zero);
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--mute);
+  letter-spacing: 0.04em;
+  background: var(--bg);
+  border: 1px solid var(--card-line);
+  border-radius: 999px;
+  padding: 2px 7px;
+  line-height: 1.2;
+}
+.phone-steps li strong {
+  font-weight: 600;
+  display: block;
+  margin-bottom: 4px;
+}
+.phone-step-note {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--mute);
+  line-height: 1.55;
+}
+.phone-step-note em { font-style: normal; font-weight: 500; color: var(--fg); }
+.phone-step-note code,
+.phone-steps li code {
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  font-size: 12px;
+  background: rgba(10, 10, 10, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--fg);
+}
+.phone-steps pre {
+  margin: 6px 0 0;
+  background: var(--fg);
+  color: var(--bg);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  overflow-x: auto;
+}
+.phone-steps pre code { background: transparent; color: inherit; padding: 0; }
+.phone-lan {
+  margin-top: 4px;
+  font-size: 13px;
+}
+.phone-lan summary {
+  cursor: pointer;
+  color: var(--mute);
+  font-weight: 500;
+  list-style: none;
+}
+.phone-lan summary::-webkit-details-marker { display: none; }
+.phone-lan summary::after { content: " ↓"; opacity: 0.7; }
+.phone-lan[open] summary::after { content: " ↑"; }
+.phone-lan p { margin: 6px 0 0; font-size: 12.5px; color: var(--mute); }
+.phone-lan p strong { color: var(--fg); font-weight: 500; }
+
+.phone-foot {
+  margin: 22px 0 0;
+  font-size: 12.5px;
+  color: var(--mute);
+  line-height: 1.55;
+}
+.phone-foot a { color: var(--fg); }
+.phone-foot a:hover { color: var(--accent); }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .phone-qr-url code,
+  :root:not([data-theme="light"]) .phone-step-note code,
+  :root:not([data-theme="light"]) .phone-steps li code {
+    background: rgba(245, 245, 240, 0.08);
+  }
+}
+:root[data-theme="dark"] .phone-qr-url code,
+:root[data-theme="dark"] .phone-step-note code,
+:root[data-theme="dark"] .phone-steps li code {
+  background: rgba(245, 245, 240, 0.08);
+}
+
+@media (max-width: 760px) {
+  .phone-grid { grid-template-columns: 1fr; gap: 18px; }
+  .phone-qr { align-self: center; }
+}
+
 /* --- restore restraint on the cards on touch + reduced-motion --- */
 @media (hover: none) {
   .bento .card .more { display: none; }

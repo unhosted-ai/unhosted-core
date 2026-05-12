@@ -779,6 +779,87 @@ your prompt
       <p class="ei-foot">all installers fetch the latest <code>v0.0.5</code> tarball from <a href="https://github.com/unhosted-ai/unhosted-core/releases/latest">github releases</a>. nothing leaves your machine after install — see <a href="#network">network &amp; security</a>.</p>
     </div>
 
+    <!-- phone install: PWA from the daemon's web UI. Two buttons that
+         expand to platform-specific setup steps with a QR generator. -->
+    <section class="phone-install" id="phone">
+      <header class="phone-head">
+        <h4>on your phone</h4>
+        <p>chat from your iphone or android against the daemon on your mac. it's the same web ui, served by your daemon, installed to your home screen as a progressive web app. no app store, no signup, no native bundle.</p>
+      </header>
+
+      <div class="phone-buttons" role="tablist" aria-label="install on phone">
+        <button class="phone-btn" type="button" data-phone-target="ios" role="tab" aria-selected="false" aria-controls="phone-panel-ios">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="phone-glyph">
+            <path d="M17.05 12.04c-.02-2.27 1.86-3.36 1.94-3.42-1.06-1.55-2.7-1.76-3.28-1.79-1.4-.14-2.73.82-3.44.82-.71 0-1.81-.8-2.97-.78-1.53.02-2.94.89-3.73 2.25-1.59 2.75-.41 6.83 1.14 9.07.76 1.1 1.66 2.34 2.84 2.3 1.14-.05 1.57-.74 2.95-.74 1.38 0 1.77.74 2.97.71 1.23-.02 2-1.12 2.75-2.23.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.42-3.6zM14.83 4.55c.62-.76 1.05-1.81.93-2.86-.9.04-2 .6-2.65 1.35-.58.66-1.08 1.74-.95 2.76 1.01.08 2.04-.51 2.67-1.25z"/>
+          </svg>
+          <span>iphone · ipad</span>
+        </button>
+        <button class="phone-btn" type="button" data-phone-target="android" role="tab" aria-selected="false" aria-controls="phone-panel-android">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="phone-glyph">
+            <path d="M17.6 9.48l1.84-3.18a.4.4 0 1 0-.7-.4l-1.86 3.22a11.7 11.7 0 0 0-9.76 0L5.26 5.9a.4.4 0 1 0-.7.4L6.4 9.48A11.16 11.16 0 0 0 1 18.5h22a11.16 11.16 0 0 0-5.4-9.02zM7 15.25a.94.94 0 1 1 0-1.88.94.94 0 0 1 0 1.88zm10 0a.94.94 0 1 1 0-1.88.94.94 0 0 1 0 1.88z"/>
+          </svg>
+          <span>android</span>
+        </button>
+      </div>
+
+      <!-- Shared QR + IP-input panel. Single component reused by both
+           targets; only the install-steps copy below differs. -->
+      <div class="phone-panel" id="phone-panel-ios" data-phone-panel hidden>
+        <div class="phone-grid">
+          <div class="phone-qr">
+            <div class="phone-qr-canvas" id="phone-qr-canvas" aria-label="qr code for the daemon URL">
+              <span class="phone-qr-hint">enter your computer's lan ip to generate a qr code</span>
+            </div>
+            <div class="phone-qr-input-wrap">
+              <label class="phone-input-label" for="phone-qr-ip">your computer's lan ip</label>
+              <input
+                id="phone-qr-ip"
+                class="phone-qr-input"
+                type="text"
+                inputmode="decimal"
+                placeholder="192.168.1.42"
+                autocomplete="off"
+                spellcheck="false"
+              >
+            </div>
+            <p class="phone-qr-url">
+              <code id="phone-qr-url-text">http://&lt;your-ip&gt;:7777</code>
+            </p>
+          </div>
+
+          <ol class="phone-steps">
+            <li>
+              <strong>start the daemon on the host machine</strong>
+              <p class="phone-step-note">on your mac / linux box / windows pc — wherever <code>unhosted</code> is installed. binding to <code>0.0.0.0</code> exposes it to your lan.</p>
+              <pre><code>unhosted serve --addr 0.0.0.0:7777</code></pre>
+            </li>
+            <li>
+              <strong>find that machine's lan ip</strong>
+              <details class="phone-lan">
+                <summary>show the command for my os</summary>
+                <p><strong>macos:</strong> <code>ipconfig getifaddr en0</code></p>
+                <p><strong>linux:</strong> <code>hostname -I | awk '{print $1}'</code></p>
+                <p><strong>windows:</strong> <code>ipconfig | findstr IPv4</code></p>
+              </details>
+              <p class="phone-step-note">paste it into the field on the left. the qr code updates as you type.</p>
+            </li>
+            <li>
+              <strong>scan the qr code from your phone's camera</strong>
+              <p class="phone-step-note phone-step-ios">iphone: open the camera app, point at the qr, tap the safari banner.</p>
+              <p class="phone-step-note phone-step-android">android: open the camera (or google lens), tap the link.</p>
+            </li>
+            <li>
+              <strong>add to home screen</strong>
+              <p class="phone-step-note phone-step-ios">in safari, tap the share icon at the bottom of the screen, then <em>add to home screen</em>. the app launches full-screen with the unhosted icon.</p>
+              <p class="phone-step-note phone-step-android">in chrome, tap the <code>⋮</code> menu, then <em>install app</em> (or <em>add to home screen</em>). launcher icon appears on the home grid.</p>
+            </li>
+          </ol>
+        </div>
+
+        <p class="phone-foot">phone and host must be on the same wifi. no traffic leaves your network. for off-lan access (your phone on cellular, mac at home), pair via <a href="#network">trusted-peer mode</a> — coming in v0.1.0.</p>
+      </div>
+    </section>
+
     <details class="dl-advanced">
       <summary>advanced: every per-os artifact</summary>
       <p class="sub">if you want to pin a version, host a mirror, or grab a specific arch (raspberry pi 5, intel mac via rosetta, docker), here's every artifact the release ships:</p>
@@ -1130,6 +1211,10 @@ $ unhosted run llama3.1:70b "..."
     </div>
   </footer>
 
+  <!-- Pure-JS QR generator (no deps, ~12 KB). Loaded only on this
+       page; used by the phone-install panel below. -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js" defer></script>
+
   <script>
     // OS auto-detect for the easy-install panel. Highlights the card
     // matching navigator.platform / userAgentData so the visitor sees
@@ -1144,6 +1229,86 @@ $ unhosted run llama3.1:70b "..."
       else if (/win/.test(ua)) os = "windows";
       else if (/linux|x11/.test(ua)) os = "linux";
       panel.setAttribute("data-os", os);
+    })();
+
+    // Phone install: iPhone / Android buttons toggle a single shared
+    // panel that contains a QR generator + setup steps. Steps render
+    // platform-specific notes based on which button was last clicked.
+    (function () {
+      var buttons = document.querySelectorAll(".phone-btn");
+      var panel = document.querySelector("[data-phone-panel]");
+      if (!buttons.length || !panel) return;
+
+      var ipInput = document.getElementById("phone-qr-ip");
+      var urlText = document.getElementById("phone-qr-url-text");
+      var canvas  = document.getElementById("phone-qr-canvas");
+      var current = null;
+
+      function showFor(target) {
+        var iosNotes     = document.querySelectorAll(".phone-step-ios");
+        var androidNotes = document.querySelectorAll(".phone-step-android");
+        iosNotes.forEach(function (n) { n.style.display     = target === "ios"     ? "block" : "none"; });
+        androidNotes.forEach(function (n) { n.style.display = target === "android" ? "block" : "none"; });
+        buttons.forEach(function (b) {
+          var active = b.getAttribute("data-phone-target") === target;
+          b.classList.toggle("is-active", active);
+          b.setAttribute("aria-selected", active ? "true" : "false");
+        });
+        panel.hidden = false;
+        current = target;
+      }
+
+      buttons.forEach(function (b) {
+        b.addEventListener("click", function () {
+          showFor(b.getAttribute("data-phone-target"));
+          // smooth scroll the panel into view so the user sees what just changed
+          setTimeout(function () { panel.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, 50);
+        });
+      });
+
+      // QR generator. Re-renders whenever the IP field changes.
+      // Uses the qrcode-generator UMD global (loaded via the script
+      // tag above). Falls back to a hint if the lib hasn't loaded
+      // yet — keypress events while loading just queue.
+      var qrLibTimer = null;
+      function renderQR() {
+        var raw = (ipInput.value || "").trim();
+        // Accept either "192.168.1.42" or a full "http://..." paste.
+        var url;
+        if (!raw) {
+          urlText.textContent = "http://<your-ip>:7777";
+          canvas.innerHTML = '<span class="phone-qr-hint">enter your computer’s lan ip to generate a qr code</span>';
+          return;
+        }
+        if (/^https?:\/\//i.test(raw)) {
+          url = raw;
+        } else {
+          url = "http://" + raw.replace(/^\/+/, "") + (/:\d+/.test(raw) ? "" : ":7777");
+        }
+        urlText.textContent = url;
+        if (typeof window.qrcode === "function") {
+          try {
+            var qr = window.qrcode(0, "M");
+            qr.addData(url);
+            qr.make();
+            canvas.innerHTML = qr.createSvgTag({ scalable: true, margin: 0 });
+          } catch (e) {
+            canvas.innerHTML = '<span class="phone-qr-hint">qr render failed — use the url above</span>';
+          }
+        } else if (!qrLibTimer) {
+          qrLibTimer = setInterval(function () {
+            if (typeof window.qrcode === "function") {
+              clearInterval(qrLibTimer);
+              qrLibTimer = null;
+              renderQR();
+            }
+          }, 100);
+        }
+      }
+      if (ipInput) {
+        ipInput.addEventListener("input", renderQR);
+        ipInput.addEventListener("change", renderQR);
+      }
     })();
 
     // Copy buttons in the terminal blocks.
