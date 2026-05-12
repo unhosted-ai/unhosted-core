@@ -36,6 +36,13 @@ rand = "0.8"
 base64 = "0.22"
 tokio-tungstenite = { version = "0.27", features = ["rustls-tls-webpki-roots"] }
 url = "2"
+# QUIC transport for encrypted peer-to-peer requests in trusted mode.
+# rustls 0.23 + ring is what quinn 0.11 expects; rcgen produces the
+# self-signed cert derived from each daemon's Ed25519 identity.
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls", "ring", "log"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rustls-pki-types = "1"
+rcgen = { version = "0.13", default-features = false, features = ["pem", "ring"] }
 
 [profile.release]
 opt-level = 3

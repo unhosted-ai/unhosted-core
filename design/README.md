@@ -23,3 +23,4 @@ Each ADR has:
 - [`0005-relay-and-connection-topology.md`](0005-relay-and-connection-topology.md) — direct / hole-punched / relay attempts
 - [`0006-public-mode-onboarding-and-wallet.md`](0006-public-mode-onboarding-and-wallet.md) — public-mode account model + wallet binding + first-90s flow
 - [`0007-security-hardening.md`](0007-security-hardening.md) — local bearer auth, replay defense, relay caps + rate limits
+- [`0008-quic-peer-transport.md`](0008-quic-peer-transport.md) — encrypted peer-to-peer via QUIC + Ed25519-bound certs (no separate Noise layer)

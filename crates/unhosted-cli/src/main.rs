@@ -108,6 +108,15 @@ enum Command {
         #[arg(long, default_value_t = 8)]
         timeout: u64,
     },
+    /// Round-trip ping over the QUIC peer transport. Confirms the
+    /// encrypted path between two paired daemons works end-to-end.
+    QuicPing {
+        /// Peer name (as shown in `peer list`).
+        peer: String,
+        /// Address of the local daemon.
+        #[arg(long, default_value_t = format!("http://{}", DEFAULT_NODE_ADDR))]
+        node: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -216,8 +225,45 @@ async fn main() -> Result<()> {
         } => {
             handle_punch(&node, &peer, timeout).await?;
         }
+        Command::QuicPing { peer, node } => {
+            handle_quic_ping(&node, &peer).await?;
+        }
     }
 
+    Ok(())
+}
+
+async fn handle_quic_ping(node: &str, peer: &str) -> Result<()> {
+    let url = format!("{}/v1/quic/ping", node.trim_end_matches('/'));
+    let body = serde_json::json!({ "peer": peer });
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()?;
+    let resp = client.post(&url).json(&body).send().await?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        anyhow::bail!("quic-ping request failed ({status}): {text}");
+    }
+    let parsed: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+    let ok = parsed.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+    let target = parsed
+        .get("target_addr")
+        .and_then(|v| v.as_str())
+        .unwrap_or("-");
+    let rtt = parsed
+        .get("rtt_ms")
+        .and_then(|v| v.as_u64())
+        .map(|v| format!("{v} ms"))
+        .unwrap_or_else(|| "-".into());
+    let error = parsed.get("error").and_then(|v| v.as_str());
+
+    println!("ok:         {ok}");
+    println!("target:     {target}");
+    println!("rtt:        {rtt}");
+    if let Some(err) = error {
+        println!("error:      {err}");
+    }
     Ok(())
 }
 

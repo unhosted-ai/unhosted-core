@@ -14,6 +14,7 @@ pub mod identity;
 pub mod peer;
 pub mod relay_client;
 pub mod router;
+pub mod transport;
 mod web;
 
 pub use auth::{AuthOutcome, LocalToken, ReplayGuard};
@@ -107,6 +108,9 @@ struct NodeState {
     /// Replay-protection store for signed peer requests. Keeps a
     /// (pubkey, ts, sig_prefix) set with TTL == verify-window.
     replay_guard: Arc<std::sync::Mutex<ReplayGuard>>,
+    /// Shared QUIC endpoint for outbound peer dials. `None` if the
+    /// daemon couldn't bind a UDP port for QUIC at startup.
+    quic: Option<Arc<transport::PeerEndpoint>>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -174,6 +178,36 @@ pub async fn serve(node: Node) -> Result<()> {
     let local_token = LocalToken::load_or_create().context("loading local API token")?;
     let replay_guard = Arc::new(std::sync::Mutex::new(ReplayGuard::new()));
 
+    // QUIC endpoint on the next port up from HTTP. Best-effort: if the
+    // port is taken we log and continue with HTTP-only routing.
+    let quic_bind = SocketAddr::new(node.addr.ip(), node.addr.port().saturating_add(1));
+    let registry_for_quic = registry.clone();
+    let quic = match transport::PeerEndpoint::bind(quic_bind, &identity, registry_for_quic) {
+        Ok(ep) => {
+            let our_pk = identity.public_b64();
+            let endpoint_handle = ep.handle();
+            tokio::spawn(async move {
+                while let Some(incoming) = endpoint_handle.accept().await {
+                    let pk = our_pk.clone();
+                    tokio::spawn(async move {
+                        match incoming.await {
+                            Ok(conn) => transport::ping_responder(conn, pk).await,
+                            Err(e) => {
+                                tracing::debug!(error = %e, "quic: peer handshake refused (unknown identity)")
+                            }
+                        }
+                    });
+                }
+            });
+            tracing::info!(addr = %quic_bind, "quic peer endpoint listening");
+            Some(Arc::new(ep))
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, addr = %quic_bind, "quic: failed to bind — peer encryption disabled");
+            None
+        }
+    };
+
     let state = NodeState {
         node: Arc::new(node.clone()),
         router: router.clone(),
@@ -184,6 +218,7 @@ pub async fn serve(node: Node) -> Result<()> {
         relay,
         local_token: local_token.clone(),
         replay_guard,
+        quic,
     };
 
     // Dispatcher for inbound relay requests: peer sent us a request via the
@@ -213,6 +248,7 @@ pub async fn serve(node: Node) -> Result<()> {
         .route("/v1/pair/short-offer", post(pair_short_offer_handler))
         .route("/v1/pair/use-code", post(pair_use_code_handler))
         .route("/v1/punch", post(punch_handler))
+        .route("/v1/quic/ping", post(quic_ping_handler))
         .route("/v1/identity", get(identity_handler))
         .route("/v1/auth/token", get(auth_token_handler))
         // OpenAI-compatible endpoints — any client that speaks OpenAI's HTTP
@@ -1119,6 +1155,82 @@ async fn punch_handler(
             bidirectional: false,
             peer_addr: None,
             local_port: None,
+            error: Some(e.to_string()),
+        })),
+    }
+}
+
+#[derive(Deserialize)]
+struct QuicPingRequest {
+    /// Name of an already-paired peer in the registry.
+    peer: String,
+}
+
+#[derive(Serialize)]
+struct QuicPingResponse {
+    /// True when both sides completed the QUIC handshake and exchanged
+    /// the ping/pong stream. False with `error` set otherwise.
+    ok: bool,
+    /// Round-trip in milliseconds.
+    rtt_ms: Option<u64>,
+    /// Address dialed (`<peer-addr-ip>:<peer-port+1>`).
+    target_addr: Option<String>,
+    error: Option<String>,
+}
+
+/// `POST /v1/quic/ping` — diagnostic. Dials the peer's QUIC endpoint
+/// (UDP, port+1 from their HTTP addr), runs the cert-key check, and
+/// times a round-trip on a single bidi stream. Confirms the encrypted
+/// peer-to-peer path works end-to-end on this network. v0.0.4 uses
+/// QUIC only for this diagnostic; `/v1/run` still rides HTTP.
+async fn quic_ping_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(req): Json<QuicPingRequest>,
+) -> Result<axum::Json<QuicPingResponse>, (StatusCode, String)> {
+    let _ = &req;
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    if require_auth(&outcome, true).is_err() {
+        return Err((StatusCode::UNAUTHORIZED, "unauthorized".into()));
+    }
+
+    let Some(quic) = state.quic.clone() else {
+        return Ok(axum::Json(QuicPingResponse {
+            ok: false,
+            rtt_ms: None,
+            target_addr: None,
+            error: Some("quic endpoint failed to bind at startup".into()),
+        }));
+    };
+
+    let peer_http_addr = {
+        let reg = state
+            .registry
+            .lock()
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "registry poisoned".into()))?;
+        reg.peers
+            .iter()
+            .find(|p| p.name == req.peer)
+            .map(|p| p.addr)
+            .ok_or((StatusCode::NOT_FOUND, format!("no peer named {}", req.peer)))?
+    };
+    let target = SocketAddr::new(peer_http_addr.ip(), peer_http_addr.port().saturating_add(1));
+
+    match quic
+        .ping(target, &state.identity.public_b64())
+        .await
+    {
+        Ok(rtt) => Ok(axum::Json(QuicPingResponse {
+            ok: true,
+            rtt_ms: Some(rtt.as_millis() as u64),
+            target_addr: Some(target.to_string()),
+            error: None,
+        })),
+        Err(e) => Ok(axum::Json(QuicPingResponse {
+            ok: false,
+            rtt_ms: None,
+            target_addr: Some(target.to_string()),
             error: Some(e.to_string()),
         })),
     }

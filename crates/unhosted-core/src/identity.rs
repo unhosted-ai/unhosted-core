@@ -84,6 +84,12 @@ impl Identity {
         B64.encode(self.signing.verifying_key().to_bytes())
     }
 
+    /// Raw 32-byte Ed25519 secret. Used by the transport module to
+    /// derive a self-signed TLS cert; the bytes never leave the process.
+    pub fn secret_bytes(&self) -> [u8; 32] {
+        self.signing.to_bytes()
+    }
+
     pub fn sign(&self, message: &[u8]) -> String {
         let sig: Signature = self.signing.sign(message);
         B64.encode(sig.to_bytes())
