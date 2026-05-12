@@ -144,7 +144,11 @@ function runQuickstartRail() {
   const steps = Array.from(document.querySelectorAll(".qs-step"));
   if (!rail || !fill || dots.length === 0) return;
 
-  // Hover wiring stays available regardless of motion-reduced.
+  // Hover + click wiring. Steps live on a horizontal scroll-snap
+  // rail (.qs-steps). Clicking a dot scrolls the carousel
+  // *horizontally* to that step rather than jumping the whole
+  // page via the anchor href.
+  const railSteps = document.querySelector(".qs-steps");
   steps.forEach((step, i) => {
     const dot = dots[i];
     if (!dot) return;
@@ -154,10 +158,41 @@ function runQuickstartRail() {
     step.addEventListener("mouseleave", blur);
     step.addEventListener("focusin", focus);
     step.addEventListener("focusout", blur);
-    dot.addEventListener("mouseenter", () =>
-      step.scrollIntoView({ block: "nearest", behavior: "smooth" }),
-    );
+    dot.addEventListener("click", (e) => {
+      e.preventDefault();
+      // Pan the carousel container to the step. inline: "start"
+      // keeps the card flush to the left edge of the rail so the
+      // next two are previewed beyond it.
+      step.scrollIntoView({ block: "nearest", inline: "start", behavior: "smooth" });
+      focus();
+    });
   });
+
+  // Live-update which dot is active as the user pans the carousel
+  // (touch, trackpad, arrow keys). The dot whose step is most
+  // centered in the viewport "wins".
+  if (railSteps && "IntersectionObserver" in window) {
+    const obs = new IntersectionObserver(
+      (entries) => {
+        let bestIdx = -1;
+        let bestRatio = 0;
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && entry.intersectionRatio > bestRatio) {
+            const idx = steps.indexOf(entry.target);
+            if (idx >= 0) {
+              bestIdx = idx;
+              bestRatio = entry.intersectionRatio;
+            }
+          }
+        });
+        if (bestIdx >= 0) {
+          dots.forEach((d, j) => d.classList.toggle("is-active", j === bestIdx));
+        }
+      },
+      { root: railSteps, threshold: [0.4, 0.6, 0.8] },
+    );
+    steps.forEach((step) => obs.observe(step));
+  }
 
   // Entrance animation: fill the rail, light the dots in sequence,
   // stagger the cards. Triggered on first viewport entry.
