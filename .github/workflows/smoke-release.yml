@@ -132,12 +132,29 @@ jobs:
 
           Write-Host
           Write-Host "→ start daemon, probe /health + /v1/run"
-          $proc = Start-Process -FilePath ".\$BIN" -ArgumentList "serve" -PassThru -NoNewWindow -RedirectStandardOutput daemon.log -RedirectStandardError daemon.err.log
-          Start-Sleep -Seconds 4
+          $proc = Start-Process -FilePath ".\$BIN" -ArgumentList "serve","--addr","127.0.0.1:7777" -PassThru -NoNewWindow -RedirectStandardOutput daemon.log -RedirectStandardError daemon.err.log
 
-          $h = Invoke-WebRequest -Uri "http://127.0.0.1:7777/health" -UseBasicParsing
-          Write-Host "  /health: HTTP $($h.StatusCode)"
-          if ($h.StatusCode -ne 200) { throw "/health not 200" }
+          # Windows Defender's first-run scan can delay startup well past
+          # the 4 seconds we used to wait. Poll /health up to 30 s, then
+          # dump the daemon logs if we still can't reach it — that gives
+          # a real diagnostic instead of bare "connection refused".
+          $ready = $false
+          for ($i = 0; $i -lt 30; $i++) {
+            Start-Sleep -Seconds 1
+            try {
+              $h = Invoke-WebRequest -Uri "http://127.0.0.1:7777/health" -UseBasicParsing -TimeoutSec 2
+              if ($h.StatusCode -eq 200) { $ready = $true; break }
+            } catch {}
+          }
+          if (-not $ready) {
+            Write-Host "FAIL: daemon never accepted /health within 30s"
+            Write-Host "--- daemon.log ---"
+            if (Test-Path daemon.log) { Get-Content daemon.log } else { Write-Host "(empty)" }
+            Write-Host "--- daemon.err.log ---"
+            if (Test-Path daemon.err.log) { Get-Content daemon.err.log } else { Write-Host "(empty)" }
+            throw "/health never returned 200"
+          }
+          Write-Host "  /health: HTTP 200 (after $i s)"
 
           try {
             $r = Invoke-WebRequest -Uri "http://127.0.0.1:7777/v1/run" -Method POST -Body '{"prompt":"hi","max_tokens":4}' -ContentType "application/json" -UseBasicParsing

@@ -2257,6 +2257,322 @@ hr.divider {
 }
 
 /* ==========================================================================
+   margin / prose-width normalization — the last word.
+   Before this block, different sections capped their prose paragraphs
+   at widely different max-widths (620 / 720 / 760 / 820px) while the
+   section heads + grids underneath them ran to the full 1224px content
+   area. That width mismatch is what reads as "the page goes left and
+   right" — the eye jumps between long lines, short lines, long lines.
+   Fix: one prose width, scaling outer padding via clamp().
+   ========================================================================== */
+
+:root {
+  --prose-max: 720px;
+  /* outer side padding: 24px on phones, ~4% in between, 64px on wide
+     displays. Replaces the hard 48px / 24px step that made the page
+     feel cramped on tablets and over-padded on laptops. */
+  --pad: clamp(24px, 4vw, 64px);
+}
+
+/* the readable-prose column used everywhere */
+.lede .sub,
+.section-sub,
+.quickstart .sub,
+.netsec .sub,
+.download .sub,
+.desktop-install .sub,
+.backend-use .sub,
+.faq .section-sub,
+.modes-section .section-sub,
+.howitworks .section-sub,
+.status .section-sub,
+.hiw-body p,
+.ei-foot,
+.status-foot,
+.netsec-note {
+  max-width: var(--prose-max);
+}
+
+/* section-head titles should sit on the same left rail as everything
+   below them. Cap their flex content to a sensible upper width on
+   very wide displays so the view-all link doesn't drift miles to the
+   right of the title. */
+.quickstart .head,
+.modes-section .head,
+.howitworks .head,
+.status .head,
+.netsec .head,
+.download .head,
+.backend-use .head,
+.milestones .head,
+.faq .head {
+  max-width: var(--max);
+}
+
+/* unified horizontal rhythm — every main wrapper anchors to the same
+   left edge (var(--pad)) and stretches no further than --max. This
+   should already be true everywhere; restating it as a safety net so
+   one stray section can't break the column. */
+.pitch,
+.quickstart,
+.modes-section,
+.bento,
+.howitworks,
+.status,
+.netsec,
+.download,
+.backend-use,
+.milestones,
+.faq {
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: var(--pad);
+  padding-right: var(--pad);
+}
+
+/* divider treatment — it was 8px x var(--pad), which on wide screens
+   left a thin line floating in the middle of a sea of whitespace.
+   Stretch it to the same content max-width as the sections. */
+hr.divider {
+  width: 100%;
+  max-width: var(--max);
+  margin: 12px auto;
+}
+
+/* very wide displays: keep the content from sprawling. 1320 felt
+   spacious on 2K monitors but disconnected on ultrawides — bring the
+   ceiling down to 1240 and let `--pad` clamp do the rest. */
+:root { --max: 1240px; }
+
+/* ==========================================================================
+   trust-radius diagram — the relational view. Three labelled rings, each
+   clickable to scroll to its matching card below. Replaces the previous
+   "three near-identical circle icons in three cards" pattern.
+   ========================================================================== */
+
+.radius-diagram {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  margin: 0 auto 36px;
+  max-width: 480px;
+  padding: 0;
+}
+.radius-diagram svg {
+  width: 100%;
+  height: auto;
+  max-width: 360px;
+  color: var(--fg);
+}
+.radius-diagram figcaption {
+  font-size: 13px;
+  color: var(--mute);
+  text-align: center;
+  max-width: 460px;
+  line-height: 1.55;
+}
+
+.radius-diagram .ring {
+  cursor: pointer;
+  transition: opacity .15s ease;
+  text-decoration: none;
+}
+.radius-diagram .ring text {
+  fill: var(--fg);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-weight: 500;
+  text-transform: lowercase;
+}
+.radius-diagram .ring-label { font-size: 11px; }
+.radius-diagram .ring-note  { font-size: 9px; fill: var(--mute); }
+.radius-diagram .ring-label.inside { fill: var(--bg); font-size: 14px; font-weight: 700; }
+.radius-diagram .ring-note.inside  { fill: rgba(245, 245, 240, 0.75); font-size: 9px; }
+.radius-diagram .ring-you { font-size: 9px; fill: rgba(245, 245, 240, 0.85); font-weight: 500; }
+
+.radius-diagram .ring-local circle { transition: fill .15s ease; }
+.radius-diagram .ring-local:hover circle { fill: var(--accent); }
+.radius-diagram .ring-trusted:hover circle,
+.radius-diagram .ring-public:hover circle { stroke: var(--accent); }
+.radius-diagram .ring-trusted text,
+.radius-diagram .ring-public text { transition: fill .15s ease; }
+.radius-diagram .ring-trusted:hover text:not(.ring-note),
+.radius-diagram .ring-public:hover text:not(.ring-note) { fill: var(--accent); }
+
+/* ==========================================================================
+   bento variants: split modes (3 wide, equal) from commitments (3 wide,
+   muted). Removes the asymmetric card spans (local was 2 cols, open was
+   2 cols) that made the original bento feel like a jigsaw rather than
+   a categorised grid.
+   ========================================================================== */
+
+.bento-modes,
+.bento-promises {
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  padding: 0;
+  margin: 0 auto 24px;
+  max-width: var(--max);
+}
+/* override the legacy column spans inside the new mode grid */
+.bento-modes  .card-local,
+.bento-modes  .card-trusted,
+.bento-modes  .card-public,
+.bento-promises .card-honest,
+.bento-promises .card-open,
+.bento-promises .card-private {
+  grid-column: span 1;
+}
+
+/* mode cards: distinct identity */
+.bento-modes .card { min-height: 0; }
+.bento-modes .card .art {
+  height: 78px;
+  align-items: flex-start;
+  margin-bottom: 2px;
+}
+.bento-modes .card .art svg { width: 64px; height: 64px; }
+.bento-modes .card-local {
+  background: var(--fg);
+  color: var(--bg);
+  border-color: var(--fg);
+}
+.bento-modes .card-local p,
+.bento-modes .card-local .meta .label,
+.bento-modes .card-local .art { color: var(--bg); }
+.bento-modes .card-local .meta .dot { background: var(--accent); }
+
+/* status pill inside a mode card's meta row */
+.bento-modes .card .meta {
+  flex-wrap: wrap;
+  gap: 6px 8px;
+}
+.bento-modes .card .meta .pill {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--card-line);
+  color: var(--mute);
+  background: transparent;
+  margin-left: auto;
+}
+.bento-modes .card .meta .pill-on  { color: var(--accent); border-color: var(--accent); }
+.bento-modes .card .meta .pill-mid { color: var(--fg); border-color: var(--fg); opacity: 0.65; }
+.bento-modes .card-local .meta .pill-on { color: var(--accent); border-color: var(--accent); }
+.bento-modes .card-local .meta .pill { background: transparent; border-color: rgba(245, 245, 240, 0.3); color: rgba(245, 245, 240, 0.8); }
+.bento-modes .card-local .meta .pill-on { color: var(--accent); border-color: var(--accent); }
+
+/* click-to-expand details inside each mode card */
+.card-details {
+  margin-top: 10px;
+  border-top: 1px solid var(--card-line);
+  padding-top: 10px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.card-details summary {
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent);
+  list-style: none;
+  position: relative;
+  padding-right: 18px;
+  letter-spacing: 0.01em;
+}
+.card-details summary::-webkit-details-marker { display: none; }
+.card-details summary::after {
+  content: "+";
+  position: absolute;
+  right: 0;
+  top: -1px;
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  color: inherit;
+  font-weight: 400;
+}
+.card-details[open] summary::after { content: "−"; }
+.card-details .kvlist {
+  margin: 12px 0 6px;
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 6px 12px;
+  font-size: 12.5px;
+}
+.card-details .kvlist dt {
+  color: var(--mute);
+  font-weight: 500;
+  text-transform: lowercase;
+  letter-spacing: 0.03em;
+  font-size: 11.5px;
+  padding-top: 1px;
+}
+.card-details .kvlist dd {
+  margin: 0;
+  color: var(--fg);
+  line-height: 1.55;
+}
+.card-details .kvlist code {
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  background: rgba(10, 10, 10, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+  word-break: break-word;
+}
+.card-details .card-link {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+}
+.card-details .card-link:hover { text-decoration: underline; }
+
+/* dark + on-fg card overrides */
+.bento-modes .card-local .card-details {
+  border-top-color: rgba(245, 245, 240, 0.2);
+}
+.bento-modes .card-local .card-details .kvlist dt { color: rgba(245, 245, 240, 0.6); }
+.bento-modes .card-local .card-details .kvlist code {
+  background: rgba(245, 245, 240, 0.12);
+  color: var(--bg);
+}
+
+/* commitments header — separates the modes (above) from the commitments (below) */
+.modes-subhead {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--mute);
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+  margin: 28px auto 14px;
+  max-width: var(--max);
+  padding: 0;
+}
+
+/* commitments grid: muted styling so it visibly sits below the modes */
+.bento-promises .card {
+  min-height: 0;
+  background: var(--card);
+  border: 1px solid var(--card-line);
+}
+.bento-promises .card .art { height: 64px; }
+.bento-promises .card .art svg { width: 52px; height: 52px; color: var(--fg); opacity: 0.85; }
+
+/* responsive */
+@media (max-width: 760px) {
+  .bento-modes,
+  .bento-promises { grid-template-columns: 1fr; }
+  .card-details .kvlist { grid-template-columns: 80px 1fr; gap: 4px 10px; }
+  .radius-diagram { max-width: 320px; }
+}
+
+/* ==========================================================================
    easy install — OS-aware primary CTA + copy-paste one-liners.
    Three cards (Mac / Windows / Linux) all visible; the JS sets
    data-os on the wrapper, and CSS promotes the matching card.

@@ -153,94 +153,205 @@ open http://127.0.0.1:7777</code></pre>
       <h3>three modes — choose your trust radius</h3>
       <a class="view-all" href="docs.html#modes">how the radius works</a>
     </div>
-    <p class="section-sub">three concentric circles. devices you own. devices owned by people you trust. strangers' idle gpus. each layer is opt-in, and traffic never crosses an unhosted server — there isn't one.</p>
+    <p class="section-sub">trust isn't binary. these are three concentric layers — each strictly contains the one before it. you opt into each one explicitly, and traffic never crosses an unhosted server (there isn't one). click any layer below to see what's inside it.</p>
 
-  <section class="bento">
+    <!-- relational diagram: the actual trust radius, one figure, labelled.
+         each ring is hover-highlightable + clickable; clicking opens the
+         <details> for the matching mode card below. -->
+    <figure class="radius-diagram" aria-label="trust radius">
+      <svg viewBox="0 0 360 360" role="img" aria-labelledby="radius-title">
+        <title id="radius-title">trust radius: local inside trusted inside public</title>
 
-    <article class="card card-local">
-      <div class="art">
-        <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-          <circle cx="50" cy="50" r="44" stroke-dasharray="2 6" opacity="0.25"/>
-          <circle cx="50" cy="50" r="28" opacity="0.45"/>
-          <circle cx="50" cy="50" r="14" fill="currentColor"/>
-        </svg>
-      </div>
-      <div class="meta">
-        <span class="dot"></span>
-        <span class="label">local</span>
-      </div>
-      <p>your devices, your network. no internet required, no payment, no rate limit.</p>
-      <a class="more" href="docs.html#modes">learn how local works →</a>
-    </article>
+        <!-- outermost: public -->
+        <a href="#mode-public" class="ring ring-public">
+          <circle cx="180" cy="180" r="160" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 8"/>
+          <text x="180" y="34" text-anchor="middle" class="ring-label">public · pay-per-token</text>
+          <text x="180" y="52" text-anchor="middle" class="ring-note">strangers' idle gpus · usdc settlement</text>
+        </a>
 
-    <article class="card card-trusted">
-      <div class="art">
-        <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-          <circle cx="50" cy="50" r="44" stroke-dasharray="2 6" opacity="0.25"/>
-          <circle cx="50" cy="50" r="28"/>
-          <circle cx="50" cy="50" r="14" fill="currentColor" opacity="0.35"/>
-        </svg>
-      </div>
-      <div class="meta">
-        <span class="dot"></span>
-        <span class="label">trusted</span>
-      </div>
-      <p>friends, family, team. end-to-end encrypted. paired explicitly. no payment.</p>
-      <a class="more" href="#network">how pairing works →</a>
-    </article>
+        <!-- middle: trusted -->
+        <a href="#mode-trusted" class="ring ring-trusted">
+          <circle cx="180" cy="180" r="110" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <text x="180" y="88" text-anchor="middle" class="ring-label">trusted · free, encrypted</text>
+          <text x="180" y="106" text-anchor="middle" class="ring-note">friends · family · team</text>
+        </a>
 
-    <article class="card card-public">
-      <div class="art">
-        <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-          <circle cx="50" cy="50" r="44" stroke-dasharray="2 6"/>
-          <circle cx="50" cy="50" r="28" opacity="0.35"/>
-          <circle cx="50" cy="50" r="14" fill="currentColor" opacity="0.25"/>
-        </svg>
-      </div>
-      <div class="meta">
-        <span class="dot"></span>
-        <span class="label">public</span>
-      </div>
-      <p>strangers' idle gpus, paid in usdc per token. opt-in safety net. you set the ceiling.</p>
-      <a class="more" href="https://github.com/unhosted-ai/unhosted-core/blob/main/design/0001-public-mode-architecture.md">read the design →</a>
-    </article>
+        <!-- innermost: local -->
+        <a href="#mode-local" class="ring ring-local">
+          <circle cx="180" cy="180" r="60" fill="currentColor"/>
+          <text x="180" y="174" text-anchor="middle" class="ring-label inside">local</text>
+          <text x="180" y="192" text-anchor="middle" class="ring-note inside">free · private · default</text>
+        </a>
 
-    <article class="card card-honest">
-      <div class="art art-text">47 tok/s</div>
-      <div class="meta">
-        <span class="dot"></span>
-        <span class="label">honest benchmarks</span>
-      </div>
-      <p>real numbers per hardware combo. reproducible. updated. no marketing language.</p>
-      <a class="more" href="#status">what's shipped today →</a>
-    </article>
+        <!-- "you" marker at the center -->
+        <circle cx="180" cy="220" r="3" fill="var(--bg)"/>
+        <text x="180" y="240" text-anchor="middle" class="ring-you">you</text>
+      </svg>
+      <figcaption>each ring strictly contains the one inside it. flow falls back outward only when you ask it to — local first, trusted second, public last.</figcaption>
+    </figure>
 
-    <article class="card card-open">
-      <div class="art art-text mono">{ }</div>
-      <div class="meta">
-        <span class="dot"></span>
-        <span class="label">open source</span>
-      </div>
-      <p>agpl-3.0. read it, fork it, audit it. you can't host it as a paid service and pretend you wrote it.</p>
-      <a class="more" href="https://github.com/unhosted-ai/unhosted-core/blob/main/LICENSE">read the license →</a>
-    </article>
+    <!-- three mode cards: distinct icons + click-to-expand details. -->
+    <section class="bento bento-modes">
 
-    <article class="card card-private">
-      <div class="art">
-        <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-          <circle cx="50" cy="50" r="34"/>
-          <line x1="22" y1="22" x2="78" y2="78"/>
-        </svg>
-      </div>
-      <div class="meta">
-        <span class="dot"></span>
-        <span class="label">no telemetry by default</span>
-      </div>
-      <p>opt-in only. plain-english explanation of exactly what gets sent, every time.</p>
-      <a class="more" href="#network">privacy details →</a>
-    </article>
+      <article class="card card-local" id="mode-local">
+        <div class="art" aria-hidden="true">
+          <!-- "you" — a single solid device on a closed home boundary -->
+          <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2.2">
+            <rect x="14" y="14" width="72" height="72" rx="8" stroke-dasharray="2 5" opacity="0.45"/>
+            <rect x="34" y="40" width="32" height="22" rx="2" fill="currentColor"/>
+            <line x1="42" y1="62" x2="58" y2="62" stroke-width="3"/>
+          </svg>
+        </div>
+        <div class="meta">
+          <span class="dot"></span>
+          <span class="label">local</span>
+          <span class="pill pill-on">shipped · v0.0.1</span>
+        </div>
+        <p>your devices, your network. no internet required, no payment, no rate limit.</p>
+        <details class="card-details">
+          <summary>what does that actually mean?</summary>
+          <dl class="kvlist">
+            <dt>hardware</dt><dd>your laptop, gaming pc, home server, raspberry pi mesh. anything you own.</dd>
+            <dt>network</dt><dd>loopback or your home wifi. mdns finds peers automatically. nothing leaves the lan.</dd>
+            <dt>privacy</dt><dd>daemon writes nothing to disk. prompts disappear after inference. conversation history is browser localstorage on your device.</dd>
+            <dt>cost</dt><dd>free, forever. no api keys, no rate limits, no analytics.</dd>
+            <dt>flow</dt><dd><code>you → daemon :7777 → llama-server/ollama/lm studio → tokens stream back</code></dd>
+          </dl>
+        </details>
+      </article>
 
-  </section>
+      <article class="card card-trusted" id="mode-trusted">
+        <div class="art" aria-hidden="true">
+          <!-- "two paired devices" — two solid nodes connected by a key/link -->
+          <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2.2">
+            <rect x="14" y="34" width="26" height="32" rx="2" fill="currentColor" opacity="0.85"/>
+            <rect x="60" y="34" width="26" height="32" rx="2" fill="currentColor" opacity="0.45"/>
+            <path d="M40 50 L60 50" stroke-width="2.5"/>
+            <circle cx="50" cy="50" r="4" fill="none" stroke-width="2"/>
+            <line x1="42" y1="66" x2="34" y2="66" stroke-width="2"/>
+            <line x1="62" y1="66" x2="74" y2="66" stroke-width="2"/>
+          </svg>
+        </div>
+        <div class="meta">
+          <span class="dot"></span>
+          <span class="label">trusted</span>
+          <span class="pill pill-mid">building · v0.0.4</span>
+        </div>
+        <p>friends, family, team. end-to-end encrypted. paired explicitly. no payment.</p>
+        <details class="card-details">
+          <summary>what does that actually mean?</summary>
+          <dl class="kvlist">
+            <dt>hardware</dt><dd>any device that ran <code>unhosted pair</code> with you. roommate's pc, your remote homelab, a teammate's mac.</dd>
+            <dt>network</dt><dd>quic over the internet, tls 1.3, cert pinned to ed25519 pubkey. relay-coordinated hole punch when both peers are behind nat.</dd>
+            <dt>pairing</dt><dd>4-letter code or <code>unhosted://pair?…</code> uri shared out of band (signal, in person, qr). 5-minute ttl. nothing pairs silently.</dd>
+            <dt>privacy</dt><dd>the relay never sees plaintext. mitm impossible because pubkey is the identity.</dd>
+            <dt>flow</dt><dd><code>you → daemon → quic+tls → friend's daemon → friend's runtime → tokens back</code></dd>
+          </dl>
+          <a class="card-link" href="#network">→ network &amp; security details</a>
+        </details>
+      </article>
+
+      <article class="card card-public" id="mode-public">
+        <div class="art" aria-hidden="true">
+          <!-- "you among many" — center solid node with a scatter of unpaired nodes around -->
+          <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="50" cy="50" r="6" fill="currentColor"/>
+            <circle cx="22" cy="28" r="3" fill="currentColor" opacity="0.45"/>
+            <circle cx="80" cy="22" r="3" fill="currentColor" opacity="0.45"/>
+            <circle cx="18" cy="68" r="3" fill="currentColor" opacity="0.45"/>
+            <circle cx="82" cy="74" r="3" fill="currentColor" opacity="0.45"/>
+            <circle cx="50" cy="14" r="3" fill="currentColor" opacity="0.45"/>
+            <circle cx="50" cy="86" r="3" fill="currentColor" opacity="0.45"/>
+            <line x1="50" y1="50" x2="22" y2="28" stroke-dasharray="2 3" opacity="0.4"/>
+            <line x1="50" y1="50" x2="80" y2="22" stroke-dasharray="2 3" opacity="0.4"/>
+            <line x1="50" y1="50" x2="18" y2="68" stroke-dasharray="2 3" opacity="0.4"/>
+            <line x1="50" y1="50" x2="82" y2="74" stroke-dasharray="2 3" opacity="0.4"/>
+            <line x1="50" y1="50" x2="50" y2="14" stroke-dasharray="2 3" opacity="0.4"/>
+            <line x1="50" y1="50" x2="50" y2="86" stroke-dasharray="2 3" opacity="0.4"/>
+          </svg>
+        </div>
+        <div class="meta">
+          <span class="dot"></span>
+          <span class="label">public</span>
+          <span class="pill pill-off">designed · v0.3.0+</span>
+        </div>
+        <p>strangers' idle gpus, paid in usdc per token. opt-in safety net. you set the ceiling.</p>
+        <details class="card-details">
+          <summary>what does that actually mean?</summary>
+          <dl class="kvlist">
+            <dt>hardware</dt><dd>any unhosted node that opts in as a public provider — datacenter gpus, prosumer rigs, anyone with idle compute.</dd>
+            <dt>matching</dt><dd>you set a max usdc/token price. daemon shops the public mesh, picks the cheapest provider under your ceiling.</dd>
+            <dt>verification</dt><dd>optimistic + redundancy at first; zk proofs when affordable. providers stake collateral and lose it if they cheat.</dd>
+            <dt>payment</dt><dd>usdc on base. settles per request via signed receipts. unhosted takes no protocol-level cut.</dd>
+            <dt>opt-in</dt><dd>nothing leaves your circle by default. you have to <em>ask</em> for public fallback, every session.</dd>
+          </dl>
+          <a class="card-link" href="https://github.com/unhosted-ai/unhosted-core/blob/main/design/0001-public-mode-architecture.md">→ read adr 0001</a>
+        </details>
+      </article>
+
+    </section>
+
+    <!-- three commitments: visually separate from the modes above. -->
+    <h4 class="modes-subhead">three commitments — what we always do, regardless of mode</h4>
+
+    <section class="bento bento-promises">
+
+      <article class="card card-honest">
+        <div class="art" aria-hidden="true">
+          <!-- "47 tok/s" — kept as the iconic number, but smaller -->
+          <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 70 L30 50 L46 60 L62 30 L86 28" stroke-width="2.5"/>
+            <line x1="14" y1="82" x2="86" y2="82" opacity="0.4"/>
+            <line x1="14" y1="82" x2="14" y2="18" opacity="0.4"/>
+            <circle cx="62" cy="30" r="3" fill="currentColor"/>
+          </svg>
+        </div>
+        <div class="meta">
+          <span class="dot"></span>
+          <span class="label">honest benchmarks</span>
+        </div>
+        <p>real numbers per hardware combo. reproducible. updated. no marketing language.</p>
+        <a class="more" href="#status">what's shipped today →</a>
+      </article>
+
+      <article class="card card-open">
+        <div class="art" aria-hidden="true">
+          <!-- branches + leaves — fork it, audit it -->
+          <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="30" cy="22" r="6" fill="currentColor"/>
+            <circle cx="30" cy="78" r="6" fill="currentColor"/>
+            <circle cx="74" cy="50" r="6" fill="none" stroke-width="2.5"/>
+            <path d="M30 28 L30 72" />
+            <path d="M30 50 Q40 50 50 50 Q62 50 68 50" />
+            <line x1="68" y1="50" x2="74" y2="50" stroke-width="2.5"/>
+          </svg>
+        </div>
+        <div class="meta">
+          <span class="dot"></span>
+          <span class="label">open source</span>
+        </div>
+        <p>agpl-3.0. read it, fork it, audit it. you can't host it as a paid service and pretend you wrote it.</p>
+        <a class="more" href="https://github.com/unhosted-ai/unhosted-core/blob/main/LICENSE">read the license →</a>
+      </article>
+
+      <article class="card card-private">
+        <div class="art" aria-hidden="true">
+          <!-- eye with strike-through — "no telemetry" -->
+          <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 50 Q50 22 86 50 Q50 78 14 50 Z"/>
+            <circle cx="50" cy="50" r="10"/>
+            <line x1="20" y1="20" x2="80" y2="80" stroke-width="3"/>
+          </svg>
+        </div>
+        <div class="meta">
+          <span class="dot"></span>
+          <span class="label">no telemetry by default</span>
+        </div>
+        <p>opt-in only. plain-english explanation of exactly what gets sent, every time.</p>
+        <a class="more" href="#network">privacy details →</a>
+      </article>
+
+    </section>
 
     <div class="modes-cta">
       <a class="btn btn-primary" href="#download">
