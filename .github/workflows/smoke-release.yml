@@ -156,16 +156,19 @@ jobs:
           }
           Write-Host "  /health: HTTP 200 (after $i s)"
 
-          try {
-            $r = Invoke-WebRequest -Uri "http://127.0.0.1:7777/v1/run" -Method POST -Body '{"prompt":"hi","max_tokens":4}' -ContentType "application/json" -UseBasicParsing
-            $http = $r.StatusCode
-            $body = $r.Content
-          } catch {
-            # Invoke-WebRequest throws on >=400 by default; capture the response.
-            $http = $_.Exception.Response.StatusCode.value__
-            $reader = New-Object IO.StreamReader $_.Exception.Response.GetResponseStream()
-            $body = $reader.ReadToEnd()
-          }
+          # PowerShell 7 (used on windows-latest runners) wraps non-2xx
+          # responses in HttpResponseMessage, which doesn't expose the
+          # old WebResponse.GetResponseStream(). Use SkipHttpErrorCheck
+          # to receive the response intact regardless of status code.
+          $r = Invoke-WebRequest `
+            -Uri "http://127.0.0.1:7777/v1/run" `
+            -Method POST `
+            -Body '{"prompt":"hi","max_tokens":4}' `
+            -ContentType "application/json" `
+            -UseBasicParsing `
+            -SkipHttpErrorCheck
+          $http = $r.StatusCode
+          $body = $r.Content
           Write-Host "  /v1/run: HTTP $http"
           Write-Host "  body: $body"
           if ($http -ne 503) { throw "/v1/run not 503" }
