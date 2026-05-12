@@ -45,14 +45,27 @@
     </div>
     <nav class="nav">
       <a href="/" class="active">home</a>
+      <a href="#modes">modes</a>
+      <a href="#how">how</a>
+      <a href="#status">status</a>
+      <a href="#network">network</a>
+      <a href="#download">download</a>
+      <a href="#backend">backend</a>
+      <a href="#faq">faq</a>
       <a href="docs.html">learn</a>
-      <a href="https://github.com/unhosted-ai/unhosted-core/blob/main/MANIFESTO.md">manifesto</a>
       <a href="https://github.com/unhosted-ai/unhosted-core">github</a>
       <button class="theme-toggle" id="theme-toggle" title="toggle theme" aria-label="toggle theme"><span class="glyph">◐</span></button>
     </nav>
+    <div class="hero-spec" aria-label="release status">
+      <span class="spec-chip">pre-alpha</span>
+      <span class="spec-chip">v0.0.4</span>
+      <span class="spec-chip">agpl-3.0</span>
+      <span class="spec-dot" aria-hidden="true"></span>
+      <span class="spec-platform">macos · linux · windows · raspberry pi</span>
+    </div>
   </header>
 
-  <!-- pitch + hardware list -->
+  <!-- pitch: lede, primary CTAs, install one-liner, hardware list -->
   <section class="pitch">
     <div class="lede">
       <h2>
@@ -63,21 +76,86 @@
           <span class="badge">agpl-3.0</span>
         </span>
       </h2>
-      <p class="sub">we build the software that pools it into one inference cluster — local, trusted, and public.</p>
+      <p class="sub">we build the software that pools it into one inference cluster — local, trusted, and public. one daemon per device, end-to-end encryption between paired peers, no server in the middle.</p>
+
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="#download">
+          <span>download</span>
+          <span class="btn-arrow" aria-hidden="true">→</span>
+        </a>
+        <a class="btn btn-ghost" href="#quickstart">quickstart in 3 commands</a>
+        <a class="btn btn-link" href="docs.html">read the docs</a>
+      </div>
+
+      <div class="hero-oneliner">
+        <span class="hero-oneliner-label">unix one-liner</span>
+        <pre><code>curl -fsSL https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.sh | sh</code></pre>
+      </div>
     </div>
-    <ul class="hardware-list" aria-label="supported hardware">
-      <li>m-series mac</li>
-      <li>rtx 4090</li>
-      <li>rtx 5090</li>
-      <li>amd / rocm</li>
-      <li>raspberry pi</li>
-    </ul>
+
+    <aside class="lede-side">
+      <h3 class="side-head">supported hardware</h3>
+      <ul class="hardware-list" aria-label="supported hardware">
+        <li>m-series mac</li>
+        <li>rtx 4090</li>
+        <li>rtx 5090</li>
+        <li>amd / rocm</li>
+        <li>raspberry pi 5</li>
+      </ul>
+      <h3 class="side-head side-head-tight">requires a runtime</h3>
+      <ul class="runtime-list">
+        <li><strong>llama.cpp</strong> · default · port 8080</li>
+        <li><strong>ollama</strong> · port 11434</li>
+        <li><strong>lm studio</strong> · port 1234</li>
+      </ul>
+      <p class="side-note">the daemon auto-detects whichever is running. run <code>unhosted doctor</code> to check.</p>
+    </aside>
   </section>
 
-  <div class="index-marker">index</div>
+  <!-- quickstart strip: three commands to get inference flowing -->
+  <section class="quickstart" id="quickstart">
+    <div class="head">
+      <h3>quickstart</h3>
+      <a class="view-all" href="docs.html#quickstart">long version with screenshots</a>
+    </div>
+    <ol class="qs-steps">
+      <li class="qs-step">
+        <div class="qs-num">01</div>
+        <h4>install unhosted</h4>
+        <p>one binary, ~12&nbsp;mb. cli daemon + native desktop shell in the same tarball.</p>
+        <pre><code>curl -fsSL https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.sh | sh</code></pre>
+        <p class="qs-note">windows: <code>irm …/install.ps1 | iex</code>. or <a href="#download">grab the tarball</a>.</p>
+      </li>
+      <li class="qs-step">
+        <div class="qs-num">02</div>
+        <h4>start a model runtime</h4>
+        <p>pick one — all three speak the same openai-compatible api.</p>
+        <pre><code>brew install llama.cpp
+unhosted pull llama3.2:3b
+llama-server -m ~/.cache/unhosted/models/llama3.2-3b.gguf --port 8080 -ngl 99</code></pre>
+        <p class="qs-note">already running ollama or lm studio? skip this step — <code>unhosted doctor</code> will find them.</p>
+      </li>
+      <li class="qs-step">
+        <div class="qs-num">03</div>
+        <h4>serve + chat</h4>
+        <p>daemon on <code>:7777</code>, web ui in your browser, optional native window on top.</p>
+        <pre><code>unhosted serve
+# in another shell:
+open http://127.0.0.1:7777</code></pre>
+        <p class="qs-note">other devices on the same wifi discover this node over mdns automatically.</p>
+      </li>
+    </ol>
+  </section>
 
-  <!-- bento grid: the three modes plus three commitments -->
-  <section class="bento" id="modes">
+  <!-- three modes + three commitments: bento grid with a labelled head -->
+  <section class="modes-section" id="modes">
+    <div class="head">
+      <h3>three modes — choose your trust radius</h3>
+      <a class="view-all" href="docs.html#modes">how the radius works</a>
+    </div>
+    <p class="section-sub">three concentric circles. devices you own. devices owned by people you trust. strangers' idle gpus. each layer is opt-in, and traffic never crosses an unhosted server — there isn't one.</p>
+
+  <section class="bento">
 
     <article class="card card-local">
       <div class="art">
@@ -158,6 +236,542 @@
 
   </section>
 
+    <div class="modes-cta">
+      <a class="btn btn-primary" href="#download">
+        <span>download for your os</span>
+        <span class="btn-arrow" aria-hidden="true">→</span>
+      </a>
+      <a class="btn btn-ghost" href="#quickstart">or 3-command quickstart</a>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- how it works: deeper than the bento — pipelines, request lifecycle, runtime layer -->
+  <section class="howitworks" id="how">
+    <div class="head">
+      <h3>how it works</h3>
+      <a class="view-all" href="docs.html#how-it-works">deep dive</a>
+    </div>
+    <p class="section-sub">two pieces, no magic. a <strong>daemon</strong> per device speaks a small http api on port <code>7777</code>; the <strong>cli</strong> (and any openai-compatible client) sends prompts to it. inference itself runs inside the model runtime you chose — unhosted is the orchestration layer, not the neural network.</p>
+
+    <!-- piece 1: single-host pipeline -->
+    <div class="hiw-block">
+      <div class="hiw-num">01</div>
+      <div class="hiw-body">
+        <h4>single-host pipeline</h4>
+        <p>v0.0.1 baseline: one daemon, one runtime, on one machine. your prompt hits the daemon over loopback. the daemon forwards it to <code>llama.cpp</code>'s <code>llama-server</code> (or ollama, or lm studio — same shape), streams the sse tokens back, and never persists a thing. closing the cli wipes nothing because nothing was written.</p>
+        <figure class="hiw-figure">
+          <pre class="hiw-diagram">
+your prompt
+    │
+    ▼
+┌────────────────┐   http     ┌────────────────┐   http       ┌────────────────┐
+│  unhosted cli  │ ─────────▶ │ unhosted node  │ ───────────▶ │  llama-server  │
+│   or browser   │  :7777     │   (daemon)     │  :8080       │   (llama.cpp)  │
+└────────────────┘            └────────┬───────┘  :11434 ◀── ollama
+                                       │          :1234  ◀── lm studio
+                                       ▼
+                                 token stream
+                                       │
+                              ◀────────┘  sse: data: {...delta...}
+          </pre>
+          <figcaption class="figure-caption">fig. v0.0.1 — single daemon, single runtime, single host. backend port detected automatically at startup.</figcaption>
+        </figure>
+      </div>
+    </div>
+
+    <!-- piece 2: multi-node routing -->
+    <div class="hiw-block">
+      <div class="hiw-num">02</div>
+      <div class="hiw-body">
+        <h4>multi-node request routing</h4>
+        <p>v0.0.2 adds peers. each daemon owns a <strong>router</strong> with a target list — <code>Local</code> plus every paired peer. for each request the router picks one target by priority, falls back to <code>Local</code> on failure, and stamps an <code>x-unhosted-forwarded</code> header so peers don't bounce it back into a loop. throughput parallelizes across requests; a single request still runs on a single gpu.</p>
+        <figure class="hiw-figure">
+          <pre class="hiw-diagram">
+                         ┌─ router ─┐
+                         │ priority │
+                         │  table   │
+                         └────┬─────┘
+                              │ pick target
+            ┌─────────────────┼─────────────────┐
+            ▼                 ▼                 ▼
+       [ local ]        [ peer:thunder ]  [ peer:loft ]
+       llama-server     rtx 4090           m4 max
+       on this box      on the lan         off-lan via quic
+            │                 │                 │
+            └─── tokens ──────┴──── stream ─────┘
+                              │
+                              ▼
+                         caller sees one
+                       openai-compatible
+                          response
+          </pre>
+          <figcaption class="figure-caption">fig. v0.0.2+ — router picks a target per request, falls back to local on peer failure. nothing knows about the others' state.</figcaption>
+        </figure>
+      </div>
+    </div>
+
+    <!-- piece 3: discovery + pairing -->
+    <div class="hiw-block">
+      <div class="hiw-num">03</div>
+      <div class="hiw-body">
+        <h4>peer discovery &amp; pairing</h4>
+        <p>on the lan, daemons announce themselves over <strong>multicast dns</strong> (<code>_unhosted._tcp.local.</code>) with their name and ed25519 pubkey. browsing is zero-config. pairing is explicit: one side issues a 5-minute <code>unhosted://pair?…</code> token; the other accepts it. each side stores the other's pubkey. nothing pairs silently, ever.</p>
+        <p>off-lan, a tiny coordination relay matches both ends' connect requests and tells each one where the other lives. then they punch a direct udp path with quic — encrypted end-to-end, the relay never sees plaintext. if punching fails (symmetric nats), the relay falls back to forwarding ciphertext blindly so you still get connectivity, just with the relay in the path.</p>
+        <figure class="hiw-figure">
+          <pre class="hiw-diagram">
+   on the lan (mdns)                            across the internet (relay+quic)
+
+  ┌───────────┐    multicast    ┌───────────┐      ┌───────────┐  register  ┌──────────┐
+  │ daemon A  │ ──announce──▶   │ daemon B  │      │ daemon A  │ ─────────▶ │  relay   │
+  │  pubkey:  │ ◀── browse ──   │  pubkey:  │      │  pubkey   │ ◀── match ─│ stateless│
+  │  ed25519  │                 │  ed25519  │      └─────┬─────┘            └────┬─────┘
+  └─────┬─────┘                 └─────┬─────┘            │                       │
+        │ pair offer (out of band)    │                  │ ◀──── coordinate ─────┘
+        │   unhosted://pair?…&token=… │                  │                       │
+        ▼                             ▼                  ▼                       ▼
+   stored as peer                stored as peer    udp hole-punch          fallback: ciphertext
+                                                   direct quic+tls         routed through relay
+          </pre>
+          <figcaption class="figure-caption">fig. discovery + pairing — pubkeys are the identity, signatures are the authorization, no central directory anywhere.</figcaption>
+        </figure>
+      </div>
+    </div>
+
+    <!-- piece 4: request lifecycle (the actual sequence) -->
+    <div class="hiw-block">
+      <div class="hiw-num">04</div>
+      <div class="hiw-body">
+        <h4>the lifecycle of one request</h4>
+        <p>a chat completion takes the same path whether it lands locally or on a peer — that's the point of the openai-compatible api: the client never knows. here's what happens between "user hits enter" and "first token visible":</p>
+        <ol class="hiw-steps">
+          <li><strong>parse + classify.</strong> request lands at the daemon. it checks for the <code>x-unhosted-forwarded</code> header (peer-to-peer hop) and the <code>x-unhosted-auth</code> signature header. loopback callers bypass the bearer check; everything else needs one or the other.</li>
+          <li><strong>replay defense.</strong> if the request carries a peer signature, the <strong>replay guard</strong> looks for <code>(pubkey, timestamp, sig-prefix)</strong> in its short-ttl set. seen recently? reject. otherwise insert and continue.</li>
+          <li><strong>route.</strong> router picks <code>Local</code> or a peer based on priority + recent failure stats. forwarded hops always pin to <code>Local</code> — no second-level fanout, no routing storms.</li>
+          <li><strong>forward.</strong> request gets handed to the runtime: an http <code>POST /v1/chat/completions</code> with <code>stream: true</code>. the runtime starts emitting sse <code>data: {…}</code> frames almost immediately.</li>
+          <li><strong>stream + tee.</strong> the daemon parses sse, extracts <code>choices[].delta.content</code>, and pipes tokens straight to the client's response body. nothing is buffered to disk; nothing is logged.</li>
+          <li><strong>done.</strong> runtime sends <code>data: [DONE]</code>, daemon closes the response, replay guard ttl eventually evicts the entry. no state survives the request except the conversation kept by the browser in localstorage.</li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- piece 5: the runtime layer (the part that's not unhosted) -->
+    <div class="hiw-block">
+      <div class="hiw-num">05</div>
+      <div class="hiw-body">
+        <h4>the runtime layer — not part of unhosted</h4>
+        <p>unhosted doesn't do any matrix math. it doesn't touch model weights, doesn't decide which token comes next, doesn't load gguf files. the neural network — the actual ml — runs inside whichever runtime you pick. all three speak the same openai-compatible <code>/v1/...</code> shape, so unhosted treats them interchangeably.</p>
+        <div class="hiw-runtime-grid">
+          <div class="hiw-rt">
+            <span class="hiw-rt-name">llama.cpp</span>
+            <span class="hiw-rt-port">:8080</span>
+            <p>the default. <code>llama-server</code> binary from llama.cpp. metal on apple silicon, cuda/vulkan on linux, cpu fallback. <code>brew install llama.cpp</code> or build from source.</p>
+          </div>
+          <div class="hiw-rt">
+            <span class="hiw-rt-name">ollama</span>
+            <span class="hiw-rt-port">:11434</span>
+            <p>preferred by many users for the model-management ergonomics. unhosted's auto-detect finds it without config; <code>ollama serve</code> and you're done.</p>
+          </div>
+          <div class="hiw-rt">
+            <span class="hiw-rt-name">lm studio</span>
+            <span class="hiw-rt-port">:1234</span>
+            <p>gui-first. nice on windows where building llama.cpp is fiddly. enable "local server" in the app, unhosted picks it up.</p>
+          </div>
+        </div>
+        <p class="hiw-callout"><strong>auto-detection.</strong> at <code>unhosted serve</code> startup the daemon probes all three on their default localhost ports. if nothing answers, it prints os-specific install hints (homebrew on macos, the ollama curl script on linux, lmstudio.ai on windows). run <code>unhosted doctor</code> any time to see the same report.</p>
+      </div>
+    </div>
+
+    <div class="hiw-cta">
+      <a class="btn btn-primary" href="#download">
+        <span>download unhosted</span>
+        <span class="btn-arrow" aria-hidden="true">→</span>
+      </a>
+      <a class="btn btn-ghost" href="docs.html#how-it-works">keep reading</a>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- what works today: shipped / building / designed / research (from the README) -->
+  <section class="status" id="status">
+    <div class="head">
+      <h3>what works today</h3>
+      <a class="view-all" href="https://github.com/unhosted-ai/unhosted-core/blob/main/README.md#whats-honest">full status</a>
+    </div>
+    <p class="section-sub">no marketing words. the table the readme calls "what's honest" — capabilities, status, version, and what we did or didn't do.</p>
+
+    <div class="status-wrap">
+      <table class="status-table-page">
+        <thead>
+          <tr>
+            <th>capability</th>
+            <th>status</th>
+            <th>version</th>
+            <th>notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>single-machine inference</td>
+            <td><span class="pill on">shipped</span></td>
+            <td>v0.0.1</td>
+            <td>wraps llama.cpp <code>llama-server</code>. smoke-tested on m-series.</td>
+          </tr>
+          <tr>
+            <td>lan cluster (request routing)</td>
+            <td><span class="pill on">shipped</span></td>
+            <td>v0.0.2</td>
+            <td>round-robin across local + peers; verified end-to-end.</td>
+          </tr>
+          <tr>
+            <td>mdns peer discovery + pairing</td>
+            <td><span class="pill on">shipped</span></td>
+            <td>v0.0.3</td>
+            <td>one-click pair in the app sidebar; hot-reload routing.</td>
+          </tr>
+          <tr>
+            <td>model management (<code>unhosted pull</code>)</td>
+            <td><span class="pill on">shipped</span></td>
+            <td>v0.0.3</td>
+            <td>known short names + direct gguf url support.</td>
+          </tr>
+          <tr>
+            <td>auto-detect llama-server / ollama / lm studio</td>
+            <td><span class="pill on">shipped</span></td>
+            <td>v0.0.4</td>
+            <td>startup probe + <code>unhosted doctor</code>. install hints when nothing's running.</td>
+          </tr>
+          <tr>
+            <td>quic peer transport (ed25519-pinned tls)</td>
+            <td><span class="pill mid">building</span></td>
+            <td>v0.0.4</td>
+            <td>diagnostic only in v0.0.4; carries traffic from v0.1.0.</td>
+          </tr>
+          <tr>
+            <td>vram-pooling (layer splitting)</td>
+            <td><span class="pill mid">building</span></td>
+            <td>v0.0.4+</td>
+            <td>needs llama.cpp built with <code>-DGGML_RPC=ON</code>.</td>
+          </tr>
+          <tr>
+            <td>trusted-peer pairing (wireguard-style)</td>
+            <td><span class="pill off">designed</span></td>
+            <td>v0.1.0</td>
+            <td>adr 0006. wallet-bound identity, public-mode fallback opt-in.</td>
+          </tr>
+          <tr>
+            <td>web ui / desktop app</td>
+            <td><span class="pill mid">building</span></td>
+            <td>v0.1.0+</td>
+            <td>tao + wry native shell. see design/0002.</td>
+          </tr>
+          <tr>
+            <td>public swarm (usdc payments)</td>
+            <td><span class="pill off">designed</span></td>
+            <td>v0.3.0+</td>
+            <td>see design/0001 — public-mode architecture.</td>
+          </tr>
+          <tr>
+            <td>verifiable inference</td>
+            <td><span class="pill off">research</span></td>
+            <td>—</td>
+            <td>optimistic + redundancy planned; zk proofs when affordable.</td>
+          </tr>
+          <tr>
+            <td>windows gpu support</td>
+            <td><span class="pill off">designed</span></td>
+            <td>after mac+linux stable</td>
+            <td>cpu works today; cuda/vulkan after the desktop shell stabilizes.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="status-foot">reproducible benchmarks land in <code>benchmarks/</code> once any code exists. we publish honest tokens-per-second numbers, not marketing language.</p>
+  </section>
+
+  <hr class="divider">
+
+  <!-- network + security: how nodes find each other, how they talk, what's encrypted -->
+  <section class="netsec" id="network">
+    <div class="head">
+      <h3>network &amp; security</h3>
+      <a class="view-all" href="docs.html#how-it-works">read the long version</a>
+    </div>
+    <p class="sub">three layers, each with a different threat model. plain http on loopback, signed-request auth on the lan, end-to-end encrypted quic between paired peers. no traffic touches an unhosted server — there isn't one.</p>
+
+    <div class="netsec-grid">
+
+      <article class="netsec-card">
+        <div class="netsec-step">01</div>
+        <h4>discovery — mdns on the lan</h4>
+        <p>nodes announce themselves over <strong>multicast dns</strong> (<code>_unhosted._tcp.local.</code>). the announcement carries the node's name and <strong>ed25519 public key</strong>. browsing is zero-config — every machine on the same wifi sees every other one within seconds, no router config, no static ips, no central directory.</p>
+      </article>
+
+      <article class="netsec-card">
+        <div class="netsec-step">02</div>
+        <h4>pairing — explicit, out of band</h4>
+        <p>two daemons become trusted peers only after one issues a 5-minute pairing token and the other accepts it. the offer uri (<code>unhosted://pair?…</code>) is shared out of band — qr code, signal, in person. each side stores the other's pubkey. <strong>nothing pairs silently</strong>.</p>
+      </article>
+
+      <article class="netsec-card">
+        <div class="netsec-step">03</div>
+        <h4>transport — quic with pinned identity</h4>
+        <p>peer-to-peer traffic runs over <strong>quic + tls 1.3</strong>. each daemon's tls cert is bound to its ed25519 identity key; a mitm can't substitute a different cert because the receiver checks the cert's pubkey against the one stored at pairing. lan traffic also accepts plain http for v0.0.x legacy callers, but it requires the same signed-request header.</p>
+      </article>
+
+      <article class="netsec-card">
+        <div class="netsec-step">04</div>
+        <h4>nat traversal — relay-coordinated hole punch</h4>
+        <p>two paired peers on different home networks find each other through a <strong>tiny coordination relay</strong>. the relay matches both sides' connect requests and tells each one where the other is, then they punch a direct udp path with quic. the relay never sees plaintext — payloads are encrypted end-to-end. if punching fails (symmetric nats), the relay falls back to forwarding ciphertext blindly.</p>
+      </article>
+
+      <article class="netsec-card">
+        <div class="netsec-step">05</div>
+        <h4>request auth — signed, replay-proof</h4>
+        <p>every sensitive request from a paired peer carries an <code>x-unhosted-auth</code> header: <code>&lt;pubkey&gt;:&lt;timestamp&gt;:&lt;ed25519-sig&gt;</code>. the receiver verifies the signature, checks the pubkey against its pair registry, and rejects timestamps outside a short window. a per-node <strong>replay guard</strong> remembers recently-seen signatures so the same one can't be reused.</p>
+      </article>
+
+      <article class="netsec-card">
+        <div class="netsec-step">06</div>
+        <h4>local boundary — bearer token off loopback</h4>
+        <p>when the daemon binds to <code>127.0.0.1</code>, the cli and the desktop shell on the same machine talk to it freely. when it binds to <code>0.0.0.0</code> for phone access, anything off loopback that isn't a signed peer needs a bearer token printed once at startup. <strong>no telemetry, no prompt logging</strong> — the daemon persists nothing about your conversations.</p>
+      </article>
+
+    </div>
+
+    <figure class="netsec-figure">
+      <pre class="netsec-diagram">
+   your laptop                    friend's tower                    coordination relay
+ ┌─────────────────┐            ┌─────────────────┐               ┌──────────────────┐
+ │  unhosted node  │ ◀──mdns──▶ │  unhosted node  │               │   register +     │
+ │  ed25519 pubkey │            │  ed25519 pubkey │ ◀──register──▶│   match + nudge  │
+ └────────┬────────┘            └────────┬────────┘               └──────┬───────────┘
+          │                              │                               │
+          │      ◀── quic / tls 1.3 ──▶  │ ◀────────── coordinate ───────┘
+          │     (cert pinned to pubkey)  │           (no payload here)
+          │                              │
+          ▼                              ▼
+    llama-server                   llama-server
+    (or ollama, lm studio)         (or ollama, lm studio)
+      </pre>
+      <figcaption class="figure-caption">fig. lan discovery via mdns · off-lan via relay-coordinated hole punch · payloads encrypted end-to-end either way</figcaption>
+    </figure>
+
+    <ul class="netsec-honest">
+      <li><strong>what's shipped:</strong> mdns discovery, pairing, signed-request auth, replay guard, bearer-token boundary, quic peer transport with pubkey-bound certs (diagnostic in v0.0.4).</li>
+      <li><strong>what's next:</strong> wireguard-style trusted pairing (v0.1.0), hardened nat traversal, formal threat-model review before v0.1.0 ships.</li>
+      <li><strong>what we don't do:</strong> store prompts, run analytics, broker keys, operate any server that sees plaintext. <a href="https://github.com/unhosted-ai/unhosted-core/blob/main/SECURITY.md">disclose a vulnerability</a>.</li>
+    </ul>
+  </section>
+
+  <hr class="divider">
+
+  <!-- download: per-OS CTAs + one-liner installer + docker -->
+  <section class="download" id="download">
+    <div class="head">
+      <h3>download</h3>
+      <a class="view-all" href="https://github.com/unhosted-ai/unhosted-core/releases">all releases</a>
+    </div>
+    <p class="sub">pre-built binaries for mac, linux, raspberry pi, and windows. each tarball contains both the <code>unhosted</code> daemon and the <code>unhosted-desktop</code> gui shell (native window, no electron — tao + wry, ~12 mb). you'll also need a local model runtime — <a href="docs.html#install">llama.cpp, ollama, or lm studio</a> — the daemon detects whichever is running.</p>
+
+    <div class="download-grid">
+
+      <a class="dl-card dl-primary" href="https://github.com/unhosted-ai/unhosted-core/releases/latest/download/unhosted-aarch64-apple-darwin.tar.gz">
+        <div class="dl-os">macos</div>
+        <div class="dl-arch">apple silicon · m1 / m2 / m3 / m4</div>
+        <div class="dl-file">unhosted-aarch64-apple-darwin.tar.gz</div>
+      </a>
+
+      <a class="dl-card" href="https://github.com/unhosted-ai/unhosted-core/releases/latest/download/unhosted-macos-app-aarch64-apple-darwin.tar.gz">
+        <div class="dl-os">macos · .app</div>
+        <div class="dl-arch">drag-to-applications bundle</div>
+        <div class="dl-file">unhosted-macos-app-aarch64-apple-darwin.tar.gz</div>
+      </a>
+
+      <a class="dl-card" href="https://github.com/unhosted-ai/unhosted-core/releases/latest/download/unhosted-x86_64-unknown-linux-gnu.tar.gz">
+        <div class="dl-os">linux</div>
+        <div class="dl-arch">x86_64 · glibc</div>
+        <div class="dl-file">unhosted-x86_64-unknown-linux-gnu.tar.gz</div>
+      </a>
+
+      <a class="dl-card" href="https://github.com/unhosted-ai/unhosted-core/releases/latest/download/unhosted-aarch64-unknown-linux-gnu.tar.gz">
+        <div class="dl-os">linux · arm64</div>
+        <div class="dl-arch">raspberry pi 5 · arm servers</div>
+        <div class="dl-file">unhosted-aarch64-unknown-linux-gnu.tar.gz</div>
+      </a>
+
+      <a class="dl-card" href="https://github.com/unhosted-ai/unhosted-core/releases/latest/download/unhosted-x86_64-pc-windows-msvc.zip">
+        <div class="dl-os">windows</div>
+        <div class="dl-arch">x86_64 · zip · pre-alpha</div>
+        <div class="dl-file">unhosted-x86_64-pc-windows-msvc.zip</div>
+      </a>
+
+      <a class="dl-card" href="https://github.com/unhosted-ai/unhosted-core/pkgs/container/unhosted">
+        <div class="dl-os">docker</div>
+        <div class="dl-arch">multi-arch · amd64 + arm64</div>
+        <div class="dl-file">ghcr.io/unhosted-ai/unhosted:latest</div>
+      </a>
+
+    </div>
+
+    <p class="netsec-note">intel mac (<code>x86_64-apple-darwin</code>) isn't in the matrix — the apple-silicon binary runs fine under rosetta 2, or build from source with <code>cargo build --release</code>.</p>
+
+    <div class="install-strip">
+      <div class="install-line">
+        <span class="install-label">unix one-liner</span>
+        <pre><code>curl -fsSL https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.sh | sh</code></pre>
+      </div>
+      <div class="install-line">
+        <span class="install-label">windows</span>
+        <pre><code>irm https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.ps1 | iex</code></pre>
+      </div>
+      <div class="install-line">
+        <span class="install-label">source</span>
+        <pre><code>git clone https://github.com/unhosted-ai/unhosted-core &amp;&amp; cd unhosted-core &amp;&amp; cargo install --path crates/unhosted-cli</code></pre>
+      </div>
+    </div>
+
+    <!-- desktop app: per-OS install of the GUI shell (unhosted-desktop) -->
+    <div class="desktop-install" id="desktop">
+      <div class="head">
+        <h4>desktop app — per-os install</h4>
+        <span class="tag">tao + wry · not electron</span>
+      </div>
+      <p class="sub">the gui is a thin native shell wrapping the daemon's web ui. one binary, no chromium runtime, no node. the one-line installer above does all of this for you — these steps are for people who want to do it by hand.</p>
+
+      <div class="os-grid">
+
+        <article class="os-card">
+          <header>
+            <span class="os-name">macos</span>
+            <span class="os-meta">.app bundle · drag-to-applications</span>
+          </header>
+          <ol>
+            <li>download <code>unhosted-macos-app-aarch64-apple-darwin.tar.gz</code> from the card above.</li>
+            <li>open the tarball, drag <code>unhosted.app</code> into <code>/Applications</code>.</li>
+            <li>first launch: right-click → open (gatekeeper warning — code signing is on the roadmap).</li>
+            <li>the app launches the daemon on <code>127.0.0.1:7777</code> and opens the chat window. requires llama-server, ollama, or lm studio running locally.</li>
+          </ol>
+          <pre><code># or via the one-liner — fetches the .app automatically
+curl -fsSL https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.sh | sh</code></pre>
+        </article>
+
+        <article class="os-card">
+          <header>
+            <span class="os-name">linux</span>
+            <span class="os-meta">.desktop entry · webkit2gtk runtime</span>
+          </header>
+          <p>install runtime deps for the embedded webview, then drop the binary + desktop entry. the installer does both — the manual path is documented below.</p>
+          <div class="distro-block">
+            <span class="distro">debian / ubuntu</span>
+            <pre><code>sudo apt install libgtk-3-0 libsoup-3.0-0 libwebkit2gtk-4.1-0</code></pre>
+          </div>
+          <div class="distro-block">
+            <span class="distro">fedora</span>
+            <pre><code>sudo dnf install gtk3 libsoup3 webkit2gtk4.1</code></pre>
+          </div>
+          <div class="distro-block">
+            <span class="distro">arch</span>
+            <pre><code>sudo pacman -S gtk3 libsoup3 webkit2gtk-4.1</code></pre>
+          </div>
+          <pre><code># then fetch + install (puts a .desktop entry in ~/.local/share/applications)
+curl -fsSL https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.sh | sh</code></pre>
+          <p class="muted-note">tarball contains the <code>unhosted-desktop</code> binary, <code>unhosted.desktop</code> launcher file, an svg icon, and a <code>unhosted.service</code> systemd unit if you want the daemon as a background service.</p>
+        </article>
+
+        <article class="os-card">
+          <header>
+            <span class="os-name">windows</span>
+            <span class="os-meta">.exe + start menu shortcut</span>
+          </header>
+          <ol>
+            <li>open powershell as your normal user (no admin needed).</li>
+            <li>run the installer. it places <code>unhosted.exe</code> + <code>unhosted-desktop.exe</code> under <code>%LOCALAPPDATA%\unhosted\</code> and adds a start menu shortcut.</li>
+            <li>launch from the start menu, or run <code>unhosted-desktop</code> from any shell.</li>
+          </ol>
+          <pre><code>irm https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.ps1 | iex</code></pre>
+          <p class="muted-note">webview2 ships with windows 11 and recent windows 10; on older systems the installer will prompt for the evergreen runtime.</p>
+        </article>
+
+        <article class="os-card">
+          <header>
+            <span class="os-name">raspberry pi · arm linux</span>
+            <span class="os-meta">aarch64 binary · headless or x</span>
+          </header>
+          <ol>
+            <li>flash raspberry pi os 64-bit (bookworm or newer — needs glibc ≥ 2.36).</li>
+            <li>install gui deps: <code>sudo apt install libgtk-3-0 libsoup-3.0-0 libwebkit2gtk-4.1-0</code>.</li>
+            <li>run the unix one-liner; it auto-detects <code>aarch64</code> and pulls the right tarball.</li>
+          </ol>
+          <p class="muted-note">on a headless pi, skip the desktop shell with <code>UNHOSTED_NO_DESKTOP=1</code> and just run <code>unhosted serve</code> on the lan.</p>
+        </article>
+
+      </div>
+
+      <div class="cli-only">
+        <h5>cli-only install (skip the gui)</h5>
+        <pre><code>UNHOSTED_NO_DESKTOP=1 curl -fsSL https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.sh | sh</code></pre>
+        <p class="muted-note">useful for servers, ci, raspberry pi mesh nodes — anywhere a native window doesn't make sense.</p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- use as a backend: openai-compatible api, any client speaks to it -->
+  <section class="backend-use" id="backend">
+    <div class="head">
+      <h3>use it as a backend</h3>
+      <a class="view-all" href="docs.html#clients">compatible clients</a>
+    </div>
+    <p class="section-sub">the daemon speaks the openai http api at <code>/v1/chat/completions</code> and <code>/v1/models</code>. anything that knows how to talk to openai, ollama, or llama-server can point at unhosted instead. the routing layer + trust radius are invisible from the client's perspective — it sees a fast openai-compatible server, that's the point.</p>
+
+    <div class="backend-grid">
+      <div class="backend-curl">
+        <span class="backend-label">streaming chat completion</span>
+        <pre><code>curl -sN http://127.0.0.1:7777/v1/chat/completions \
+    -H 'content-type: application/json' \
+    -d '{
+      "model": "llama3.2:1b",
+      "messages": [{"role":"user","content":"hello"}],
+      "stream": true
+    }'
+data: {"choices":[{"delta":{"content":"hi"}}], ...}
+data: {"choices":[{"delta":{"content":" there"}}], ...}
+data: [DONE]</code></pre>
+      </div>
+
+      <ul class="backend-clients">
+        <li>
+          <span class="bc-name">delta browser</span>
+          <span class="bc-desc">point its provider settings at <code>http://127.0.0.1:7777</code>. multi-node routing, peers, future public swarm — all transparent.</span>
+        </li>
+        <li>
+          <span class="bc-name">langchain / llamaindex</span>
+          <span class="bc-desc">use any "openai-compatible local endpoint" recipe. set <code>OPENAI_API_BASE</code> to the daemon's url.</span>
+        </li>
+        <li>
+          <span class="bc-name">openwebui</span>
+          <span class="bc-desc">add unhosted as an openai-style provider. streaming + tool calls forwarded straight through.</span>
+        </li>
+        <li>
+          <span class="bc-name">aider, cursor (local mode), continue</span>
+          <span class="bc-desc">anything that auto-discovers ollama on <code>:11434</code> or llama-server on <code>:8080</code> drops onto <code>:7777</code> the same way.</span>
+        </li>
+      </ul>
+    </div>
+
+    <div class="backend-cta">
+      <a class="btn btn-primary" href="#download">
+        <span>install unhosted</span>
+        <span class="btn-arrow" aria-hidden="true">→</span>
+      </a>
+      <a class="btn btn-ghost" href="https://github.com/unhosted-ai/unhosted-core/blob/main/crates/unhosted-core/src/lib.rs">read the source</a>
+    </div>
+  </section>
+
   <hr class="divider">
 
   <!-- milestones (Kernel-style "trusted by" slot, repurposed since we have no users yet) -->
@@ -201,6 +815,72 @@ $ unhosted run llama3.1:70b "..."
     </div>
   </section>
 
+  <hr class="divider">
+
+  <!-- faq: short, pointed answers to common questions -->
+  <section class="faq" id="faq">
+    <div class="head">
+      <h3>questions</h3>
+      <a class="view-all" href="docs.html">long-form docs</a>
+    </div>
+    <p class="section-sub">the questions we get most. short answers. links to the longer write-up where one exists.</p>
+
+    <div class="faq-grid">
+      <details>
+        <summary>does unhosted train models?</summary>
+        <p>no. training is meta's / mistral's / qwen's / alibaba's job — far too expensive for us. we run <em>inference</em> on whatever open-weights model you point us at. you can fine-tune locally with axolotl, mlx-finetune, or llama.cpp itself, then load the result.</p>
+      </details>
+
+      <details>
+        <summary>does the daemon log my prompts?</summary>
+        <p>no. prompts pass through the daemon to the runtime in memory and disappear after inference. nothing is written to disk by unhosted. the conversation you see in the chat ui is kept in your browser's localstorage, on your device, and you can wipe it at any time.</p>
+      </details>
+
+      <details>
+        <summary>is my data sent to any server you operate?</summary>
+        <p>we do not operate any server that handles your prompts. the only optional server in the architecture is the <strong>coordination relay</strong> for off-lan peer connections, and it only ever sees ciphertext — payloads are end-to-end encrypted between paired peers.</p>
+      </details>
+
+      <details>
+        <summary>do i have to use llama.cpp?</summary>
+        <p>no. unhosted speaks the openai-compatible api, so it talks to <strong>llama.cpp's <code>llama-server</code></strong>, <strong>ollama</strong>, or <strong>lm studio</strong> equally well. on startup the daemon probes all three on their default ports and uses whichever it finds. <code>unhosted doctor</code> tells you what's running.</p>
+      </details>
+
+      <details>
+        <summary>how is this funded?</summary>
+        <p>self-funded. no vc money, no token sale. the public-mode swarm (v0.3.0+) settles payments in usdc between users and providers; unhosted takes no cut at the protocol level. see <a href="https://github.com/unhosted-ai/unhosted-core/blob/main/MANIFESTO.md">the manifesto</a> for the long version.</p>
+      </details>
+
+      <details>
+        <summary>why agpl-3.0?</summary>
+        <p>it's the license that prevents someone from taking the code, hosting it as a paid saas, and pretending they wrote it. you can read it, fork it, audit it, ship it. you can sell support, custom integrations, or hardware around it. you can't quietly close-source it as a service.</p>
+      </details>
+
+      <details>
+        <summary>windows support?</summary>
+        <p>cli + desktop shell ship as a windows binary in every release. gpu acceleration on windows is "designed" — we'll harden it after macos and linux are stable. lm studio is the easiest runtime to use on windows today.</p>
+      </details>
+
+      <details>
+        <summary>raspberry pi?</summary>
+        <p>aarch64 linux binaries ship in every release. raspberry pi 5 with 8 gb runs <code>llama3.2:1b</code> at a few tokens/sec on cpu — fine for ambient/automation use, slow for chat. a pi mesh on the lan distributes parallel requests cleanly.</p>
+      </details>
+
+      <details>
+        <summary>how do i contribute?</summary>
+        <p>open an issue or pr at <a href="https://github.com/unhosted-ai/unhosted-core">github.com/unhosted-ai/unhosted-core</a>. brand voice rules live in <a href="https://github.com/unhosted-ai/unhosted-core/blob/main/BRAND.md">brand.md</a> — plain language, no marketing, no superlatives. security reports go through <a href="https://github.com/unhosted-ai/unhosted-core/blob/main/SECURITY.md">security.md</a>.</p>
+      </details>
+    </div>
+
+    <div class="faq-cta">
+      <a class="btn btn-primary" href="#download">
+        <span>download for your os</span>
+        <span class="btn-arrow" aria-hidden="true">→</span>
+      </a>
+      <a class="btn btn-ghost" href="https://github.com/unhosted-ai/unhosted-core/issues">ask on github</a>
+    </div>
+  </section>
+
   <!-- footer -->
   <footer class="footer">
     <div class="footer-grid">
@@ -232,7 +912,7 @@ $ unhosted run llama3.1:70b "..."
         <p><a href="https://github.com/unhosted-ai/unhosted-core/blob/main/LICENSE">agpl-3.0</a>. read it, fork it, audit it. <a href="https://github.com/unhosted-ai/unhosted-core/blob/main/SECURITY.md">security</a>.</p>
         <p class="badges">
           <span class="badge">pre-alpha</span>
-          <span class="badge">v0.0.1</span>
+          <span class="badge">v0.0.4</span>
         </p>
       </div>
 

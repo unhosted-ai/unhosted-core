@@ -117,6 +117,11 @@ enum Command {
         #[arg(long, default_value_t = format!("http://{}", DEFAULT_NODE_ADDR))]
         node: String,
     },
+    /// Probe the local environment for a model runtime — llama.cpp's
+    /// `llama-server`, Ollama, or LM Studio. Prints what's reachable
+    /// on the default localhost ports and, if nothing is, an
+    /// OS-specific install hint.
+    Doctor,
 }
 
 #[derive(Subcommand, Debug)]
@@ -228,8 +233,56 @@ async fn main() -> Result<()> {
         Command::QuicPing { peer, node } => {
             handle_quic_ping(&node, &peer).await?;
         }
+        Command::Doctor => {
+            run_doctor().await?;
+        }
     }
 
+    Ok(())
+}
+
+async fn run_doctor() -> Result<()> {
+    use unhosted_core::upstream;
+
+    let configured = std::env::var("UNHOSTED_LLAMA_SERVER_URL")
+        .unwrap_or_else(|_| upstream::LLAMA_SERVER_DEFAULT_URL.to_string());
+
+    println!("unhosted doctor");
+    println!();
+    println!("  configured upstream: {configured}");
+    let configured_ok = upstream::probe_configured(&configured).await;
+    println!(
+        "    {}",
+        if configured_ok {
+            "ok — responds on /v1/models or /health"
+        } else {
+            "absent — nothing responded"
+        }
+    );
+    println!();
+
+    println!("  scanning known backends on localhost defaults:");
+    let report = upstream::probe_all().await;
+    for r in &report.results {
+        let mark = if r.reachable { "ok    " } else { "absent" };
+        println!("    [{}] {:<13} {}", mark, r.backend.name(), r.url);
+    }
+    println!();
+
+    if configured_ok {
+        println!("looks good — your daemon will proxy to {configured}.");
+        return Ok(());
+    }
+
+    if let Some(found) = report.first_reachable() {
+        println!("a local backend is running on a different port.");
+        println!("set the upstream env var, then re-run `unhosted serve`:");
+        println!();
+        println!("  UNHOSTED_LLAMA_SERVER_URL={} unhosted serve", found.url);
+        return Ok(());
+    }
+
+    println!("{}", upstream::install_hints());
     Ok(())
 }
 

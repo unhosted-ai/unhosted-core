@@ -337,9 +337,20 @@ function renderStatus(s) {
     els.connModel.textContent = s.upstream.model || "(model not reported)";
     els.connUpstream.textContent = s.upstream.url.replace(/^https?:\/\//, "");
   } else {
-    setStatusDot("warn", "upstream offline — start `llama-server`");
-    els.connModel.textContent = "no model loaded";
-    els.connUpstream.textContent = s.upstream.url.replace(/^https?:\/\//, "");
+    // Configured upstream is down. If a different backend is alive on
+    // its default port, surface that — the daemon will auto-route to
+    // it on the next request, but the user should *see* that's why
+    // chat suddenly works again.
+    const alt = (s.upstream.backends || []).find((b) => b.reachable);
+    if (alt) {
+      setStatusDot("ok", `${alt.name} reachable · auto-routing to ${alt.url.replace(/^https?:\/\//, "")}`);
+      els.connModel.textContent = `(via ${alt.name})`;
+      els.connUpstream.textContent = alt.url.replace(/^https?:\/\//, "");
+    } else {
+      setStatusDot("warn", "no runtime — start llama-server, ollama, or lm studio");
+      els.connModel.textContent = "no model loaded";
+      els.connUpstream.textContent = s.upstream.url.replace(/^https?:\/\//, "");
+    }
   }
   els.connNode.textContent = s.node.addr;
 
@@ -531,7 +542,15 @@ els.composer.addEventListener("submit", async (e) => {
     assistantNode.append(buildStats(stats));
   } catch (err) {
     showError(assistantNode, err);
-    assistantMsg.text += `\n[error: ${err && err.message ? err.message : "request failed"}]`;
+    // Compact inline summary for the saved transcript — humans never see
+    // the JSON body, just a single legible line. The rich banner lives
+    // inside the DOM (see showError) and isn't persisted.
+    const info = err && err.info;
+    if (info && info.kind === "upstream_offline") {
+      assistantMsg.text += "\n[no model runtime is running — start llama-server, ollama, or lm studio]";
+    } else {
+      assistantMsg.text += `\n[error: ${err && err.message ? err.message : "request failed"}]`;
+    }
   } finally {
     assistantNode.classList.remove("streaming");
     streaming = false;
@@ -549,7 +568,13 @@ async function streamPrompt(prompt, onChunk) {
     body: JSON.stringify({ prompt, max_tokens: 512 }),
   });
 
-  if (!resp.ok) throw new Error(`node returned ${resp.status} ${resp.statusText}`);
+  if (!resp.ok) {
+    // The daemon returns a structured JSON body when the upstream
+    // (llama-server / ollama / lm studio) is offline. Parse it and
+    // throw an Error whose message + .info tell the UI what to render.
+    const err = await readStructuredError(resp);
+    throw err;
+  }
   if (!resp.body) throw new Error("streaming not supported by this browser");
 
   const servedBy = resp.headers.get("x-unhosted-served-by");
@@ -564,16 +589,68 @@ async function streamPrompt(prompt, onChunk) {
   return servedBy;
 }
 
+// Reads either a structured JSON error (the daemon's upstream-offline
+// shape) or a plain text/HTML response and returns an Error decorated
+// with .info — the renderer uses this to show a friendly banner.
+async function readStructuredError(resp) {
+  const errorKind = resp.headers.get("x-unhosted-error");
+  const contentType = resp.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    try {
+      const body = await resp.json();
+      const e = body && body.error;
+      if (e) {
+        const err = new Error(e.message || "request failed");
+        err.info = {
+          kind: e.type || errorKind || "error",
+          configured: e.configured || null,
+          checked: e.checked || [],
+          hint: e.hint || null,
+          status: resp.status,
+        };
+        return err;
+      }
+    } catch (_) { /* fall through to status-line error */ }
+  }
+  const err = new Error(`node returned ${resp.status} ${resp.statusText || ""}`.trim());
+  err.info = { kind: errorKind || "http_error", status: resp.status };
+  return err;
+}
+
 // ---------------------------------------------------------------- helpers
 
 function showError(node, err) {
   const bodyEl = node.querySelector(".body");
   const banner = document.createElement("div");
   banner.className = "error-banner";
-  banner.innerHTML =
-    "<strong>error:</strong> " +
-    (err && err.message ? escapeHtml(err.message) : "request failed") +
-    ". is <code>llama-server</code> running and reachable from the daemon?";
+  const info = err && err.info;
+
+  if (info && info.kind === "upstream_offline") {
+    // No backend is reachable on any known port. Give the user
+    // concrete next steps, the install command, and a CTA to the
+    // doctor command.
+    const checkedHtml = (info.checked || [])
+      .map((u) => `<code>${escapeHtml(u)}</code>`)
+      .join(" · ");
+    banner.classList.add("error-banner-offline");
+    banner.innerHTML =
+      "<strong>no model runtime is responding.</strong> " +
+      "unhosted is the orchestration layer — it needs a backend running locally " +
+      "(<code>llama-server</code>, <code>ollama</code>, or <code>lm studio</code>) to actually do inference.<br>" +
+      "<span class=\"err-row\"><span class=\"err-label\">checked:</span> " +
+      (checkedHtml || "<em>nothing reachable</em>") +
+      "</span>" +
+      (info.hint ? "<span class=\"err-row err-hint\">" + escapeHtml(info.hint) + "</span>" : "") +
+      "<span class=\"err-actions\">" +
+      "<a class=\"err-btn err-btn-primary\" href=\"https://github.com/unhosted-ai/unhosted-core#install-a-runtime\" target=\"_blank\" rel=\"noopener\">install a runtime</a> " +
+      "<a class=\"err-btn\" href=\"https://github.com/unhosted-ai/unhosted-core/blob/main/README.md#whats-honest\" target=\"_blank\" rel=\"noopener\">about runtimes</a>" +
+      "</span>";
+  } else {
+    banner.innerHTML =
+      "<strong>error:</strong> " +
+      (err && err.message ? escapeHtml(err.message) : "request failed") +
+      ". is the daemon reachable? try <code>unhosted doctor</code> for a probe.";
+  }
   bodyEl.append(banner);
 }
 

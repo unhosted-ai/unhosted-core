@@ -15,6 +15,7 @@ pub mod peer;
 pub mod relay_client;
 pub mod router;
 pub mod transport;
+pub mod upstream;
 mod web;
 
 pub use auth::{AuthOutcome, LocalToken, ReplayGuard};
@@ -126,6 +127,12 @@ fn default_max_tokens() -> u32 {
 
 #[derive(Serialize, Debug)]
 struct ChatRequest<'a> {
+    /// OpenAI-compatible servers vary on whether this field is required.
+    /// llama-server ignores it (serves whatever's loaded); Ollama and
+    /// LM Studio return 400 without it. We populate it from
+    /// `upstream::select_live` when a model id is discoverable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<&'a str>,
     messages: Vec<ChatMessage<'a>>,
     max_tokens: u32,
     stream: bool,
@@ -280,6 +287,12 @@ pub async fn serve(node: Node) -> Result<()> {
         node.addr
     );
 
+    // Probe the configured upstream + the two other backends we know
+    // how to talk to. If nothing answers, the daemon still starts —
+    // but we print install hints so the user isn't left wondering why
+    // their first prompt 502s.
+    print_upstream_banner(&node.llama_server_url).await;
+
     // Loud advisory when bound to a non-loopback addr: the LAN can reach
     // sensitive endpoints, so the user needs the bearer token to drive
     // the UI from another device. Loopback callers (the desktop shell,
@@ -294,6 +307,54 @@ pub async fn serve(node: Node) -> Result<()> {
     )
     .await?;
     Ok(())
+}
+
+/// Probe the configured upstream and the other known backends, then
+/// print a single banner summarizing what's reachable. When the
+/// configured upstream is dead, we surface whichever alternative
+/// backend is actually running (Ollama, LM Studio) and tell the user
+/// how to switch. When nothing is running, we print install hints.
+async fn print_upstream_banner(configured_url: &str) {
+    let configured_ok = upstream::probe_configured(configured_url).await;
+    if configured_ok {
+        eprintln!();
+        eprintln!(" upstream reachable: {configured_url}");
+        eprintln!();
+        return;
+    }
+
+    // Configured upstream is down. Probe the three standard local
+    // backends to see if the user has *something* running on a
+    // different port — most common cause of "it didn't work" is
+    // Ollama on :11434 while we look at :8080.
+    let report = upstream::probe_all().await;
+
+    eprintln!();
+    eprintln!("───────────────────────────────────────────────────────────────");
+    eprintln!(" upstream check: {configured_url} did not respond");
+    eprintln!();
+    for r in &report.results {
+        let status = if r.reachable { "ok    " } else { "absent" };
+        eprintln!("   [{}] {:<13} {}", status, r.backend.name(), r.url);
+    }
+    eprintln!();
+
+    match report.first_reachable() {
+        Some(found) => {
+            eprintln!(" a local backend is running on a different port.");
+            eprintln!(" to use it, restart with:");
+            eprintln!();
+            eprintln!("   UNHOSTED_LLAMA_SERVER_URL={} unhosted serve", found.url);
+            eprintln!();
+            eprintln!(" all three speak openai-compatible /v1, so unhosted will");
+            eprintln!(" proxy requests through transparently.");
+        }
+        None => {
+            eprintln!("{}", upstream::install_hints());
+        }
+    }
+    eprintln!("───────────────────────────────────────────────────────────────");
+    eprintln!();
 }
 
 fn print_lan_security_banner(bind: SocketAddr, token: &str) {
@@ -460,6 +521,18 @@ struct UpstreamStatus {
     url: String,
     reachable: bool,
     model: Option<String>,
+    /// Per-backend probe results so the UI can suggest switching when
+    /// the configured upstream is down but another runtime is alive
+    /// on its default port (the "you have ollama running on :11434"
+    /// case from the v0.0.4 UX work).
+    backends: Vec<BackendProbe>,
+}
+
+#[derive(Serialize, Clone)]
+struct BackendProbe {
+    name: &'static str,
+    url: &'static str,
+    reachable: bool,
 }
 
 #[derive(Serialize)]
@@ -488,6 +561,20 @@ async fn status_handler(
 
     let upstream_url = state.node.llama_server_url.clone();
     let (reachable, model) = probe_upstream(&upstream_url).await;
+    // Probe all three known local backends in parallel so the UI can
+    // suggest a switch when the configured upstream is down but, say,
+    // ollama is running on :11434. Cheap (~750ms timeout each, in
+    // parallel) and runs once per status poll.
+    let backend_report = upstream::probe_all().await;
+    let backends: Vec<BackendProbe> = backend_report
+        .results
+        .iter()
+        .map(|r| BackendProbe {
+            name: r.backend.name(),
+            url: r.backend.upstream_url(),
+            reachable: r.reachable,
+        })
+        .collect();
 
     let mut discovered = state
         .discovery
@@ -513,6 +600,7 @@ async fn status_handler(
                         url: upstream_url,
                         reachable,
                         model,
+                        backends: backends.clone(),
                     },
                     peers: vec![],
                     routing: RoutingStatus {
@@ -625,6 +713,7 @@ async fn status_handler(
             url: upstream_url,
             reachable,
             model,
+            backends,
         },
         peers,
         routing: RoutingStatus {
@@ -1502,7 +1591,11 @@ async fn chat_completions_handler(
 }
 
 async fn proxy_chat_local(node: &Node, body: bytes::Bytes) -> Result<Response, StatusCode> {
-    let url = format!("{}/v1/chat/completions", node.llama_server_url);
+    let Some(live) = upstream::select_live(&node.llama_server_url).await else {
+        return Ok(upstream_offline_response(&node.llama_server_url));
+    };
+    let base = live.url;
+    let url = format!("{base}/v1/chat/completions");
     let client = reqwest::Client::new();
     let upstream = client
         .post(&url)
@@ -1511,13 +1604,13 @@ async fn proxy_chat_local(node: &Node, body: bytes::Bytes) -> Result<Response, S
         .send()
         .await
         .map_err(|e| {
-            tracing::error!(error = %e, "chat: upstream call failed");
+            tracing::error!(error = %e, %url, "chat: upstream call failed");
             StatusCode::BAD_GATEWAY
         })?;
 
     let status = upstream.status();
     if !status.is_success() {
-        tracing::error!(%status, "chat: upstream non-success");
+        tracing::error!(%status, %url, "chat: upstream non-success");
         return Err(StatusCode::BAD_GATEWAY);
     }
     let content_type = upstream
@@ -1533,8 +1626,33 @@ async fn proxy_chat_local(node: &Node, body: bytes::Bytes) -> Result<Response, S
     Ok(Response::builder()
         .header("content-type", content_type)
         .header("x-unhosted-served-by", "local")
+        .header("x-unhosted-upstream", base)
         .body(Body::from_stream(stream))
         .expect("valid response"))
+}
+
+/// Build the structured "no upstream reachable" response. Returned as
+/// HTTP 503 with a JSON body the web UI parses to render a friendly
+/// message + install hint. Falls back to a plain 502 if JSON
+/// serialization somehow fails (should be unreachable).
+fn upstream_offline_response(configured: &str) -> Response {
+    let body = upstream::offline_error_json(configured);
+    let bytes = match serde_json::to_vec(&body) {
+        Ok(b) => b,
+        Err(_) => {
+            return Response::builder()
+                .status(StatusCode::BAD_GATEWAY)
+                .body(Body::from("upstream offline"))
+                .expect("valid response");
+        }
+    };
+    Response::builder()
+        .status(StatusCode::SERVICE_UNAVAILABLE)
+        .header("content-type", "application/json")
+        .header("x-unhosted-served-by", "local")
+        .header("x-unhosted-error", "upstream_offline")
+        .body(Body::from(bytes))
+        .expect("valid response")
 }
 
 async fn proxy_chat_peer(name: &str, addr: SocketAddr, body: &bytes::Bytes) -> Result<Response> {
@@ -1579,9 +1697,12 @@ async fn models_handler(
     let outcome = state.classify(&headers, Some(remote.ip()), &[]);
     require_auth(&outcome, false)?;
 
-    let url = format!("{}/v1/models", state.node.llama_server_url);
+    let Some(live) = upstream::select_live(&state.node.llama_server_url).await else {
+        return Ok(upstream_offline_response(&state.node.llama_server_url));
+    };
+    let url = format!("{}/v1/models", live.url);
     let upstream = reqwest::Client::new().get(&url).send().await.map_err(|e| {
-        tracing::error!(error = %e, "models: upstream call failed");
+        tracing::error!(error = %e, %url, "models: upstream call failed");
         StatusCode::BAD_GATEWAY
     })?;
     if !upstream.status().is_success() {
@@ -2226,15 +2347,21 @@ async fn handle_quic_run(
     Ok(())
 }
 
-/// Serve a request locally by proxying to this node's upstream llama-server,
-/// parsing its SSE stream, and emitting plain-text tokens.
+/// Serve a request locally by proxying to whichever model runtime is
+/// actually reachable right now — the configured upstream first, then
+/// ollama / lm studio / llama-server as fallbacks. Parses the SSE
+/// stream from the chosen backend and emits plain-text tokens.
 async fn run_local(node: &Node, req: RunRequest) -> Result<Response, StatusCode> {
-    let upstream_url = format!("{}/v1/chat/completions", node.llama_server_url);
+    let Some(live) = upstream::select_live(&node.llama_server_url).await else {
+        return Ok(upstream_offline_response(&node.llama_server_url));
+    };
+    let upstream_url = format!("{}/v1/chat/completions", live.url);
     let client = reqwest::Client::new();
 
     let upstream_resp = client
         .post(&upstream_url)
         .json(&ChatRequest {
+            model: live.model.as_deref(),
             messages: vec![
                 ChatMessage {
                     role: "system",
@@ -2251,12 +2378,12 @@ async fn run_local(node: &Node, req: RunRequest) -> Result<Response, StatusCode>
         .send()
         .await
         .map_err(|e| {
-            tracing::error!(error = %e, "upstream request failed");
+            tracing::error!(error = %e, %upstream_url, "upstream request failed");
             StatusCode::BAD_GATEWAY
         })?;
 
     if !upstream_resp.status().is_success() {
-        tracing::error!(status = %upstream_resp.status(), "upstream returned non-success");
+        tracing::error!(status = %upstream_resp.status(), %upstream_url, "upstream returned non-success");
         return Err(StatusCode::BAD_GATEWAY);
     }
 

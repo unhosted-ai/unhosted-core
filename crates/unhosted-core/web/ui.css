@@ -669,12 +669,72 @@ button:focus-visible, input:focus-visible, textarea:focus-visible,
   background: var(--accent-soft);
   border: 1px solid var(--accent);
   color: var(--fg);
-  padding: 10px 14px;
-  border-radius: 8px;
+  padding: 12px 16px;
+  border-radius: 10px;
   font-size: 13.5px;
+  line-height: 1.55;
   margin: 6px 0 0;
 }
 .error-banner strong { color: var(--accent); }
+.error-banner code {
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  font-size: 12.5px;
+  background: rgba(10, 10, 10, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* upstream_offline — richer banner with checked-backends + actions */
+.error-banner-offline {
+  padding: 14px 16px 12px;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+}
+.error-banner-offline .err-row {
+  display: block;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--mute);
+}
+.error-banner-offline .err-label {
+  color: var(--mute);
+  margin-right: 6px;
+  letter-spacing: 0.02em;
+}
+.error-banner-offline .err-hint {
+  color: var(--fg);
+  font-style: italic;
+}
+.error-banner-offline .err-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.error-banner-offline .err-btn {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12.5px;
+  padding: 6px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  text-decoration: none;
+  color: var(--fg);
+  transition: border-color .15s ease, background .15s ease;
+}
+.error-banner-offline .err-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.error-banner-offline .err-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.error-banner-offline .err-btn-primary:hover {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--bg);
+}
 
 /* ==========================================================================
    composer
