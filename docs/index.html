@@ -156,51 +156,42 @@ open http://127.0.0.1:7777</code></pre>
     </div>
     <p class="section-sub">trust isn't binary. these are three concentric layers — each strictly contains the one before it. you opt into each one explicitly, and traffic never crosses an unhosted server (there isn't one). click any layer below to see what's inside it.</p>
 
-    <!-- relational diagram: the actual trust radius, one figure, labelled.
-         labels sit OUTSIDE each ring on a flag-leader line so they
-         don't collide with the ring strokes. each ring is clickable
-         to scroll to its matching mode card below. -->
-    <figure class="radius-diagram" aria-label="trust radius">
-      <svg viewBox="0 0 480 360" role="img" aria-labelledby="radius-title">
-        <title id="radius-title">trust radius: local inside trusted inside public</title>
+    <!-- relational diagram: three concentric rings, one centered label
+         on the inner disc. Everything else moves to a plain legend
+         below — standard, readable, no leader lines that clip and no
+         low-contrast text floating over the fill. -->
+    <figure class="radius-diagram" aria-label="trust radius: local inside trusted inside public">
+      <div class="radius-svg-wrap">
+        <svg viewBox="0 0 200 200" role="img">
+          <a href="#mode-public" class="ring ring-public" aria-label="public ring">
+            <circle cx="100" cy="100" r="92" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="3 6"/>
+          </a>
+          <a href="#mode-trusted" class="ring ring-trusted" aria-label="trusted ring">
+            <circle cx="100" cy="100" r="62" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          </a>
+          <a href="#mode-local" class="ring ring-local" aria-label="local ring">
+            <circle cx="100" cy="100" r="34" fill="currentColor"/>
+            <text x="100" y="105" text-anchor="middle" class="ring-label inside">local</text>
+          </a>
+        </svg>
+      </div>
 
-        <!-- centered rings on the LEFT of the viewBox; labels float on the RIGHT -->
-        <g class="rings">
-          <a href="#mode-public" class="ring ring-public">
-            <circle cx="180" cy="180" r="160" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="3 7"/>
-          </a>
-          <a href="#mode-trusted" class="ring ring-trusted">
-            <circle cx="180" cy="180" r="106" fill="none" stroke="currentColor" stroke-width="1.4"/>
-          </a>
-          <a href="#mode-local" class="ring ring-local">
-            <circle cx="180" cy="180" r="58" fill="currentColor"/>
-          </a>
-        </g>
+      <ol class="radius-legend">
+        <li>
+          <span class="legend-key key-local"></span>
+          <a href="#mode-local"><strong>local</strong> · your devices, your network</a>
+        </li>
+        <li>
+          <span class="legend-key key-trusted"></span>
+          <a href="#mode-trusted"><strong>trusted</strong> · paired peers, end-to-end encrypted</a>
+        </li>
+        <li>
+          <span class="legend-key key-public"></span>
+          <a href="#mode-public"><strong>public</strong> · strangers' idle gpus, pay-per-token</a>
+        </li>
+      </ol>
 
-        <!-- ring labels: positioned in the bottom-left of each ring,
-             OUTSIDE the next inner ring so nothing overlaps -->
-        <g class="ring-labels">
-          <!-- public: top-right of the outer ring, outside the dashed circle -->
-          <a href="#mode-public">
-            <line x1="270" y1="60" x2="330" y2="40" class="leader"/>
-            <text x="338" y="36" class="ring-label">public</text>
-            <text x="338" y="52" class="ring-note">pay-per-token · strangers' gpus</text>
-          </a>
-          <!-- trusted: right side, in the band between trusted and public -->
-          <a href="#mode-trusted">
-            <line x1="286" y1="180" x2="340" y2="180" class="leader"/>
-            <text x="348" y="178" class="ring-label">trusted</text>
-            <text x="348" y="194" class="ring-note">free · encrypted · friends, family</text>
-          </a>
-          <!-- local: inside the filled circle -->
-          <text x="180" y="184" text-anchor="middle" class="ring-label inside">local</text>
-          <text x="180" y="200" text-anchor="middle" class="ring-note inside">free · private · default</text>
-          <!-- "you" marker near the bottom of the local fill -->
-          <circle cx="180" cy="224" r="2.5" fill="var(--bg)"/>
-          <text x="180" y="240" text-anchor="middle" class="ring-you">you</text>
-        </g>
-      </svg>
-      <figcaption>each ring strictly contains the one inside it. flow falls back outward only when you ask it to — local first, trusted second, public last.</figcaption>
+      <figcaption>each ring strictly contains the one inside it. flow falls outward only when you ask it to — local first, trusted second, public last.</figcaption>
     </figure>
 
     <!-- three mode cards: distinct icons + click-to-expand details. -->
