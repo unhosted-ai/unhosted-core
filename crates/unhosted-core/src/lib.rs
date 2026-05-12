@@ -179,47 +179,54 @@ pub async fn serve(node: Node) -> Result<()> {
     let replay_guard = Arc::new(std::sync::Mutex::new(ReplayGuard::new()));
 
     // QUIC endpoint on the next port up from HTTP. Best-effort: if the
-    // port is taken we log and continue with HTTP-only routing.
+    // port is taken we log and continue with HTTP-only routing. The
+    // accept loop is wired AFTER state is built so it can dispatch
+    // inbound run requests against the daemon's inference path.
     let quic_bind = SocketAddr::new(node.addr.ip(), node.addr.port().saturating_add(1));
     let registry_for_quic = registry.clone();
-    let quic = match transport::PeerEndpoint::bind(quic_bind, &identity, registry_for_quic) {
-        Ok(ep) => {
-            let our_pk = identity.public_b64();
-            let endpoint_handle = ep.handle();
-            tokio::spawn(async move {
-                while let Some(incoming) = endpoint_handle.accept().await {
-                    let pk = our_pk.clone();
-                    tokio::spawn(async move {
-                        match incoming.await {
-                            Ok(conn) => transport::ping_responder(conn, pk).await,
-                            Err(e) => {
-                                tracing::debug!(error = %e, "quic: peer handshake refused (unknown identity)")
-                            }
-                        }
-                    });
-                }
-            });
-            tracing::info!(addr = %quic_bind, "quic peer endpoint listening");
-            Some(Arc::new(ep))
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, addr = %quic_bind, "quic: failed to bind — peer encryption disabled");
-            None
-        }
-    };
+    let (quic, quic_endpoint_for_accept) =
+        match transport::PeerEndpoint::bind(quic_bind, &identity, registry_for_quic) {
+            Ok(ep) => {
+                tracing::info!(addr = %quic_bind, "quic peer endpoint listening");
+                let handle = ep.handle();
+                (Some(Arc::new(ep)), Some(handle))
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, addr = %quic_bind, "quic: failed to bind — peer encryption disabled");
+                (None, None)
+            }
+        };
 
     let state = NodeState {
         node: Arc::new(node.clone()),
         router: router.clone(),
         registry,
         discovery,
-        identity,
+        identity: identity.clone(),
         pairing_tokens: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         relay,
         local_token: local_token.clone(),
         replay_guard,
         quic,
     };
+
+    // Spawn the QUIC accept loop now that NodeState is ready. Each
+    // incoming connection gets dispatched to `quic_inbound_handler`,
+    // which routes by request kind (run / ping / future).
+    if let Some(endpoint) = quic_endpoint_for_accept {
+        let state_for_quic = state.clone();
+        tokio::spawn(async move {
+            while let Some(incoming) = endpoint.accept().await {
+                let state = state_for_quic.clone();
+                tokio::spawn(async move {
+                    match incoming.await {
+                        Ok(conn) => quic_inbound_handler(conn, state).await,
+                        Err(e) => tracing::debug!(error = %e, "quic: peer handshake refused"),
+                    }
+                });
+            }
+        });
+    }
 
     // Dispatcher for inbound relay requests: peer sent us a request via the
     // relay; run it locally and stream chunks back through the relay's
@@ -1861,9 +1868,37 @@ async fn run_handler(
         }
         Target::Peer { ref name, addr } => {
             tracing::debug!(target = %name, %addr, "routing request to peer");
-            // Direct HTTP first. If the peer has a pubkey (trusted), sign
-            // the request so they can verify the sender.
-            let signing = lookup_peer_pubkey(&state.registry, name).map(|_| state.identity.clone());
+            let peer_pubkey = lookup_peer_pubkey(&state.registry, name);
+            let quic_first = peer_pubkey.is_some()
+                && state.quic.is_some()
+                && std::env::var("UNHOSTED_QUIC_RUN")
+                    .map(|v| v != "0" && !v.is_empty())
+                    .unwrap_or(false);
+
+            // QUIC path (opt-in via UNHOSTED_QUIC_RUN=1 during v0.0.4 →
+            // v0.0.5 transition). Falls through to the HTTP-signed path
+            // on any failure, preserving observability for whichever
+            // network shape breaks the new transport.
+            if quic_first {
+                if let Some(ref quic) = state.quic {
+                    let quic_target =
+                        SocketAddr::new(addr.ip(), addr.port().saturating_add(1));
+                    match run_peer_via_quic(quic, quic_target, &req).await {
+                        Ok(resp) => return Ok(resp),
+                        Err(e) => {
+                            tracing::info!(
+                                peer = %name,
+                                error = %e,
+                                "quic peer path failed; falling back to HTTP"
+                            );
+                        }
+                    }
+                }
+            }
+
+            // Direct HTTP. If the peer has a pubkey (trusted), sign the
+            // request so they can verify the sender.
+            let signing = peer_pubkey.as_ref().map(|_| state.identity.clone());
             match run_peer(name, addr, &req, signing.as_ref()).await {
                 Ok(resp) => Ok(resp),
                 Err(e) => {
@@ -1871,11 +1906,10 @@ async fn run_handler(
 
                     // Fall back to relay if the peer has a pubkey AND we're
                     // currently registered with a relay. Otherwise local.
-                    let pubkey = lookup_peer_pubkey(&state.registry, name);
                     let relay_ready =
                         matches!(state.relay.current_state().await, RelayState::Registered);
 
-                    match (pubkey, relay_ready) {
+                    match (peer_pubkey, relay_ready) {
                         (Some(pk), true) => {
                             tracing::info!(peer = %name, "trying via relay");
                             match run_peer_via_relay(&state.relay, &pk, name, &req).await {
@@ -2023,6 +2057,173 @@ async fn run_peer(
         .header("x-unhosted-served-by", format!("peer:{name}"))
         .body(Body::from_stream(stream))
         .expect("valid response"))
+}
+
+/// QUIC peer transport, request-side. Opens one bidi stream, writes a
+/// JSON header line + the serialized RunRequest, half-closes send, and
+/// streams the response chunks back as the daemon's standard
+/// `text/plain` response.
+///
+/// Wire format (v0):
+///   line 1: `{"kind":"run","version":0}\n`
+///   line 2: serialized `RunRequest` JSON + `\n`
+///   (send-side closed)
+///   chunks of `text/plain` until EOF (recv-side closed)
+async fn run_peer_via_quic(
+    quic: &Arc<transport::PeerEndpoint>,
+    peer_quic_addr: SocketAddr,
+    req: &RunRequest,
+) -> Result<Response> {
+    let conn = quic
+        .connect(peer_quic_addr)
+        .await
+        .context("quic: connect to peer")?;
+    let (mut send, mut recv) = conn.open_bi().await.context("quic: open bi stream")?;
+
+    let header = b"{\"kind\":\"run\",\"version\":0}\n";
+    send.write_all(header).await.context("quic: write header")?;
+    let body = serde_json::to_vec(req).context("serializing run request")?;
+    send.write_all(&body).await.context("quic: write body")?;
+    send.write_all(b"\n").await.context("quic: terminator")?;
+    send.finish().context("quic: finish send")?;
+
+    // Drain the response stream into a channel that becomes the
+    // axum response body. Bounded chunk size keeps memory tight on
+    // long generations.
+    let (tx, rx) = mpsc::channel::<Result<bytes::Bytes, std::io::Error>>(32);
+    tokio::spawn(async move {
+        let mut buf = [0u8; 8192];
+        loop {
+            match recv.read(&mut buf).await {
+                Ok(Some(n)) if n > 0 => {
+                    if tx
+                        .send(Ok(bytes::Bytes::copy_from_slice(&buf[..n])))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Ok(_) => break,
+                Err(e) => {
+                    let _ = tx
+                        .send(Err(std::io::Error::other(format!("quic recv: {e}"))))
+                        .await;
+                    break;
+                }
+            }
+        }
+        // Holding `conn` until the stream finishes keeps the connection
+        // alive for the duration of the response.
+        drop(conn);
+    });
+
+    Ok(Response::builder()
+        .header("content-type", "text/plain; charset=utf-8")
+        .header("x-unhosted-served-by", "peer:quic")
+        .body(Body::from_stream(ReceiverStream::new(rx)))
+        .expect("valid response"))
+}
+
+/// QUIC peer transport, server-side. Dispatches each inbound stream by
+/// its JSON header `kind` field. v0.0.4 + v0.0.5 only handle "run".
+async fn quic_inbound_handler(conn: quinn::Connection, state: NodeState) {
+    let remote = conn.remote_address();
+    loop {
+        let (mut send, mut recv) = match conn.accept_bi().await {
+            Ok(s) => s,
+            Err(quinn::ConnectionError::ApplicationClosed(_))
+            | Err(quinn::ConnectionError::LocallyClosed)
+            | Err(quinn::ConnectionError::ConnectionClosed(_)) => return,
+            Err(e) => {
+                tracing::debug!(%remote, error = %e, "quic: stream end");
+                return;
+            }
+        };
+
+        // Read header line. Cap at 4KB so a malicious peer can't make
+        // us buffer arbitrary data before the LF.
+        let mut header = Vec::with_capacity(128);
+        let mut byte = [0u8; 1];
+        let header_ok = loop {
+            match recv.read(&mut byte).await {
+                Ok(Some(_)) => {
+                    if byte[0] == b'\n' {
+                        break true;
+                    }
+                    header.push(byte[0]);
+                    if header.len() > 4096 {
+                        break false;
+                    }
+                }
+                _ => break false,
+            }
+        };
+        if !header_ok {
+            let _ = send.finish();
+            continue;
+        }
+
+        let kind = serde_json::from_slice::<serde_json::Value>(&header)
+            .ok()
+            .and_then(|v| v.get("kind").and_then(|k| k.as_str()).map(str::to_string))
+            .unwrap_or_default();
+
+        match kind.as_str() {
+            "run" => {
+                let state = state.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = handle_quic_run(&mut send, &mut recv, &state).await {
+                        tracing::debug!(error = %e, "quic: run stream errored");
+                    }
+                });
+            }
+            other => {
+                tracing::debug!(%remote, kind = %other, "quic: unknown stream kind");
+                let _ = send.finish();
+            }
+        }
+    }
+}
+
+async fn handle_quic_run(
+    send: &mut quinn::SendStream,
+    recv: &mut quinn::RecvStream,
+    state: &NodeState,
+) -> Result<()> {
+    // Read the request body until end-of-stream (capped at 256KB so a
+    // bug or hostile peer can't exhaust memory).
+    let body = recv.read_to_end(256 * 1024).await.context("quic: read body")?;
+    let req: RunRequest = serde_json::from_slice(&body).context("quic: parse run req")?;
+
+    // Reuse the local-inference path. Build a fake axum Response and
+    // stream its body into the QUIC send stream chunk-by-chunk.
+    let resp = match run_local(&state.node, req).await {
+        Ok(r) => r,
+        Err(status) => {
+            let msg = format!("local run failed: {status}");
+            let _ = send.write_all(msg.as_bytes()).await;
+            let _ = send.finish();
+            return Ok(());
+        }
+    };
+
+    let mut stream = resp.into_body().into_data_stream();
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(bytes) => {
+                if send.write_all(&bytes).await.is_err() {
+                    break;
+                }
+            }
+            Err(e) => {
+                tracing::debug!(error = %e, "quic: local stream errored");
+                break;
+            }
+        }
+    }
+    let _ = send.finish();
+    Ok(())
 }
 
 /// Serve a request locally by proxying to this node's upstream llama-server,

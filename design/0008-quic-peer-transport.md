@@ -45,20 +45,31 @@ Three tests cover the load-bearing pieces:
 - Two paired peers complete a ping in the same process.
 - A stranger (each side's registry omits the other) fails handshake.
 
-## What's deliberately not in v0.0.4
+## What landed in v0.0.5 (followup commit)
 
-- **`/v1/run` does not yet route over QUIC.** Inference traffic still rides HTTP + the signed-header path. Reason: we want the new transport observable on real LANs before we move the load-bearing path. Migration to QUIC for run requests happens in v0.0.5 once we have field-test data that connections survive long-running streams.
+- **`/v1/run` can now route over QUIC** when the peer is trusted and the daemon was started with `UNHOSTED_QUIC_RUN=1`. Failure on any QUIC step (connect, handshake, stream open, stream finish) falls back to the existing HTTP-signed path on the same request — observability stays intact, and a network that breaks QUIC degrades gracefully rather than failing the request.
+- **Wire format** is intentionally tiny:
+  ```
+  → {"kind":"run","version":0}\n
+  → <serialized RunRequest JSON>\n
+  (send-side closed)
+  ← text/plain chunks until recv-side closed
+  ```
+  Same JSON shapes as `/v1/run`, just framed over a QUIC bidi stream instead of an HTTP body. Header line is capped at 4KB, body at 256KB — hostile peer can't exhaust memory.
+- **Inbound dispatch**: `quic_inbound_handler` reads the header `kind` field and routes; only "run" is implemented in v0.0.5. Unknown kinds are dropped quietly.
+
+## What's deliberately not in v0.0.5
+
+- **QUIC is opt-in.** `UNHOSTED_QUIC_RUN=1` to enable; default-off means v0.0.5 doesn't auto-shift the load-bearing path. We want field-test data before flipping the default.
 - **No QUIC-over-hole-punch yet.** The transport binds a fixed UDP port; using the hole-punched socket from `relay_client::try_punch` requires lifting the endpoint to accept a pre-bound UDP socket. Straightforward but distinct work — depends on a real two-NAT test environment, not solvable from a single machine.
 - **No QUIC fallback to relay-routed run requests.** The relay WebSocket path (ADR 0005) still carries inference for symmetric-NAT pairs. QUIC will eventually live on top of the punched socket *or* defer to relay; we won't tunnel QUIC over WebSockets.
 - **No model attestation / per-model auth.** All paired peers can use any model the responder serves. Per-pair allow-lists are a v0.2.0 concern.
 
 ## Migration plan for `/v1/run`
 
-Once two-machine testing confirms the v0.0.4 ping works across the network shapes that matter (LAN, hole-punched, relay-fallback), the migration is:
-
-1. Add a `request` stream protocol on top of `PeerEndpoint`: client sends a JSON header + body on one bidi stream; server streams response chunks back on the same stream.
-2. In the daemon's existing `run_peer` path, when the peer is a trusted (pubkey-bearing) registry entry, attempt QUIC first with a short timeout. Fall back to HTTP-signed path on any QUIC failure.
-3. After one ship of co-existence, the HTTP-signed path becomes legacy-only for v0.0.x peers; current peers always use QUIC.
+Step 1 (v0.0.5, this commit) — opt-in flag, HTTP fallback on any QUIC failure.
+Step 2 (v0.0.6 target) — flip default-on once two-machine testing confirms it works across LAN / hole-punched / relay-fallback shapes. Flag becomes `UNHOSTED_QUIC_RUN=0` to opt out.
+Step 3 (v0.1.0 target) — HTTP-signed path becomes legacy-only, retained one ship for back-compat with v0.0.x peers in the wild.
 
 This staging keeps the network observable: if a real network breaks QUIC, the HTTP path is right there to roll back to without a release.
 
