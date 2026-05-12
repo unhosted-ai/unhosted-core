@@ -25,6 +25,14 @@ Solana ships later because:
 
 The matchmaker and CLI are designed multi-chain from day one so adding Solana doesn't require a rebuild.
 
+**What "multi-chain" means in practice:** any chain that can hold escrow, verify a buyer's signature against a deposit balance, and pay out batched receipts is a candidate. Concretely:
+
+- **EVM L2s** (Polygon PoS, Arbitrum, Optimism, Base, zkSync, Linea, Scroll, Polygon zkEVM, etc.) — drop-in compatible. Same escrow contract, redeployed. Picked per liquidity, fees, and onramp coverage.
+- **Solana** — different program, same protocol envelope. Planned post-v0.3.0.
+- **Bitcoin L1** — no, no smart-contract layer for the escrow shape we need. Lightning is its own world; revisit if state channels ever land.
+
+Stablecoin-wise, USDC is the launch choice on Base because of Coinbase Onramp coverage, but USDT / DAI / USDS can be enabled per-chain without protocol changes — they're just ERC-20 addresses the escrow contract is configured against. Volatile tokens (ETH, SOL, MATIC/POL) make terrible *pricing* units for inference but can be deposit currency that auto-swaps to USDC at escrow time once a swap router is wired in.
+
 ### 2. Verifiable inference — optimistic + redundancy
 
 For v1 public mode, verification is **optimistic with N≥2 redundant queries**.
