@@ -164,37 +164,30 @@ function runQuickstartRail() {
   inView(
     rail,
     () => {
+      // calm fill: a single soft sweep from 0 → 100% over ~1.1 s.
+      // No elastic curve, no bounce — restrained.
       animate(
         fill,
         { width: ["0%", "100%"] },
-        { duration: 0.95, ease: [0.22, 1, 0.36, 1] },
+        { duration: 1.1, ease: [0.22, 1, 0.36, 1] },
       );
 
-      // each dot lights up as the fill sweeps past it. The thresholds
-      // (0%, 50%, 100%) align with the three rail positions.
+      // dots simply fade in as the fill reaches them. No scale-burst.
       const stops = [0, 0.5, 1];
       dots.forEach((dot, i) => {
         animate(
           dot,
-          { opacity: [0.4, 1] },
-          { duration: 0.3, delay: stops[i] * 0.9, ease: "linear" },
+          { opacity: [0.35, 1] },
+          { duration: 0.35, delay: stops[i] * 1.05, ease: [0.22, 1, 0.36, 1] },
         );
-        // small pulse to mark "reached this step"
-        const numEl = dot.querySelector("span");
-        if (numEl) {
-          animate(
-            numEl,
-            { transform: ["scale(0.85)", "scale(1.08)", "scale(1)"] },
-            { duration: 0.45, delay: stops[i] * 0.9, ease: [0.34, 1.56, 0.64, 1] },
-          );
-        }
       });
 
-      // cards stagger in from below as the rail lights them up.
+      // cards stagger in from below; slightly longer so the eye can
+      // follow each step without feeling rushed.
       animate(
         steps,
-        { opacity: [0, 1], transform: ["translateY(14px)", "translateY(0)"] },
-        { duration: 0.5, delay: stagger(0.18, { start: 0.15 }), ease: [0.22, 1, 0.36, 1] },
+        { opacity: [0, 1], transform: ["translateY(12px)", "translateY(0)"] },
+        { duration: 0.55, delay: stagger(0.16, { start: 0.2 }), ease: [0.22, 1, 0.36, 1] },
       );
     },
     { amount: 0.3 },
