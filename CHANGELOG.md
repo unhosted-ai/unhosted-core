@@ -6,6 +6,21 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.7] — 2026-05-12
+
+### Added
+- **Cross-device chat sync.** Chat history is now stored daemon-side at `~/.config/unhosted/chats.json` and served via `GET/POST/PUT/DELETE /v1/chats[/:id]`. Every device paired to the daemon — desktop browser, phone PWA over LAN, public-tunnel URL — sees the same conversation list, instead of the per-origin localStorage stores that previously diverged. Web UI does a one-time migration of pre-existing localStorage chats on first load. Endpoints are local-user-only (loopback or valid bearer); paired peers can use your GPU but not read your history.
+- **"Open to internet" button** in the sidebar. One click spawns `cloudflared` and surfaces a `*.trycloudflare.com` URL with the bearer token embedded as `?api_token=…`, so opening it on a phone over cellular Just Works. New `/v1/tunnel[/start|stop]` endpoints; subprocess gets `kill_on_drop(true)` so daemon shutdown takes the tunnel down with it. Requires `cloudflared` on PATH (`brew install cloudflared`).
+- **Stop button** during streaming, alongside the existing send button. Aborts the in-flight `/v1/run` fetch via `AbortController`; partial text stays in the transcript with a `[stopped]` marker. Verified that upstream cancellation propagates to ollama via socket-close — no wasted GPU cycles.
+- **Clear-all-chats button** on hover next to the "conversations" header. Issues `DELETE /v1/chats`.
+
+### Changed
+- **Desktop shell migrated from raw tao+wry to Tauri 2.** Same underlying WebView (WKWebView / WebView2 / WebKitGTK) — the wrap buys us the official Tauri bundler (signed `.dmg` / `.msi` / `.AppImage` / `.deb` produced by `cargo tauri build` on each platform's CI runner), the updater plugin (Phase 1 wired against the GitHub release feed; pending the `TAURI_SIGNING_PRIVATE_KEY` secret + signed releases to actually serve updates), and a clean place to hang the Phase 2 polish (system tray, deep-link handler for `unhosted://pair?…`, native notifications). The desktop binary still bundles **zero** HTML/JS of its own; the window loads `http://127.0.0.1:7777` and renders whatever the daemon serves, so a daemon upgrade is also a UI upgrade — no separate desktop release per UI change.
+- **Release workflow uses Tauri's bundler.** `bundle-macos.sh` + `build-dmg.sh` are retired; `.github/workflows/release.yml` now installs `tauri-cli` on each matrix runner and runs `cargo tauri build` to produce platform-native installers in one pass. New `.github/scripts/build-updater-manifest.py` assembles `latest.json` from the per-asset `.sig` files Tauri's signer emits.
+
+### Security
+- **Tunnel-source detection in the auth classifier.** Requests carrying `cf-connecting-ip`, or with a non-loopback IP anywhere in `x-forwarded-for`, are now classified as non-loopback even when the TCP source is `127.0.0.1`. Without this, cloudflared forwarding to `localhost` would have inherited the loopback bypass — anyone with the public URL would have driven the daemon unauthenticated. Bearer is now required for tunneled traffic; local browser keeps its no-bearer convenience.
+
 ## [0.0.6] — 2026-05-12
 
 ### Fixed

@@ -203,6 +203,7 @@ const els = {
   composer: $("#composer"),
   prompt: $("#prompt"),
   send: $("#send"),
+  stop: $("#stop"),
   conversation: $("#conversation"),
   empty: $("#empty-state"),
   meta: $("#composer-meta"),
@@ -216,34 +217,144 @@ const els = {
   peersBlock: $("#peers-block"),
   peerList: $("#peer-list"),
   newChat: $("#new-chat"),
+  clearChats: $("#clear-chats"),
   chatList: $("#chat-list"),
   discoveredSection: $("#discovered-section"),
   discoveredList: $("#discovered-list"),
+  tunnelToggle: $("#tunnel-toggle"),
+  tunnelLabel: $("#tunnel-toggle-label"),
+  tunnelStatus: $("#tunnel-status-line"),
+  tunnelLink: $("#tunnel-link"),
+  tunnelUrl: $("#tunnel-url"),
+  tunnelCopy: $("#tunnel-copy"),
+  tunnelWarn: $("#tunnel-warn"),
 };
 
 let streaming = false;
+let currentAbort = null;
 
-// ---------------------------------------------------------------- chat store
-
-const STORE_KEY = "unhosted-chats";
-const MAX_CHATS = 50;
-
-const store = loadStore();
-
-function loadStore() {
-  let raw = null;
-  try { raw = localStorage.getItem(STORE_KEY); } catch (e) {}
-  if (!raw) return { activeId: null, chats: [] };
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed.chats) return { activeId: null, chats: [] };
-    return parsed;
-  } catch (e) {
-    return { activeId: null, chats: [] };
+function setSendMode(mode) {
+  // mode: "send" | "stop"
+  if (mode === "stop") {
+    els.send.hidden = true;
+    els.stop.hidden = false;
+  } else {
+    els.send.hidden = false;
+    els.stop.hidden = true;
   }
 }
 
-function saveStore() { safeSet(STORE_KEY, JSON.stringify(store)); }
+// ---------------------------------------------------------------- chat store
+//
+// The canonical store lives on the daemon at /v1/chats. Every device
+// paired to this daemon (laptop browser, phone PWA over LAN, …) sees
+// the same conversation list. The browser keeps an in-memory mirror
+// so rendering stays synchronous; mutations write through to the
+// daemon (`putChat`), and we re-fetch on tab-visibility to pick up
+// changes another device made.
+
+const LEGACY_STORE_KEY = "unhosted-chats";
+const MIGRATED_KEY = "unhosted-chats-migrated";
+const ACTIVE_KEY = "unhosted-active-id";
+const MAX_CHATS = 50;
+
+// activeId is local UI state — each device remembers which chat *it*
+// had open. Not part of the synced history.
+const store = { activeId: safeGetActive(), chats: [] };
+
+function safeGetActive() {
+  try { return localStorage.getItem(ACTIVE_KEY); } catch (e) { return null; }
+}
+function setActiveId(id) {
+  store.activeId = id;
+  try {
+    if (id) localStorage.setItem(ACTIVE_KEY, id);
+    else localStorage.removeItem(ACTIVE_KEY);
+  } catch (e) {}
+}
+
+async function fetchChats() {
+  const r = await fetch("/v1/chats", { cache: "no-store" });
+  if (!r.ok) throw new Error("fetch /v1/chats " + r.status);
+  const j = await r.json();
+  return j.chats || [];
+}
+
+async function putChat(chat) {
+  try {
+    const r = await fetch(`/v1/chats/${encodeURIComponent(chat.id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(chat),
+    });
+    if (!r.ok) console.warn("save chat failed", r.status);
+  } catch (e) { console.warn("save chat error", e); }
+}
+
+async function deleteChatRemote(id) {
+  try {
+    await fetch(`/v1/chats/${encodeURIComponent(id)}`, { method: "DELETE" });
+  } catch (e) { console.warn("delete chat error", e); }
+}
+
+async function clearChatsRemote() {
+  try {
+    await fetch("/v1/chats", { method: "DELETE" });
+  } catch (e) { console.warn("clear chats error", e); }
+}
+
+async function bootstrapChats() {
+  try {
+    store.chats = await fetchChats();
+  } catch (e) {
+    console.warn("chats bootstrap failed; running with empty list", e);
+    store.chats = [];
+  }
+
+  // One-time migration: a returning user from the localStorage era has
+  // their old chats sitting in localStorage but nothing on the daemon
+  // yet. Upload them so phones / paired devices see the same history.
+  let migrated = false;
+  try { migrated = localStorage.getItem(MIGRATED_KEY) === "1"; } catch (e) {}
+  if (!migrated && store.chats.length === 0) {
+    let raw = null;
+    try { raw = localStorage.getItem(LEGACY_STORE_KEY); } catch (e) {}
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        const legacy = (parsed && parsed.chats) || [];
+        if (legacy.length > 0) {
+          for (const c of legacy) await putChat(c);
+          store.chats = await fetchChats();
+          if (parsed.activeId && !store.activeId) setActiveId(parsed.activeId);
+          console.info(`migrated ${legacy.length} chats from localStorage to daemon`);
+        }
+      } catch (e) { console.warn("legacy migration failed", e); }
+    }
+    try { localStorage.setItem(MIGRATED_KEY, "1"); } catch (e) {}
+  }
+
+  // Reconcile activeId: clear if it points at a chat that no longer exists.
+  if (store.activeId && !store.chats.find((c) => c.id === store.activeId)) {
+    setActiveId(null);
+  }
+}
+
+// Pull fresh state from the daemon. Used on tab-visibility so a chat
+// edited on another device shows up when you switch back. Skip while
+// streaming on this device so we don't trample the in-progress message.
+async function refreshChatsFromServer() {
+  if (streaming) return;
+  try {
+    const fresh = await fetchChats();
+    store.chats = fresh;
+    if (store.activeId && !fresh.find((c) => c.id === store.activeId)) {
+      setActiveId(fresh[0]?.id || null);
+    }
+    renderChatList();
+    renderActiveChat();
+  } catch (e) { /* keep showing what we have */ }
+}
 
 function newChatId() {
   return "c_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -258,9 +369,9 @@ function ensureActiveChat() {
   if (!chat) {
     chat = { id: newChatId(), title: "new chat", createdAt: Date.now(), messages: [] };
     store.chats.unshift(chat);
-    store.activeId = chat.id;
+    setActiveId(chat.id);
     if (store.chats.length > MAX_CHATS) store.chats.length = MAX_CHATS;
-    saveStore();
+    putChat(chat);
   }
   return chat;
 }
@@ -275,9 +386,9 @@ function startNewChat() {
   }
   const chat = { id: newChatId(), title: "new chat", createdAt: Date.now(), messages: [] };
   store.chats.unshift(chat);
-  store.activeId = chat.id;
+  setActiveId(chat.id);
   if (store.chats.length > MAX_CHATS) store.chats.length = MAX_CHATS;
-  saveStore();
+  putChat(chat);
   renderChatList();
   renderActiveChat();
   els.prompt.focus();
@@ -285,8 +396,7 @@ function startNewChat() {
 
 function switchToChat(id) {
   if (!store.chats.some((c) => c.id === id)) return;
-  store.activeId = id;
-  saveStore();
+  setActiveId(id);
   renderChatList();
   renderActiveChat();
 }
@@ -301,9 +411,9 @@ function deleteChat(id) {
   if (!confirm(`delete ${label}? this can't be undone.`)) return;
   store.chats.splice(idx, 1);
   if (store.activeId === id) {
-    store.activeId = store.chats.length > 0 ? store.chats[0].id : null;
+    setActiveId(store.chats.length > 0 ? store.chats[0].id : null);
   }
-  saveStore();
+  deleteChatRemote(id);
   renderChatList();
   renderActiveChat();
 }
@@ -312,6 +422,7 @@ function deleteChat(id) {
 
 function renderChatList() {
   els.chatList.innerHTML = "";
+  if (els.clearChats) els.clearChats.hidden = store.chats.length === 0;
   if (store.chats.length === 0) {
     const li = document.createElement("li");
     li.className = "chat-item empty";
@@ -610,6 +721,19 @@ document.querySelectorAll(".chip[data-suggest]").forEach((btn) => {
 });
 
 els.newChat.addEventListener("click", startNewChat);
+
+if (els.clearChats) {
+  els.clearChats.addEventListener("click", () => {
+    if (store.chats.length === 0) return;
+    const n = store.chats.length;
+    if (!confirm(`clear all ${n} chat${n === 1 ? "" : "s"}? this can't be undone.`)) return;
+    store.chats = [];
+    setActiveId(null);
+    clearChatsRemote();
+    renderChatList();
+    renderActiveChat();
+  });
+}
 autoresize();
 
 // ---------------------------------------------------------------- submit
@@ -636,7 +760,9 @@ els.composer.addEventListener("submit", async (e) => {
     store.chats.splice(idx, 1);
     store.chats.unshift(chat);
   }
-  saveStore();
+  // Snapshot the chat now (title + user msg). The full save with the
+  // assistant reply happens after streaming completes.
+  putChat(chat);
   renderChatList();
 
   if (els.empty) els.empty.style.display = "none";
@@ -651,7 +777,8 @@ els.composer.addEventListener("submit", async (e) => {
   assistantNode.classList.add("streaming");
 
   streaming = true;
-  els.send.disabled = true;
+  currentAbort = new AbortController();
+  setSendMode("stop");
   els.meta.innerHTML = '<span class="info">streaming…</span>';
 
   const startedAt = performance.now();
@@ -664,7 +791,7 @@ els.composer.addEventListener("submit", async (e) => {
       bodyEl.textContent = assistantMsg.text;
       bytes += chunk.length;
       els.scroll.scrollTop = els.scroll.scrollHeight;
-    });
+    }, currentAbort.signal);
     const elapsedMs = performance.now() - startedAt;
     const stats = {
       servedBy,
@@ -675,31 +802,48 @@ els.composer.addEventListener("submit", async (e) => {
     assistantMsg.stats = stats;
     assistantNode.append(buildStats(stats));
   } catch (err) {
-    showError(assistantNode, err);
-    // Compact inline summary for the saved transcript — humans never see
-    // the JSON body, just a single legible line. The rich banner lives
-    // inside the DOM (see showError) and isn't persisted.
-    const info = err && err.info;
-    if (info && info.kind === "upstream_offline") {
-      assistantMsg.text += "\n[no model runtime is running — start llama-server, ollama, or lm studio]";
+    if (err && (err.name === "AbortError" || err.aborted)) {
+      // User pressed stop — keep whatever streamed so far, mark it.
+      assistantMsg.text += assistantMsg.text ? "\n[stopped]" : "[stopped]";
+      const bodyEl = assistantNode.querySelector(".body");
+      bodyEl.textContent = assistantMsg.text;
     } else {
-      assistantMsg.text += `\n[error: ${err && err.message ? err.message : "request failed"}]`;
+      showError(assistantNode, err);
+      // Compact inline summary for the saved transcript — humans never see
+      // the JSON body, just a single legible line. The rich banner lives
+      // inside the DOM (see showError) and isn't persisted.
+      const info = err && err.info;
+      if (info && info.kind === "upstream_offline") {
+        assistantMsg.text += "\n[no model runtime is running — start llama-server, ollama, or lm studio]";
+      } else {
+        assistantMsg.text += `\n[error: ${err && err.message ? err.message : "request failed"}]`;
+      }
     }
   } finally {
     assistantNode.classList.remove("streaming");
     streaming = false;
+    currentAbort = null;
+    setSendMode("send");
     els.meta.innerHTML = '<span class="hint">enter to send</span>';
-    saveStore();
+    chat.updatedAt = Date.now();
+    putChat(chat);
     autoresize();
     els.prompt.focus();
   }
 });
 
-async function streamPrompt(prompt, onChunk) {
+els.stop.addEventListener("click", () => {
+  if (currentAbort) {
+    try { currentAbort.abort(); } catch (e) {}
+  }
+});
+
+async function streamPrompt(prompt, onChunk, signal) {
   const resp = await fetch("/v1/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prompt, max_tokens: 512 }),
+    signal,
   });
 
   if (!resp.ok) {
@@ -801,6 +945,117 @@ function escapeHtml(s) {
 function truncate(s, n) {
   if (s.length <= n) return s;
   return s.slice(0, n - 1) + "…";
+}
+
+// ---------------------------------------------------------------- tunnel
+//
+// "Open to internet" toggle. Clicking it tells the daemon to spawn
+// cloudflared; the daemon parses the trycloudflare URL out of stderr
+// and exposes it via /v1/tunnel. The displayed URL embeds the bearer
+// token as ?api_token=… so the phone's first visit auto-authenticates
+// (auth bootstrap up top stores it in localStorage + strips the param).
+//
+// Caveat: the URL + token together grant full daemon access. The user
+// is warned in the UI. The classifier in auth.rs detects cf-connecting-ip
+// and forces bearer for tunneled requests so loopback bypass can't leak.
+
+let tunnelPollTimer = null;
+
+async function fetchTunnel() {
+  try {
+    const r = await fetch("/v1/tunnel", { cache: "no-store" });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch (e) { return null; }
+}
+
+async function startTunnel() {
+  try {
+    const r = await fetch("/v1/tunnel/start", { method: "POST" });
+    return r.ok ? await r.json() : null;
+  } catch (e) { return null; }
+}
+
+async function stopTunnel() {
+  try {
+    const r = await fetch("/v1/tunnel/stop", { method: "POST" });
+    return r.ok ? await r.json() : null;
+  } catch (e) { return null; }
+}
+
+function renderTunnel(s) {
+  if (!s || !els.tunnelToggle) return;
+  const state = s.state;
+  if (state === "running") {
+    const token = getToken() || "";
+    const sep = s.url.includes("?") ? "&" : "?";
+    const linkHref = token ? `${s.url}${sep}api_token=${encodeURIComponent(token)}` : s.url;
+    els.tunnelLabel.textContent = "stop";
+    els.tunnelStatus.textContent = "live — open this on your phone, anywhere:";
+    els.tunnelStatus.dataset.state = "running";
+    els.tunnelUrl.textContent = linkHref;
+    els.tunnelUrl.dataset.copy = linkHref;
+    els.tunnelLink.hidden = false;
+    els.tunnelWarn.hidden = false;
+  } else if (state === "starting") {
+    els.tunnelLabel.textContent = "starting…";
+    els.tunnelStatus.textContent = "spawning cloudflared, waiting for url…";
+    els.tunnelStatus.dataset.state = "starting";
+    els.tunnelLink.hidden = true;
+    els.tunnelWarn.hidden = true;
+  } else if (state === "failed") {
+    els.tunnelLabel.textContent = "enable";
+    els.tunnelStatus.textContent = "failed: " + (s.error || "unknown");
+    els.tunnelStatus.dataset.state = "failed";
+    els.tunnelLink.hidden = true;
+    els.tunnelWarn.hidden = true;
+  } else {
+    els.tunnelLabel.textContent = "enable";
+    els.tunnelStatus.textContent = "off — your daemon is only reachable on this network.";
+    els.tunnelStatus.dataset.state = "idle";
+    els.tunnelLink.hidden = true;
+    els.tunnelWarn.hidden = true;
+  }
+}
+
+function setTunnelPolling(on) {
+  if (tunnelPollTimer) { clearInterval(tunnelPollTimer); tunnelPollTimer = null; }
+  if (on) {
+    tunnelPollTimer = setInterval(async () => {
+      const s = await fetchTunnel();
+      renderTunnel(s);
+      if (s && s.state !== "starting") setTunnelPolling(false);
+    }, 1500);
+  }
+}
+
+if (els.tunnelToggle) {
+  els.tunnelToggle.addEventListener("click", async () => {
+    els.tunnelToggle.disabled = true;
+    try {
+      const cur = await fetchTunnel();
+      const isOn = cur && (cur.state === "running" || cur.state === "starting");
+      const next = isOn ? await stopTunnel() : await startTunnel();
+      renderTunnel(next);
+      if (next && next.state === "starting") setTunnelPolling(true);
+    } finally {
+      els.tunnelToggle.disabled = false;
+    }
+  });
+}
+
+if (els.tunnelCopy) {
+  els.tunnelCopy.addEventListener("click", async () => {
+    const url = els.tunnelUrl.dataset.copy || els.tunnelUrl.textContent;
+    try {
+      await navigator.clipboard.writeText(url);
+      const old = els.tunnelStatus.textContent;
+      els.tunnelStatus.textContent = "copied to clipboard.";
+      setTimeout(() => { els.tunnelStatus.textContent = old; }, 1400);
+    } catch (e) {
+      els.tunnelStatus.textContent = "copy failed — long-press the url instead.";
+    }
+  });
 }
 
 // ---------------------------------------------------------------- pair modal
@@ -1054,5 +1309,25 @@ document.addEventListener("keydown", (e) => {
 
 // ---------------------------------------------------------------- boot
 
+// Render synchronously first (empty list, while the daemon answers)
+// so the UI shows something instead of flashing nothing. Then swap
+// to the real state once the fetch resolves.
 renderChatList();
 renderActiveChat();
+
+bootstrapChats().then(() => {
+  renderChatList();
+  renderActiveChat();
+});
+
+fetchTunnel().then((s) => {
+  renderTunnel(s);
+  if (s && s.state === "starting") setTunnelPolling(true);
+});
+
+// Cross-device sync: when this tab comes back to the foreground, pull
+// fresh state so a chat edited on another paired device (phone PWA,
+// other browser) shows up. Cheap GET, skipped while we're mid-stream.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refreshChatsFromServer();
+});

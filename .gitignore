@@ -32,6 +32,17 @@ __pycache__/
 .venv/
 venv/
 
+# Tauri auto-generates schema files on every build — never commit.
+crates/unhosted-desktop/gen/
+
+# But DO commit the desktop crate's dist/ fallback + icons even though
+# `dist/` and `*.icns` are ignored above. These are source assets, not
+# build output.
+!crates/unhosted-desktop/dist/
+!crates/unhosted-desktop/dist/**
+!crates/unhosted-desktop/icons/
+!crates/unhosted-desktop/icons/**
+
 # Local env
 .env
 .env.local

@@ -1,0 +1,51 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "unhosted",
+  "version": "0.0.7",
+  "identifier": "ai.unhosted.app",
+  "build": {
+    "frontendDist": "dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "unhosted",
+        "url": "http://127.0.0.1:7777",
+        "width": 960,
+        "height": 720,
+        "minWidth": 480,
+        "minHeight": 480
+      }
+    ],
+    "security": {
+      "csp": null,
+      "dangerousDisableAssetCspModification": true
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "targets": ["app", "dmg", "deb", "appimage", "rpm", "msi", "nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Productivity",
+    "shortDescription": "your hardware as your AI cluster",
+    "longDescription": "Local-first AI daemon that pools owned hardware (Mac, Linux, Windows, Raspberry Pi) into a private inference cluster. Routes through llama.cpp / Ollama / LM Studio. Nothing leaves your machines."
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "dialog": true,
+      "endpoints": [
+        "https://github.com/unhosted-ai/unhosted-core/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRBMDJDOTUyRjA1RUZCMjMKUldRaisxN3dVc2tDU3ZuQSs1N2QyQ0QvVlMvd2RnQU9rUUNlTmUwRmdvU0xNdXR1Nzc0dmtBUy8K"
+    }
+  }
+}

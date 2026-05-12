@@ -908,6 +908,103 @@ button:focus-visible, input:focus-visible, textarea:focus-visible,
 .send:disabled { background: var(--surface); color: var(--mute); border-color: var(--line-strong); }
 .send:disabled:hover { background: var(--surface); }
 
+.stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  color: var(--fg);
+  border-color: var(--line-strong);
+  padding: 6px 14px 6px 16px;
+  font-weight: 500;
+}
+.stop .send-icon { width: 11px; height: 11px; }
+.stop:hover { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+
+.h4-action {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--mute);
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+}
+.h4-action svg { width: 12px; height: 12px; }
+.sidebar-section:hover .h4-action { opacity: 1; }
+.h4-action:hover { color: var(--fg); background: var(--surface); }
+
+/* tunnel — "open to internet" toggle */
+.tunnel-body { display: flex; flex-direction: column; gap: 6px; }
+.tunnel-status {
+  font-size: 11px;
+  color: var(--mute);
+  margin: 0 4px;
+  line-height: 1.4;
+}
+.tunnel-status[data-state="running"] { color: var(--accent); }
+.tunnel-status[data-state="failed"] { color: var(--danger, #c33); }
+.tunnel-link {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 4px 0;
+  padding: 6px 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+/* `display: flex` above wins over the browser default `[hidden] { display: none }`,
+   so we must re-assert it. Same trick for the warning line below. */
+.tunnel-link[hidden],
+.tunnel-warn[hidden] { display: none !important; }
+.tunnel-status[data-state="starting"]::after {
+  content: " ";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 6px;
+  border: 1.5px solid var(--mute);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: tunnel-spin 0.9s linear infinite;
+  vertical-align: -1px;
+}
+@keyframes tunnel-spin { to { transform: rotate(360deg); } }
+.tunnel-url {
+  flex: 1;
+  font-size: 10.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tunnel-copy {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.tunnel-copy svg { width: 11px; height: 11px; }
+.tunnel-warn {
+  font-size: 10px;
+  color: var(--mute);
+  margin: 2px 4px 0;
+  line-height: 1.35;
+  font-style: italic;
+}
+
 /* ==========================================================================
    responsive
    ========================================================================== */

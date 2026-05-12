@@ -23,19 +23,15 @@ jobs:
         include:
           - target: aarch64-apple-darwin
             os: macos-latest
-            archive: tar.gz
             kind: macos
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            archive: tar.gz
             kind: linux
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
-            archive: tar.gz
             kind: linux
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            archive: zip
             kind: windows
           # x86_64-apple-darwin (Intel Mac) is dropped from the matrix:
           # macos-13 runner pool queues hours behind the others, blocking
@@ -50,93 +46,122 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      # ----- platform setup for the desktop shell -----
-      # Linux: tao + wry need gtk/webkit2gtk + libsoup at build time. Users
-      # also need the matching runtime packages — the installer prints a hint.
-      - name: Install Linux GUI deps
+      # ----- platform setup for the Tauri 2 bundler -----
+      # Linux: Tauri 2 uses the same WebKitGTK pair as the old tao+wry shell,
+      # plus the rsvg loader for icon rasterization in the bundler.
+      - name: Install Linux GUI + bundler deps
         if: matrix.kind == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libgtk-3-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev
+            libgtk-3-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf
 
-      # macOS: librsvg gives us rsvg-convert for the .icns icon pipeline.
-      - name: Install macOS bundler deps
-        if: matrix.kind == 'macos'
-        run: brew install librsvg
+      # macOS: nothing extra needed — Tauri's bundler uses hdiutil + sips
+      # which ship with the OS.
 
-      # ----- build both binaries -----
-      - name: Build CLI + desktop shell
-        run: |
-          cargo build --release --target ${{ matrix.target }} -p unhosted-cli
-          cargo build --release --target ${{ matrix.target }} -p unhosted-desktop
+      # Windows: WiX 3 is what `tauri bundle` invokes for .msi. NSIS is
+      # what it invokes for the .exe installer. Both come pre-installed
+      # on windows-latest runners.
+
+      # ----- install the Tauri CLI -----
+      # We use the Rust binary (faster cold start than the npm package,
+      # no Node dep). Pinned to a minor for reproducibility.
+      - name: Install tauri-cli
+        run: cargo install tauri-cli --version "^2.4" --locked
+
+      # ----- build the CLI (separate crate from the desktop shell) -----
+      - name: Build CLI
+        run: cargo build --release --target ${{ matrix.target }} -p unhosted-cli
+
+      # ----- bundle the desktop shell via Tauri -----
+      # Produces .app + .dmg on macOS, .deb + .AppImage + .rpm on Linux,
+      # .msi + .exe (NSIS) on Windows — plus the updater manifest
+      # (`latest.json`) when TAURI_SIGNING_PRIVATE_KEY is set.
+      - name: Build desktop bundle
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        working-directory: crates/unhosted-desktop
+        run: cargo tauri build --target ${{ matrix.target }}
 
       # ----- stage release artifacts -----
-      - name: Stage release artifact (linux)
+      - name: Stage release artifacts (linux)
         if: matrix.kind == 'linux'
         shell: bash
         run: |
           STAGE="unhosted-${{ matrix.target }}"
+          mkdir -p dist-stage
+          # CLI tarball — same as before
           mkdir -p "$STAGE"
-          cp target/${{ matrix.target }}/release/unhosted          "$STAGE/"
-          cp target/${{ matrix.target }}/release/unhosted-desktop  "$STAGE/"
-          cp scripts/unhosted.desktop  "$STAGE/"
-          cp scripts/unhosted.service  "$STAGE/"
-          cp branding/logo/app-icon.svg "$STAGE/unhosted.svg"
+          cp target/${{ matrix.target }}/release/unhosted "$STAGE/"
+          cp scripts/unhosted.desktop  "$STAGE/" 2>/dev/null || true
+          cp scripts/unhosted.service  "$STAGE/" 2>/dev/null || true
           cp LICENSE README.md CHANGELOG.md "$STAGE/"
-          tar -czf "${STAGE}.tar.gz" "$STAGE"
-          shasum -a 256 "${STAGE}.tar.gz" > "${STAGE}.tar.gz.sha256"
+          tar -czf "dist-stage/${STAGE}.tar.gz" "$STAGE"
+          shasum -a 256 "dist-stage/${STAGE}.tar.gz" > "dist-stage/${STAGE}.tar.gz.sha256"
+          # Tauri bundles
+          BUNDLE_DIR="target/${{ matrix.target }}/release/bundle"
+          find "$BUNDLE_DIR" -maxdepth 3 \( -name "*.deb" -o -name "*.AppImage" -o -name "*.rpm" -o -name "*.tar.gz" -o -name "*.sig" \) -exec cp {} dist-stage/ \;
+          ls -lah dist-stage
 
-      - name: Stage release artifact (macos)
+      - name: Stage release artifacts (macos)
         if: matrix.kind == 'macos'
         shell: bash
         run: |
           STAGE="unhosted-${{ matrix.target }}"
+          mkdir -p dist-stage
+          # CLI tarball
           mkdir -p "$STAGE"
-          cp target/${{ matrix.target }}/release/unhosted          "$STAGE/"
-          cp target/${{ matrix.target }}/release/unhosted-desktop  "$STAGE/"
+          cp target/${{ matrix.target }}/release/unhosted "$STAGE/"
           cp LICENSE README.md CHANGELOG.md "$STAGE/"
-          tar -czf "${STAGE}.tar.gz" "$STAGE"
-          shasum -a 256 "${STAGE}.tar.gz" > "${STAGE}.tar.gz.sha256"
+          tar -czf "dist-stage/${STAGE}.tar.gz" "$STAGE"
+          shasum -a 256 "dist-stage/${STAGE}.tar.gz" > "dist-stage/${STAGE}.tar.gz.sha256"
+          # Tauri bundles — copy .app archive + .dmg + sig
+          BUNDLE_DIR="target/${{ matrix.target }}/release/bundle"
+          if [ -d "$BUNDLE_DIR/dmg" ]; then
+            cp "$BUNDLE_DIR/dmg/"*.dmg dist-stage/ 2>/dev/null || true
+          fi
+          if [ -d "$BUNDLE_DIR/macos" ]; then
+            # tar the .app for distribution outside the .dmg path
+            APP=$(find "$BUNDLE_DIR/macos" -name "*.app" -maxdepth 1 | head -1)
+            if [ -n "$APP" ]; then
+              tar -czf "dist-stage/unhosted-macos-app-${{ matrix.target }}.tar.gz" -C "$(dirname "$APP")" "$(basename "$APP")"
+            fi
+          fi
+          # Updater sig files (e.g. *.dmg.sig)
+          find "$BUNDLE_DIR" -maxdepth 3 -name "*.sig" -exec cp {} dist-stage/ \; 2>/dev/null || true
+          for f in dist-stage/*.dmg dist-stage/*.tar.gz; do
+            [ -f "$f" ] && shasum -a 256 "$f" > "$f.sha256"
+          done
+          ls -lah dist-stage
 
-          # Also produce the .app bundle as a separate asset.
-          UNHOSTED_BIN="$PWD/target/${{ matrix.target }}/release/unhosted-desktop" \
-            bash scripts/bundle-macos.sh
-          APP_ARCHIVE="unhosted-macos-app-${{ matrix.target }}.tar.gz"
-          tar -czf "$APP_ARCHIVE" -C dist unhosted.app
-          shasum -a 256 "$APP_ARCHIVE" > "${APP_ARCHIVE}.sha256"
-
-          # Also produce a .dmg — the actual "double-click installer"
-          # experience users expect on macOS. Same .app inside, just
-          # wrapped in a mountable disk image with a Drag-To-Applications
-          # shortcut. hdiutil is built into macOS, no extra deps.
-          bash scripts/build-dmg.sh
-          DMG_ASSET="unhosted-${{ matrix.target }}.dmg"
-          mv dist/unhosted.dmg "$DMG_ASSET"
-          shasum -a 256 "$DMG_ASSET" > "${DMG_ASSET}.sha256"
-
-      - name: Stage release artifact (windows)
+      - name: Stage release artifacts (windows)
         if: matrix.kind == 'windows'
         shell: pwsh
         run: |
           $stage = "unhosted-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path dist-stage | Out-Null
+          # CLI zip
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/unhosted.exe"         "$stage/"
-          Copy-Item "target/${{ matrix.target }}/release/unhosted-desktop.exe" "$stage/"
+          Copy-Item "target/${{ matrix.target }}/release/unhosted.exe" "$stage/"
           Copy-Item LICENSE,README.md,CHANGELOG.md "$stage/"
-          Compress-Archive -Path $stage -DestinationPath "$stage.zip" -Force
-          (Get-FileHash -Algorithm SHA256 "$stage.zip").Hash + "  $stage.zip" | Set-Content "$stage.zip.sha256"
+          Compress-Archive -Path $stage -DestinationPath "dist-stage/$stage.zip" -Force
+          (Get-FileHash -Algorithm SHA256 "dist-stage/$stage.zip").Hash + "  $stage.zip" | Set-Content "dist-stage/$stage.zip.sha256"
+          # Tauri bundles
+          $bundleDir = "target/${{ matrix.target }}/release/bundle"
+          if (Test-Path "$bundleDir/msi") {
+            Get-ChildItem "$bundleDir/msi/*.msi","$bundleDir/msi/*.sig" -ErrorAction SilentlyContinue | Copy-Item -Destination dist-stage/
+          }
+          if (Test-Path "$bundleDir/nsis") {
+            Get-ChildItem "$bundleDir/nsis/*.exe","$bundleDir/nsis/*.sig" -ErrorAction SilentlyContinue | Copy-Item -Destination dist-stage/
+          }
+          Get-ChildItem dist-stage
 
       - uses: actions/upload-artifact@v4
         with:
           name: unhosted-${{ matrix.target }}
-          path: |
-            unhosted-${{ matrix.target }}.${{ matrix.archive }}
-            unhosted-${{ matrix.target }}.${{ matrix.archive }}.sha256
-            unhosted-macos-app-${{ matrix.target }}.tar.gz
-            unhosted-macos-app-${{ matrix.target }}.tar.gz.sha256
-            unhosted-${{ matrix.target }}.dmg
-            unhosted-${{ matrix.target }}.dmg.sha256
+          path: dist-stage/*
           if-no-files-found: ignore
 
   release:
@@ -161,6 +186,21 @@ jobs:
           else
             echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           fi
+
+      # Generate the updater manifest (`latest.json`) so installed
+      # desktop shells can self-update. Each platform's bundle has a
+      # `.sig` next to it from the Tauri signer; the script reads them
+      # back and assembles the JSON the updater plugin expects.
+      # No-ops cleanly when no `.sig` files are present (which is
+      # what happens until the TAURI_SIGNING_PRIVATE_KEY secret is set).
+      - name: Generate updater manifest
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 .github/scripts/build-updater-manifest.py "$TAG" dist "$REPO" || true
+          ls -lah dist
+          cat dist/latest.json 2>/dev/null || echo "(no latest.json — updater secrets likely not set yet)"
 
       - name: Create GitHub release
         env:

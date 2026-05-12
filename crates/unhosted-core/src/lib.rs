@@ -9,6 +9,7 @@
 //! peer is just another `unhosted serve` process. No new transport.
 
 pub mod auth;
+pub mod chats;
 pub mod discovery;
 pub mod identity;
 pub mod paths;
@@ -16,6 +17,7 @@ pub mod peer;
 pub mod relay_client;
 pub mod router;
 pub mod transport;
+pub mod tunnel;
 pub mod upstream;
 mod web;
 
@@ -113,6 +115,15 @@ struct NodeState {
     /// Shared QUIC endpoint for outbound peer dials. `None` if the
     /// daemon couldn't bind a UDP port for QUIC at startup.
     quic: Option<Arc<transport::PeerEndpoint>>,
+    /// Server-side chat history. Loaded at startup from
+    /// `~/.config/unhosted/chats.json`. Lets any device paired to this
+    /// daemon see the same conversation list — replaces the per-browser
+    /// `localStorage` store that diverged across origins.
+    chats: chats::ChatStore,
+    /// Cloudflare Tunnel control. Spawns `cloudflared` as a subprocess
+    /// when the user clicks "open to internet" in the UI; lets the
+    /// phone PWA reach this daemon from any network.
+    tunnel: Arc<tunnel::TunnelManager>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -205,6 +216,9 @@ pub async fn serve(node: Node) -> Result<()> {
             }
         };
 
+    let chat_store = chats::ChatStore::load_or_create().context("loading chat store")?;
+    let tunnel_mgr = Arc::new(tunnel::TunnelManager::new(node.addr.port()));
+
     let state = NodeState {
         node: Arc::new(node.clone()),
         router: router.clone(),
@@ -216,6 +230,8 @@ pub async fn serve(node: Node) -> Result<()> {
         local_token: local_token.clone(),
         replay_guard,
         quic,
+        chats: chat_store,
+        tunnel: tunnel_mgr,
     };
 
     // Spawn the QUIC accept loop now that NodeState is ready. Each
@@ -271,6 +287,25 @@ pub async fn serve(node: Node) -> Result<()> {
         // http://127.0.0.1:7777 instead of OpenAI / Ollama / llama-server.
         .route("/v1/chat/completions", post(chat_completions_handler))
         .route("/v1/models", get(models_handler))
+        // Server-side chat history — same store regardless of which paired
+        // device opens the UI.
+        .route(
+            "/v1/chats",
+            get(chats_list_handler)
+                .post(chats_upsert_handler)
+                .delete(chats_clear_handler),
+        )
+        .route(
+            "/v1/chats/{id}",
+            get(chats_get_handler)
+                .put(chats_upsert_handler)
+                .delete(chats_delete_handler),
+        )
+        // Cloudflare Tunnel control — one-click "make this daemon reachable
+        // from the public internet" for phones on cellular / coffee-shop wifi.
+        .route("/v1/tunnel", get(tunnel_status_handler))
+        .route("/v1/tunnel/start", post(tunnel_start_handler))
+        .route("/v1/tunnel/stop", post(tunnel_stop_handler))
         .with_state(state);
 
     let app = api
@@ -460,6 +495,7 @@ fn cors_layer() -> tower_http::cors::CorsLayer {
         .allow_methods([
             axum::http::Method::GET,
             axum::http::Method::POST,
+            axum::http::Method::PUT,
             axum::http::Method::DELETE,
             axum::http::Method::OPTIONS,
         ])
@@ -1738,6 +1774,149 @@ async fn identity_handler(
         "pubkey": state.identity.public_b64(),
         "addr": state.node.addr.to_string(),
     })))
+}
+
+// ─── chat history endpoints ────────────────────────────────────────────────
+// All four chat endpoints are local-user-only: paired peers can call /v1/run
+// against this daemon's hardware, but they don't get to read or mutate the
+// owner's chat history. Auth must be loopback or a valid local bearer token.
+
+async fn chats_list_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<axum::Json<serde_json::Value>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    Ok(axum::Json(serde_json::json!({ "chats": state.chats.list() })))
+}
+
+async fn chats_get_handler(
+    State(state): State<NodeState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<axum::Json<chats::Chat>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    state
+        .chats
+        .get(&id)
+        .map(axum::Json)
+        .ok_or(StatusCode::NOT_FOUND)
+}
+
+/// Insert-or-replace. Used by both `POST /v1/chats` (id in body) and
+/// `PUT /v1/chats/{id}` (id in path). When the path id is present it
+/// overrides whatever the body says — clients shouldn't rely on the
+/// body id matching, but if they get it wrong we don't surprise them
+/// by writing under a different key.
+async fn chats_upsert_handler(
+    State(state): State<NodeState>,
+    path: Option<axum::extract::Path<String>>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Result<axum::Json<chats::Chat>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &body);
+    require_auth(&outcome, true)?;
+    let mut chat: chats::Chat = serde_json::from_slice(&body).map_err(|e| {
+        tracing::warn!(error = %e, "chats upsert: bad body");
+        StatusCode::BAD_REQUEST
+    })?;
+    if let Some(axum::extract::Path(path_id)) = path {
+        chat.id = path_id;
+    }
+    if chat.id.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    state
+        .chats
+        .upsert(chat)
+        .map(axum::Json)
+        .map_err(|e| {
+            tracing::error!(error = %e, "chats upsert: write failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
+
+async fn chats_delete_handler(
+    State(state): State<NodeState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<StatusCode, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    match state.chats.delete(&id) {
+        Ok(true) => Ok(StatusCode::NO_CONTENT),
+        Ok(false) => Err(StatusCode::NOT_FOUND),
+        Err(e) => {
+            tracing::error!(error = %e, "chats delete: write failed");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+async fn chats_clear_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<axum::Json<serde_json::Value>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    let cleared = state.chats.clear().map_err(|e| {
+        tracing::error!(error = %e, "chats clear: write failed");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    Ok(axum::Json(serde_json::json!({ "cleared": cleared })))
+}
+
+// ─── tunnel (cloudflare) endpoints ────────────────────────────────────────
+// All three are local-user-only. Spawning a public tunnel is consequential —
+// only the owner of this daemon should be able to flip it on, and only from
+// loopback or with the bearer token.
+
+async fn tunnel_status_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<axum::Json<tunnel::TunnelState>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    Ok(axum::Json(state.tunnel.status().await))
+}
+
+async fn tunnel_start_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<axum::Json<tunnel::TunnelState>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    match state.tunnel.start().await {
+        Ok(s) => Ok(axum::Json(s)),
+        Err(e) => {
+            tracing::warn!(error = %e, "tunnel start failed");
+            Ok(axum::Json(tunnel::TunnelState::Failed {
+                error: e.to_string(),
+            }))
+        }
+    }
+}
+
+async fn tunnel_stop_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<axum::Json<tunnel::TunnelState>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    let s = state.tunnel.stop().await.map_err(|e| {
+        tracing::error!(error = %e, "tunnel stop failed");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    Ok(axum::Json(s))
 }
 
 /// Route an inbound relay request by its `kind` to the right local handler.

@@ -82,7 +82,9 @@ This section replaces the typical "Features" list. It's the truth about what wor
 | Trusted-peer pairing          | designed    | v0.1.0. WireGuard-style.                                           |
 | Public swarm (USDC)           | designed    | v0.3.0+. See [design/0001](design/0001-public-mode-architecture.md). |
 | Verifiable inference          | research    | Optimistic + redundancy planned; ZK proofs when affordable.        |
-| Web UI / desktop app          | designed    | v0.1.0+ web, v0.2.0+ Tauri. See [design/0002](design/0002-application-frontends.md). |
+| Web UI / desktop app          | shipped     | Web UI in the daemon since v0.0.3. Tauri desktop shell + auto-updater in v0.0.7. See [design/0002](design/0002-application-frontends.md). |
+| Cross-device chat history     | shipped     | v0.0.7. Daemon-side store at `~/.config/unhosted/chats.json`; phones over LAN/tunnel see the same chats as desktop. |
+| Public reach (Cloudflare Tunnel) | shipped  | v0.0.7. One-click sidebar button; phone PWA works on cellular. |
 | Windows GPU support           | designed    | After Mac + Linux are stable.                                      |
 
 Reproducible benchmarks land in `benchmarks/` once any code exists. We will publish honest tokens-per-second numbers, not marketing language.

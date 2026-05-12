@@ -266,12 +266,43 @@ pub fn classify(
         return AuthOutcome::Rejected("bad bearer token");
     }
 
-    // 3. No auth — only allow if from loopback.
+    // 3. No auth — only allow if from loopback AND not forwarded from
+    //    a public tunnel. When `cf-connecting-ip` (Cloudflare Tunnel) or
+    //    a non-loopback X-Forwarded-For is set, the underlying TCP
+    //    connection is loopback but the *real* client is on the
+    //    internet — we must NOT treat that as the local user.
+    let tunneled = is_forwarded_from_public(headers);
     match peer_addr {
-        Some(ip) if ip.is_loopback() => AuthOutcome::LoopbackUnauthed,
+        Some(ip) if ip.is_loopback() && !tunneled => AuthOutcome::LoopbackUnauthed,
         Some(_) => AuthOutcome::Missing,
         None => AuthOutcome::Missing, // unknown source, fail closed
     }
+}
+
+/// Returns true when this request was forwarded from a public tunnel
+/// (Cloudflare Tunnel, ngrok, generic reverse proxy with X-Forwarded-For
+/// to a non-loopback source). Used to deny the loopback-bypass when the
+/// real caller is on the internet — even though our socket sees 127.0.0.1.
+fn is_forwarded_from_public(headers: &HeaderMap) -> bool {
+    // Cloudflare always sets this on tunneled requests to the origin.
+    if headers.get("cf-connecting-ip").is_some() {
+        return true;
+    }
+    // Conservative XFF check: any non-loopback IP in the chain → public.
+    if let Some(v) = headers.get("x-forwarded-for").and_then(|h| h.to_str().ok()) {
+        for hop in v.split(',') {
+            let hop = hop.trim();
+            if hop.is_empty() {
+                continue;
+            }
+            if let Ok(ip) = hop.parse::<IpAddr>() {
+                if !ip.is_loopback() {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 #[cfg(test)]

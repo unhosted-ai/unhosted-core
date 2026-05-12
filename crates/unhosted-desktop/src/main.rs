@@ -1,23 +1,28 @@
 //! Desktop shell for Unhosted — opens a native window pointed at the local
-//! daemon's web UI. This is the v0.2.0 alpha: just a webview wrapping the
-//! existing `unhosted serve` HTTP UI. Full Tauri (auto-updater, native menus,
-//! tray icon, bundling, code signing) follows once this skeleton is solid.
+//! daemon's web UI.
 //!
-//! Built on `tao` (cross-platform window/event-loop) + `wry` (cross-platform
-//! webview) — the same lower-level stack Tauri itself sits on. macOS uses
-//! WKWebView, Linux uses WebKitGTK, Windows uses Edge WebView2.
+//! v0.0.7 swapped the bare `tao` + `wry` pair for **Tauri 2**. Same underlying
+//! WebView (WKWebView on macOS, WebView2 on Windows, WebKitGTK on Linux) — the
+//! Tauri wrap buys us the updater plugin, native bundling (`tauri bundle`
+//! produces signed `.dmg` / `.msi` / `.AppImage`), and a place to bolt on the
+//! Phase 2 polish (system tray, deep links, native notifications) without
+//! rolling our own infrastructure.
+//!
+//! The desktop binary still bundles **zero** HTML/JS of its own. The window
+//! loads `http://127.0.0.1:7777`, which is the daemon — so every UI change
+//! ships through a daemon release, no separate desktop release needed.
 
-use anyhow::{Context, Result};
-use tao::{
-    event::{Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder,
-};
-use wry::WebViewBuilder;
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
+
+use anyhow::Result;
+use tauri_plugin_updater::UpdaterExt;
 
 const DEFAULT_NODE_URL: &str = "http://127.0.0.1:7777";
 
-fn main() -> Result<()> {
+fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -30,42 +35,59 @@ fn main() -> Result<()> {
         std::env::var("UNHOSTED_NODE_URL").unwrap_or_else(|_| DEFAULT_NODE_URL.to_string());
 
     if !daemon_reachable(&node_url) {
+        // Better UX than aborting silently: the embedded dist/index.html
+        // gives the user a clear "start the daemon" page. But warn loudly
+        // so terminal users see what's wrong.
         eprintln!();
         eprintln!("unhosted daemon is not reachable at {node_url}.");
         eprintln!();
         eprintln!("start it in another terminal:");
         eprintln!("    unhosted serve");
         eprintln!();
-        eprintln!("or set UNHOSTED_NODE_URL=<other-host:port> to point this app at a remote node.");
+        eprintln!("opening anyway — the window will retry on refresh.");
         eprintln!();
-        std::process::exit(1);
     }
 
-    tracing::info!(node_url = %node_url, "opening desktop shell");
+    tracing::info!(node_url = %node_url, "opening tauri desktop shell");
 
-    let event_loop = EventLoop::new();
-    let window = WindowBuilder::new()
-        .with_title("unhosted")
-        .with_inner_size(tao::dpi::LogicalSize::new(960.0, 720.0))
-        .with_min_inner_size(tao::dpi::LogicalSize::new(480.0, 480.0))
-        .build(&event_loop)
-        .context("creating window")?;
+    tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .setup(|app| {
+            // Kick off a background updater check on startup. Failures
+            // are silent — the user can also trigger this manually
+            // from the UI later (Phase 2).
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = check_for_update(handle).await {
+                    tracing::warn!(error = %e, "updater check failed");
+                }
+            });
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
 
-    let _webview = WebViewBuilder::new()
-        .with_url(&node_url)
-        .build(&window)
-        .context("creating webview")?;
-
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Wait;
-        if let Event::WindowEvent {
-            event: WindowEvent::CloseRequested,
-            ..
-        } = event
-        {
-            *control_flow = ControlFlow::Exit;
+/// Best-effort updater check. The updater plugin reads the endpoints +
+/// pubkey from `tauri.conf.json`. If a newer signed release exists, the
+/// `dialog: true` config flag pops the native "update available" prompt.
+async fn check_for_update(app: tauri::AppHandle) -> Result<()> {
+    let updater = app.updater()?;
+    match updater.check().await {
+        Ok(Some(update)) => {
+            tracing::info!(
+                version = %update.version,
+                date = ?update.date,
+                "update available"
+            );
+            // With `dialog: true` in tauri.conf.json the plugin shows
+            // its own prompt + downloads + relaunches. No further code
+            // needed here.
         }
-    });
+        Ok(None) => tracing::info!("desktop shell is up to date"),
+        Err(e) => tracing::warn!(error = %e, "updater check failed"),
+    }
+    Ok(())
 }
 
 fn daemon_reachable(url: &str) -> bool {

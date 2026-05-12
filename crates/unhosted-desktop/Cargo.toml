@@ -7,15 +7,21 @@ repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
 description = "Desktop shell for Unhosted — a native window wrapping the daemon's web UI."
+build = "build.rs"
 
 [[bin]]
 name = "unhosted-desktop"
 path = "src/main.rs"
 
 [dependencies]
-tao.workspace = true
-wry.workspace = true
+tauri = { workspace = true }
+tauri-plugin-updater = { workspace = true }
 anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
+serde.workspace = true
+serde_json.workspace = true
+
+[build-dependencies]
+tauri-build = { workspace = true }

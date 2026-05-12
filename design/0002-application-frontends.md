@@ -1,8 +1,9 @@
 # 0002 — Application frontends: CLI, web UI, desktop app
 
-**Status:** Accepted (architectural intent, no frontend code beyond the CLI yet)
+**Status:** Accepted — fully realized.
 **Captured:** 2026-05-09
-**Targets:** CLI is v0.0.1 (shipped). Web UI lands in v0.1.0+. Desktop app lands in v0.2.0+.
+**Updated:** 2026-05-12 (v0.0.7: Tauri migration shipped earlier than originally targeted).
+**Targets:** CLI shipped in v0.0.1. Web UI shipped in v0.0.3 (embedded in the daemon). Desktop app shipped first as raw `tao`+`wry` in v0.0.4 and migrated to Tauri 2 in v0.0.7 — earlier than the v0.2.0 target because the auto-updater and signed-installer story was needed to stop manually re-installing every release.
 
 This ADR answers the question "will there be an application to run this?" Yes — and there will be more than one. The CLI is the first surface, not the only one.
 

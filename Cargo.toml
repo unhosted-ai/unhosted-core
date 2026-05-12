@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/unhosted-core", "crates/unhosted-cli", "crates/unhosted-desktop", "crates/unhosted-relay"]
 
 [workspace.package]
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/unhosted-ai/unhosted"
@@ -29,6 +29,13 @@ rust-embed = { version = "8", features = ["axum", "interpolate-folder-path"] }
 mime_guess = "2"
 tao = "0.31"
 wry = "0.48"
+# Tauri 2 desktop shell. Replaces the bare tao+wry pair so we can get
+# auto-updater, signed installers, and (Phase 2) tray + deep links
+# without rebuilding our own infrastructure. The underlying WebView
+# is the same (WKWebView / WebView2 / WebKitGTK) — Tauri just wraps it.
+tauri = { version = "2", features = [] }
+tauri-build = { version = "2", features = [] }
+tauri-plugin-updater = "2"
 mdns-sd = "0.13"
 hostname = "0.4"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
