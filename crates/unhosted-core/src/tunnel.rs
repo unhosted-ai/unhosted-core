@@ -28,9 +28,26 @@ use tokio::sync::Mutex;
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum TunnelState {
     Idle,
-    Starting,
+    Starting { stage: StartingStage },
     Running { url: String },
     Failed { error: String },
+}
+
+/// Sub-stage of [`TunnelState::Starting`]. Drives the progress bar in the
+/// UI — we parse cloudflared's stderr for known milestone lines and bump
+/// the stage so the user sees real progress, not a hung spinner.
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum StartingStage {
+    /// Process spawned, no useful output yet.
+    Spawning,
+    /// Cloudflared has reached out to Cloudflare ("Requesting new quick
+    /// Tunnel on trycloudflare.com").
+    Requesting,
+    /// Cloudflared got back a tunnel and is negotiating the QUIC
+    /// connection ("Initial protocol quic", "Starting metrics server",
+    /// "Generated Connector ID").
+    Connecting,
 }
 
 pub struct TunnelManager {
@@ -64,7 +81,10 @@ impl TunnelManager {
     /// the `*.trycloudflare.com` line.
     pub async fn start(&self) -> Result<TunnelState> {
         let mut inner = self.inner.lock().await;
-        if matches!(inner.state, TunnelState::Starting | TunnelState::Running { .. }) {
+        if matches!(
+            inner.state,
+            TunnelState::Starting { .. } | TunnelState::Running { .. }
+        ) {
             return Ok(inner.state.clone());
         }
 
@@ -85,26 +105,53 @@ impl TunnelManager {
 
         let mut child = cmd.spawn().context("spawning cloudflared")?;
         let stderr = child.stderr.take().context("cloudflared stderr unavailable")?;
-        inner.state = TunnelState::Starting;
+        inner.state = TunnelState::Starting {
+            stage: StartingStage::Spawning,
+        };
         inner.child = Some(child);
         let inner_arc = self.inner.clone();
         drop(inner);
 
         // Background task: scan stderr for the public URL and update
-        // state. Also surfaces fatal errors as `Failed`.
+        // state. Also surfaces fatal errors as `Failed`, and bumps the
+        // starting-stage so the UI progress bar reflects real progress.
+        //
+        // Important ordering: cloudflared announces the `trycloudflare.com`
+        // URL *several seconds* before the QUIC connection to Cloudflare's
+        // edge is registered. If we flipped to `Running` the instant the URL
+        // appeared, users would tap the link on their phone and hit 502s
+        // because the tunnel wasn't live yet. So we capture the URL but
+        // stay in `Starting` until we also see "Registered tunnel connection".
         tokio::spawn(async move {
             let mut reader = BufReader::new(stderr).lines();
+            let mut pending_url: Option<String> = None;
             while let Ok(Some(line)) = reader.next_line().await {
                 tracing::debug!(line = %line, "cloudflared");
                 if let Some(url) = extract_trycloudflare_url(&line) {
+                    pending_url = Some(url);
+                }
+                if line.contains("Registered tunnel connection") {
+                    if let Some(url) = pending_url.take() {
+                        let mut guard = inner_arc.lock().await;
+                        guard.state = TunnelState::Running { url: url.clone() };
+                        tracing::info!(url = %url, "cloudflared tunnel up");
+                        continue;
+                    }
+                }
+                if let Some(next) = detect_stage(&line) {
                     let mut guard = inner_arc.lock().await;
-                    guard.state = TunnelState::Running { url: url.clone() };
-                    tracing::info!(url = %url, "cloudflared tunnel up");
+                    // Stages only move forward — ignore a late "Requesting"
+                    // line after we've already advanced.
+                    if let TunnelState::Starting { stage } = guard.state {
+                        if next > stage {
+                            guard.state = TunnelState::Starting { stage: next };
+                        }
+                    }
                 }
             }
             // stderr closed → process exited.
             let mut guard = inner_arc.lock().await;
-            if matches!(guard.state, TunnelState::Starting) {
+            if matches!(guard.state, TunnelState::Starting { .. }) {
                 guard.state = TunnelState::Failed {
                     error: "cloudflared exited before producing a url".into(),
                 };
@@ -153,6 +200,27 @@ fn which_cloudflared() -> Result<()> {
     );
 }
 
+/// Classify a cloudflared log line into a [`StartingStage`] if it matches
+/// one of the known milestone substrings. Returns `None` for lines that
+/// don't move the state machine.
+fn detect_stage(line: &str) -> Option<StartingStage> {
+    // Order matters: check the latest stage first so a line that
+    // mentions multiple keywords (rare) classifies as the furthest one.
+    if line.contains("Registered tunnel connection")
+        || line.contains("Generated Connector ID")
+        || line.contains("Starting metrics server")
+        || line.contains("Initial protocol")
+    {
+        Some(StartingStage::Connecting)
+    } else if line.contains("Requesting new quick Tunnel")
+        || line.contains("Thank you for trying Cloudflare Tunnel")
+    {
+        Some(StartingStage::Requesting)
+    } else {
+        None
+    }
+}
+
 /// Find a `*.trycloudflare.com` URL inside a cloudflared log line.
 /// Format is roughly `... |  https://<words>.trycloudflare.com  |` but
 /// version-to-version it shifts; we just grep for the substring.
@@ -196,5 +264,31 @@ mod tests {
     fn ignores_unrelated_lines() {
         let line = "INF Starting tunnel";
         assert!(extract_trycloudflare_url(line).is_none());
+    }
+
+    #[test]
+    fn detects_requesting_stage() {
+        let line = "INF Requesting new quick Tunnel on trycloudflare.com...";
+        assert_eq!(detect_stage(line), Some(StartingStage::Requesting));
+    }
+
+    #[test]
+    fn detects_connecting_stage() {
+        assert_eq!(
+            detect_stage("INF Initial protocol quic"),
+            Some(StartingStage::Connecting)
+        );
+        assert_eq!(
+            detect_stage("INF Registered tunnel connection connIndex=0"),
+            Some(StartingStage::Connecting)
+        );
+    }
+
+    #[test]
+    fn stage_ordering_is_monotonic() {
+        // The state-machine relies on `Spawning < Requesting < Connecting`
+        // so progress can only move forward.
+        assert!(StartingStage::Spawning < StartingStage::Requesting);
+        assert!(StartingStage::Requesting < StartingStage::Connecting);
     }
 }
