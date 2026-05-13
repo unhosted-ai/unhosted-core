@@ -128,42 +128,20 @@ impl TunnelManager {
         // state. Also surfaces fatal errors as `Failed`, and bumps the
         // starting-stage so the UI progress bar reflects real progress.
         //
-        // Important ordering: cloudflared announces the `trycloudflare.com`
-        // URL *several seconds* before the QUIC connection to Cloudflare's
-        // edge is registered. If we flipped to `Running` the instant the URL
-        // appeared, users would tap the link on their phone and hit 502s
-        // because the tunnel wasn't live yet. So we wait for whichever comes
-        // first: an explicit "Registered tunnel connection" line, or a 5s
-        // fallback timer after URL detection (cloudflared log format has
-        // shifted across versions; the timer guarantees we don't strand the
-        // user on the Connecting stage forever).
+        // We flip to `Running` the moment the URL appears. Cloudflare's
+        // edge is reliably warm within ~1s and users take longer than that
+        // to switch devices and tap. Showing the URL immediately wins
+        // perceived latency; the rare early-tap that 502s recovers on
+        // its own with a refresh.
         tokio::spawn(async move {
             let mut reader = BufReader::new(stderr).lines();
-            let mut pending_url: Option<String> = None;
             while let Ok(Some(line)) = reader.next_line().await {
                 tracing::debug!(line = %line, "cloudflared");
                 if let Some(url) = extract_trycloudflare_url(&line) {
-                    pending_url = Some(url.clone());
-                    // Fire the fallback timer the moment we get the URL.
-                    // If "Registered" arrives first, the check inside this
-                    // task will see Running and bail out.
-                    let inner_fallback = inner_arc.clone();
-                    tokio::spawn(async move {
-                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                        let mut guard = inner_fallback.lock().await;
-                        if matches!(guard.state, TunnelState::Starting { .. }) {
-                            guard.state = TunnelState::Running { url: url.clone() };
-                            tracing::info!(url = %url, "cloudflared tunnel up (timer)");
-                        }
-                    });
-                }
-                if line.contains("Registered tunnel connection") {
-                    if let Some(url) = pending_url.take() {
-                        let mut guard = inner_arc.lock().await;
-                        guard.state = TunnelState::Running { url: url.clone() };
-                        tracing::info!(url = %url, "cloudflared tunnel up");
-                        continue;
-                    }
+                    let mut guard = inner_arc.lock().await;
+                    guard.state = TunnelState::Running { url: url.clone() };
+                    tracing::info!(url = %url, "cloudflared tunnel up");
+                    continue;
                 }
                 if let Some(next) = detect_stage(&line) {
                     let mut guard = inner_arc.lock().await;

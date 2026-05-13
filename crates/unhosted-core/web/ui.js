@@ -1137,13 +1137,18 @@ if (els.tunnelToggle) {
 if (els.tunnelCopy) {
   els.tunnelCopy.addEventListener("click", async () => {
     const url = els.tunnelUrl.dataset.copy || els.tunnelUrl.textContent;
+    const labelEl = els.tunnelCopy.querySelector(".tunnel-copy-label");
     try {
       await navigator.clipboard.writeText(url);
-      const old = els.tunnelStatus.textContent;
-      els.tunnelStatus.textContent = "copied to clipboard.";
-      setTimeout(() => { els.tunnelStatus.textContent = old; }, 1400);
+      if (labelEl) {
+        labelEl.textContent = "copied";
+        setTimeout(() => { labelEl.textContent = "copy"; }, 1400);
+      }
     } catch (e) {
-      els.tunnelStatus.textContent = "copy failed — long-press the url instead.";
+      if (labelEl) {
+        labelEl.textContent = "failed";
+        setTimeout(() => { labelEl.textContent = "copy"; }, 1400);
+      }
     }
   });
 }
