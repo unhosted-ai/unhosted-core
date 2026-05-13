@@ -44,6 +44,44 @@ If the workflow misfires, you can also trigger it from the Actions tab:
 
 - Actions → Release → Run workflow → enter the tag you want to release against an existing branch.
 
+## Cross-compile locally from macOS
+
+The CI workflow is the golden path. But sometimes you want to build a
+Linux or Windows artifact on this Mac — to smoke-test a fix before
+tagging, or to hand someone a binary directly.
+
+`zig` as a cross-linker is the cleanest setup. One install covers both
+Linux (musl + gnu) and Windows (gnu) targets:
+
+```bash
+brew install zig                                    # ~50 MB
+cargo install --locked cargo-zigbuild              # ~10 MB
+rustup target add x86_64-unknown-linux-musl
+rustup target add aarch64-unknown-linux-musl
+rustup target add x86_64-pc-windows-gnu
+```
+
+CLI cross-compile (works cleanly — pure Rust + reqwest with rustls):
+
+```bash
+cargo zigbuild --release -p unhosted-cli --target x86_64-unknown-linux-musl
+cargo zigbuild --release -p unhosted-cli --target x86_64-pc-windows-gnu
+```
+
+Then use the bundle scripts with the right target:
+
+```bash
+UNHOSTED_TARGET=x86_64-unknown-linux-musl bash scripts/bundle-linux.sh
+# Windows .zip — run from a Windows box or matching cross-environment.
+```
+
+**Caveat on the desktop binary.** `unhosted-desktop` pulls in Tauri,
+which links against webkit2gtk on Linux and WebView2 on Windows. Those
+have C/system dependencies that don't cross-compile cleanly from
+macOS. For desktop builds, lean on CI or build natively on a Linux
+container / Windows box. CLI-only cross-compile is the realistic
+local-from-Mac story.
+
 ## What's not in the binary
 
 - `llama.cpp` (separate install)
