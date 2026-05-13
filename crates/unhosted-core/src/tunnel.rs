@@ -18,7 +18,7 @@
 use std::process::Stdio;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::Serialize;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
@@ -59,7 +59,20 @@ pub struct TunnelManager {
 struct Inner {
     state: TunnelState,
     child: Option<Child>,
+    /// How many consecutive auto-restart attempts the supervisor has tried.
+    /// Reset to 0 when a tunnel reaches `Running` or when `stop()` is called.
+    /// Capped at [`MAX_AUTO_RESTARTS`] so a permanently broken cloudflared
+    /// doesn't churn forever.
+    restart_attempts: u32,
 }
+
+/// Hard cap on consecutive auto-restarts. After this many failed revivals
+/// the supervisor gives up and leaves the tunnel in `Failed` so the user
+/// can investigate.
+const MAX_AUTO_RESTARTS: u32 = 3;
+/// Backoff between auto-restart attempts. Short enough that a transient
+/// crash heals before the user notices their phone stopped working.
+const AUTO_RESTART_DELAY_SECS: u64 = 3;
 
 impl TunnelManager {
     pub fn new(local_port: u16) -> Self {
@@ -67,6 +80,7 @@ impl TunnelManager {
             inner: Arc::new(Mutex::new(Inner {
                 state: TunnelState::Idle,
                 child: None,
+                restart_attempts: 0,
             })),
             local_port,
         }
@@ -79,91 +93,62 @@ impl TunnelManager {
     /// Spawn cloudflared. Returns immediately with `Starting`; the URL
     /// becomes available a second or two later once cloudflared logs
     /// the `*.trycloudflare.com` line.
-    pub async fn start(&self) -> Result<TunnelState> {
-        let mut inner = self.inner.lock().await;
-        if matches!(
-            inner.state,
-            TunnelState::Starting { .. } | TunnelState::Running { .. }
-        ) {
-            return Ok(inner.state.clone());
+    ///
+    /// Takes `self: Arc<Self>` so the supervisor task spawned inside can
+    /// hold a strong reference and call `start` again if cloudflared dies
+    /// unexpectedly mid-session. Callers with a shared `Arc<TunnelManager>`
+    /// (e.g. `state.tunnel`) should pass `state.tunnel.clone()`.
+    pub async fn start(self: Arc<Self>) -> Result<TunnelState> {
+        {
+            let inner = self.inner.lock().await;
+            if matches!(
+                inner.state,
+                TunnelState::Starting { .. } | TunnelState::Running { .. }
+            ) {
+                return Ok(inner.state.clone());
+            }
         }
 
         // Probe for cloudflared on PATH first so we can give a clean
         // error instead of a subprocess-spawn failure.
         which_cloudflared()?;
 
-        // Preflight the network. Without internet, cloudflared would sit at
-        // "Requesting new quick Tunnel" indefinitely and the UI would show
-        // a hung progress bar with no useful error. A 1.5s HEAD to
-        // cloudflare.com fails fast and lets us surface a clear message
-        // instead.
+        // Preflight the network. Without internet, cloudflared would sit
+        // at "Requesting new quick Tunnel" indefinitely and the UI would
+        // show a hung progress bar with no useful error. Held outside the
+        // mutex so the captured guard doesn't poison the future's Send.
         if !has_internet().await {
+            let mut inner = self.inner.lock().await;
             inner.state = TunnelState::Failed {
                 error: "no internet — open to internet needs an outbound connection".into(),
             };
             return Ok(inner.state.clone());
         }
 
-        let target = format!("http://127.0.0.1:{}", self.local_port);
-        let mut cmd = Command::new("cloudflared");
-        cmd.arg("tunnel")
-            .arg("--no-autoupdate")
-            .arg("--url")
-            .arg(&target)
-            // cloudflared writes the trycloudflare URL to stderr at INFO.
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
+        // Flip state to Starting{Spawning} before we hand off — callers
+        // see a fast transition and the supervisor loop owns the spawn.
+        {
+            let mut inner = self.inner.lock().await;
+            if matches!(
+                inner.state,
+                TunnelState::Starting { .. } | TunnelState::Running { .. }
+            ) {
+                return Ok(inner.state.clone());
+            }
+            inner.state = TunnelState::Starting {
+                stage: StartingStage::Spawning,
+            };
+        }
 
-        let mut child = cmd.spawn().context("spawning cloudflared")?;
-        let stderr = child.stderr.take().context("cloudflared stderr unavailable")?;
-        inner.state = TunnelState::Starting {
-            stage: StartingStage::Spawning,
-        };
-        inner.child = Some(child);
-        let inner_arc = self.inner.clone();
-        drop(inner);
-
-        // Background task: scan stderr for the public URL and update
-        // state. Also surfaces fatal errors as `Failed`, and bumps the
-        // starting-stage so the UI progress bar reflects real progress.
-        //
-        // We flip to `Running` the moment the URL appears. Cloudflare's
-        // edge is reliably warm within ~1s and users take longer than that
-        // to switch devices and tap. Showing the URL immediately wins
-        // perceived latency; the rare early-tap that 502s recovers on
-        // its own with a refresh.
+        // Single supervisor task: spawns cloudflared, reads its stderr,
+        // and re-spawns on unexpected death. Looping inside one task
+        // avoids the recursive-self.start() Send-trait gymnastics, keeps
+        // the restart-attempt counter local to the loop, and gives us a
+        // single place to react to stop() (which sets state to Idle).
+        let supervisor_inner = self.inner.clone();
+        let local_port = self.local_port;
         tokio::spawn(async move {
-            let mut reader = BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = reader.next_line().await {
-                tracing::debug!(line = %line, "cloudflared");
-                if let Some(url) = extract_trycloudflare_url(&line) {
-                    let mut guard = inner_arc.lock().await;
-                    guard.state = TunnelState::Running { url: url.clone() };
-                    tracing::info!(url = %url, "cloudflared tunnel up");
-                    continue;
-                }
-                if let Some(next) = detect_stage(&line) {
-                    let mut guard = inner_arc.lock().await;
-                    // Stages only move forward — ignore a late "Requesting"
-                    // line after we've already advanced.
-                    if let TunnelState::Starting { stage } = guard.state {
-                        if next > stage {
-                            guard.state = TunnelState::Starting { stage: next };
-                        }
-                    }
-                }
-            }
-            // stderr closed → process exited.
-            let mut guard = inner_arc.lock().await;
-            if matches!(guard.state, TunnelState::Starting { .. }) {
-                guard.state = TunnelState::Failed {
-                    error: "cloudflared exited before producing a url".into(),
-                };
-            } else if matches!(guard.state, TunnelState::Running { .. }) {
-                guard.state = TunnelState::Idle;
-            }
-            guard.child = None;
+            supervisor_loop(supervisor_inner, local_port).await;
         });
 
         Ok(self.status().await)
@@ -177,7 +162,131 @@ impl TunnelManager {
             // and we don't want the handler to block on a slow exit.
         }
         inner.state = TunnelState::Idle;
+        // User asked to stop, so any future tunnel start should get a
+        // fresh restart budget. The supervisor in the reader task sees
+        // state==Idle here and won't revive.
+        inner.restart_attempts = 0;
         Ok(inner.state.clone())
+    }
+}
+
+/// Supervisor loop: spawn cloudflared, read its stderr, and revive on
+/// unexpected death up to [`MAX_AUTO_RESTARTS`] times. Runs as a single
+/// long-lived tokio task per `start()` call. Exits when:
+///   - the operator pressed stop (state == Idle) — clean handoff
+///   - we ran out of restart attempts — state == Failed
+///   - state == Failed for any other reason (e.g. spawn error)
+async fn supervisor_loop(inner: Arc<Mutex<Inner>>, local_port: u16) {
+    let target = format!("http://127.0.0.1:{}", local_port);
+    loop {
+        let mut cmd = Command::new("cloudflared");
+        cmd.arg("tunnel")
+            .arg("--no-autoupdate")
+            .arg("--url")
+            .arg(&target)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                let mut guard = inner.lock().await;
+                guard.state = TunnelState::Failed {
+                    error: format!("failed to spawn cloudflared: {e}"),
+                };
+                guard.child = None;
+                return;
+            }
+        };
+        let stderr = match child.stderr.take() {
+            Some(s) => s,
+            None => {
+                let mut guard = inner.lock().await;
+                guard.state = TunnelState::Failed {
+                    error: "cloudflared stderr unavailable".into(),
+                };
+                guard.child = None;
+                return;
+            }
+        };
+        {
+            let mut guard = inner.lock().await;
+            guard.child = Some(child);
+            // Don't reset state to Starting{Spawning} on revival — keep
+            // whatever the caller set (Running for revival path, Spawning
+            // for first start) until cloudflared output advances it.
+            if matches!(guard.state, TunnelState::Idle) {
+                guard.state = TunnelState::Starting {
+                    stage: StartingStage::Spawning,
+                };
+            }
+        }
+
+        let mut reader = BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            tracing::debug!(line = %line, "cloudflared");
+            if let Some(url) = extract_trycloudflare_url(&line) {
+                let mut guard = inner.lock().await;
+                guard.state = TunnelState::Running { url: url.clone() };
+                guard.restart_attempts = 0;
+                tracing::info!(url = %url, "cloudflared tunnel up");
+                continue;
+            }
+            if let Some(next) = detect_stage(&line) {
+                let mut guard = inner.lock().await;
+                if let TunnelState::Starting { stage } = guard.state {
+                    if next > stage {
+                        guard.state = TunnelState::Starting { stage: next };
+                    }
+                }
+            }
+        }
+        // stderr closed → process exited. Decide whether to revive.
+        let mut should_revive = false;
+        {
+            let mut guard = inner.lock().await;
+            guard.child = None;
+            match guard.state {
+                TunnelState::Running { .. } => {
+                    if guard.restart_attempts < MAX_AUTO_RESTARTS {
+                        guard.restart_attempts += 1;
+                        let attempt = guard.restart_attempts;
+                        guard.state = TunnelState::Starting {
+                            stage: StartingStage::Spawning,
+                        };
+                        tracing::warn!(
+                            attempt,
+                            delay_secs = AUTO_RESTART_DELAY_SECS,
+                            "cloudflared exited unexpectedly — reviving"
+                        );
+                        should_revive = true;
+                    } else {
+                        let attempts = guard.restart_attempts;
+                        tracing::error!(
+                            attempts,
+                            "cloudflared crashed too many times — giving up"
+                        );
+                        guard.state = TunnelState::Failed {
+                            error: format!(
+                                "cloudflared crashed {attempts} times in a row — check the binary"
+                            ),
+                        };
+                    }
+                }
+                TunnelState::Starting { .. } => {
+                    guard.state = TunnelState::Failed {
+                        error: "cloudflared exited before producing a url".into(),
+                    };
+                }
+                // Idle (stop pressed) or Failed: leave the state, exit
+                // the supervisor.
+                _ => {}
+            }
+        }
+        if !should_revive {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(AUTO_RESTART_DELAY_SECS)).await;
     }
 }
 

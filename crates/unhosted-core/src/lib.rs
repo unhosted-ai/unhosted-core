@@ -252,7 +252,7 @@ pub async fn serve(node: Node) -> Result<()> {
         let tunnel = state.tunnel.clone();
         tokio::spawn(async move {
             tracing::info!("eager tunnel: starting cloudflared at boot");
-            match tunnel.start().await {
+            match tunnel.clone().start().await {
                 Ok(s) => tracing::info!(state = ?s, "eager tunnel: kicked off"),
                 Err(e) => tracing::warn!(error = %e, "eager tunnel: start failed"),
             }
@@ -1919,7 +1919,7 @@ async fn tunnel_start_handler(
 ) -> Result<axum::Json<tunnel::TunnelState>, StatusCode> {
     let outcome = state.classify(&headers, Some(remote.ip()), &[]);
     require_auth(&outcome, true)?;
-    match state.tunnel.start().await {
+    match state.tunnel.clone().start().await {
         Ok(s) => Ok(axum::Json(s)),
         Err(e) => {
             tracing::warn!(error = %e, "tunnel start failed");
