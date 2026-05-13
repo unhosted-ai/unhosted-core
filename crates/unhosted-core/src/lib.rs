@@ -78,6 +78,11 @@ pub struct Node {
     /// connects to the relay, registers with its identity, and (eventually)
     /// routes off-LAN peer traffic through it.
     pub relay_url: Option<String>,
+    /// Eagerly start the Cloudflare tunnel at daemon boot, so the public
+    /// URL is already live by the time the user clicks "open to internet".
+    /// Off by default — exposing the daemon publicly should require explicit
+    /// opt-in even when starting the daemon.
+    pub eager_tunnel: bool,
 }
 
 impl Node {
@@ -89,6 +94,9 @@ impl Node {
             peers: Vec::new(),
             name: default_node_name(),
             relay_url: std::env::var("UNHOSTED_RELAY").ok(),
+            eager_tunnel: std::env::var("UNHOSTED_EAGER_TUNNEL")
+                .map(|v| matches!(v.as_str(), "1" | "true" | "yes"))
+                .unwrap_or(false),
         }
     }
 }
@@ -233,6 +241,23 @@ pub async fn serve(node: Node) -> Result<()> {
         chats: chat_store,
         tunnel: tunnel_mgr,
     };
+
+    // Eager tunnel: if the operator opted in (--eager-tunnel /
+    // UNHOSTED_EAGER_TUNNEL=1), kick off cloudflared right away in the
+    // background. By the time the user clicks "open to internet" in
+    // the UI, the public URL is already live — 0s perceived latency.
+    // Failures (no internet, missing cloudflared binary) surface in the
+    // tunnel status the same way a manual click would.
+    if node.eager_tunnel {
+        let tunnel = state.tunnel.clone();
+        tokio::spawn(async move {
+            tracing::info!("eager tunnel: starting cloudflared at boot");
+            match tunnel.start().await {
+                Ok(s) => tracing::info!(state = ?s, "eager tunnel: kicked off"),
+                Err(e) => tracing::warn!(error = %e, "eager tunnel: start failed"),
+            }
+        });
+    }
 
     // Spawn the QUIC accept loop now that NodeState is ready. Each
     // incoming connection gets dispatched to `quic_inbound_handler`,

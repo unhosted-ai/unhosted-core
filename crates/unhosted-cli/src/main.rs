@@ -63,6 +63,13 @@ enum Command {
         /// UNHOSTED_RELAY env var.
         #[arg(long)]
         relay: Option<String>,
+        /// Eagerly start the Cloudflare tunnel at daemon boot, so the
+        /// public URL is live by the time the user clicks "open to
+        /// internet" in the UI (0s perceived latency vs ~4s). Off by
+        /// default — exposing the daemon publicly is opt-in. Overrides
+        /// UNHOSTED_EAGER_TUNNEL env var.
+        #[arg(long)]
+        eager_tunnel: bool,
     },
     /// Run a prompt against a local node and stream tokens to stdout.
     Run {
@@ -175,6 +182,7 @@ async fn main() -> Result<()> {
             addr,
             upstream,
             relay,
+            eager_tunnel,
         } => {
             let llama_server_url = upstream
                 .or_else(|| std::env::var("UNHOSTED_LLAMA_SERVER_URL").ok())
@@ -187,12 +195,17 @@ async fn main() -> Result<()> {
                 );
             }
             let relay_url = relay.or_else(|| std::env::var("UNHOSTED_RELAY").ok());
+            let eager_tunnel = eager_tunnel
+                || std::env::var("UNHOSTED_EAGER_TUNNEL")
+                    .map(|v| matches!(v.as_str(), "1" | "true" | "yes"))
+                    .unwrap_or(false);
             let node = Node {
                 addr,
                 llama_server_url,
                 peers: registry.peers,
                 name: default_node_name(),
                 relay_url,
+                eager_tunnel,
             };
             serve(node).await?;
         }
