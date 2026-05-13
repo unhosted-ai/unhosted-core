@@ -1666,6 +1666,47 @@ async fn chat_completions_handler(
     }
 }
 
+/// If the chat-completions body's `model` field is the documented
+/// placeholder ("local" / "default" / "auto"), swap it for the
+/// upstream's actual model id. llama-server doesn't care about the
+/// model name, but Ollama and LM Studio strictly resolve it against
+/// their loaded set — sending the placeholder to those backends 404s.
+///
+/// Falls through unchanged when:
+///   - the body isn't valid JSON (let upstream's error speak)
+///   - the model field is already a real name (assume user knows)
+///   - we don't know the upstream's model (no probe data — let upstream
+///     error properly so the user sees a real message)
+fn rewrite_placeholder_model(body: bytes::Bytes, upstream_model: Option<&str>) -> bytes::Bytes {
+    let Some(real_model) = upstream_model else {
+        return body;
+    };
+    let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return body;
+    };
+    let Some(obj) = v.as_object_mut() else {
+        return body;
+    };
+    let needs_swap = match obj.get("model") {
+        Some(serde_json::Value::String(s)) => {
+            matches!(s.as_str(), "local" | "default" | "auto" | "")
+        }
+        None => true,
+        _ => false,
+    };
+    if !needs_swap {
+        return body;
+    }
+    obj.insert(
+        "model".to_string(),
+        serde_json::Value::String(real_model.to_string()),
+    );
+    match serde_json::to_vec(&v) {
+        Ok(b) => bytes::Bytes::from(b),
+        Err(_) => body,
+    }
+}
+
 async fn proxy_chat_local(
     node: &Node,
     client: &reqwest::Client,
@@ -1676,6 +1717,12 @@ async fn proxy_chat_local(
     };
     let base = live.url;
     let url = format!("{base}/v1/chat/completions");
+    // Substitute the documented placeholder model "local" with the
+    // upstream's actual model id when we know it. llama-server ignores
+    // the model field entirely, but Ollama (and LM Studio) reject
+    // unknown model names with a 404 — that's what was surfacing as a
+    // bare 502 to anyone copying the docs snippet against Ollama.
+    let body = rewrite_placeholder_model(body, live.model.as_deref());
     let upstream = client
         .post(&url)
         .header("content-type", "application/json")
