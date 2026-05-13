@@ -124,6 +124,9 @@
             <span id="tunnel-toggle-label">enable</span>
           </button>
           <div class="tunnel-status" id="tunnel-status-line">off — your daemon is only reachable on this network.</div>
+          <div class="tunnel-progress" id="tunnel-progress" hidden>
+            <div class="tunnel-progress-bar" id="tunnel-progress-bar"></div>
+          </div>
           <div class="tunnel-link" id="tunnel-link" hidden>
             <code class="tunnel-url" id="tunnel-url"></code>
             <button class="icon-btn tunnel-copy" id="tunnel-copy" title="copy url with token" aria-label="copy url">
@@ -269,6 +272,24 @@
 
     </main>
 
+  </div>
+
+  <!-- In-app confirm modal. Replaces window.confirm() — many WebViews
+       (including ours under Tauri) silently return false from window.confirm,
+       which silently swallowed every "delete chat" click. -->
+  <div class="modal-backdrop" id="confirm-modal" hidden>
+    <div class="modal modal-confirm">
+      <header class="modal-head">
+        <h2 id="confirm-title">are you sure?</h2>
+      </header>
+      <div class="modal-body">
+        <p id="confirm-message" class="muted"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="confirm-cancel">cancel</button>
+          <button type="button" class="btn-danger" id="confirm-ok">ok</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Pair modal: shared by both "show offer" and "accept offer" flows -->

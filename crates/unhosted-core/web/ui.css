@@ -920,6 +920,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible,
 }
 .stop .send-icon { width: 11px; height: 11px; }
 .stop:hover { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+/* `display: inline-flex` on both buttons above beats the user-agent
+   `[hidden] { display: none }` rule, so the JS toggle in setSendMode()
+   leaves whichever button was meant to be hidden still visible. Re-assert
+   it here so send ↔ stop properly swap into the same right-edge slot. */
+.send[hidden], .stop[hidden] { display: none !important; }
 
 .h4-action {
   margin-left: auto;
@@ -965,19 +970,38 @@ button:focus-visible, input:focus-visible, textarea:focus-visible,
    so we must re-assert it. Same trick for the warning line below. */
 .tunnel-link[hidden],
 .tunnel-warn[hidden] { display: none !important; }
-.tunnel-status[data-state="starting"]::after {
-  content: " ";
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  margin-left: 6px;
-  border: 1.5px solid var(--mute);
-  border-top-color: transparent;
-  border-radius: 50%;
-  animation: tunnel-spin 0.9s linear infinite;
-  vertical-align: -1px;
+/* Determinate progress bar shown while cloudflared is starting. The width
+   is set by JS from the backend stage (spawning → requesting → connecting →
+   running). A subtle diagonal shimmer overlays the fill so even at 20% the
+   user can see the tunnel is alive, not hung. */
+.tunnel-progress {
+  height: 4px;
+  margin: 2px 4px 0;
+  background: var(--line);
+  border-radius: 2px;
+  overflow: hidden;
 }
-@keyframes tunnel-spin { to { transform: rotate(360deg); } }
+.tunnel-progress[hidden] { display: none; }
+.tunnel-progress-bar {
+  height: 100%;
+  width: 0%;
+  background-color: var(--accent);
+  background-image: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.18) 25%,
+    transparent 25%,
+    transparent 50%,
+    rgba(255, 255, 255, 0.18) 50%,
+    rgba(255, 255, 255, 0.18) 75%,
+    transparent 75%,
+    transparent
+  );
+  background-size: 12px 12px;
+  border-radius: 2px;
+  transition: width 350ms ease-out;
+  animation: tunnel-shimmer 0.9s linear infinite;
+}
+@keyframes tunnel-shimmer { to { background-position: 12px 0; } }
 .tunnel-url {
   flex: 1;
   font-size: 10.5px;
@@ -1194,6 +1218,36 @@ button:focus-visible, input:focus-visible, textarea:focus-visible,
   font-weight: 500;
 }
 .btn-primary:hover { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+
+.btn-secondary {
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--line-strong);
+  padding: 7px 18px;
+  font-weight: 500;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.btn-secondary:hover { background: var(--line); }
+
+.btn-danger {
+  background: var(--danger, #c33);
+  color: #fff;
+  border: 1px solid var(--danger, #c33);
+  padding: 7px 18px;
+  font-weight: 500;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.btn-danger:hover { filter: brightness(1.08); }
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.modal-confirm .modal-body p { margin: 0; line-height: 1.45; }
 
 @media (max-width: 760px) {
   /* phone: drop the sidebar, give the chat the full viewport. */

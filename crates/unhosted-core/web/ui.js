@@ -224,6 +224,8 @@ const els = {
   tunnelToggle: $("#tunnel-toggle"),
   tunnelLabel: $("#tunnel-toggle-label"),
   tunnelStatus: $("#tunnel-status-line"),
+  tunnelProgress: $("#tunnel-progress"),
+  tunnelProgressBar: $("#tunnel-progress-bar"),
   tunnelLink: $("#tunnel-link"),
   tunnelUrl: $("#tunnel-url"),
   tunnelCopy: $("#tunnel-copy"),
@@ -401,14 +403,62 @@ function switchToChat(id) {
   renderActiveChat();
 }
 
-function deleteChat(id) {
+// In-app confirm dialog. window.confirm() returns false in our WebView
+// without ever rendering anything — the native dialog isn't honored — so
+// every confirm-gated action (delete chat, clear chats) was silently aborted.
+// This Promise-based helper uses the #confirm-modal markup instead, which
+// works the same in any browser or WebView.
+const confirmEls = {
+  modal: $("#confirm-modal"),
+  title: $("#confirm-title"),
+  message: $("#confirm-message"),
+  ok: $("#confirm-ok"),
+  cancel: $("#confirm-cancel"),
+};
+
+function confirmDialog({ title = "are you sure?", message = "", confirmLabel = "ok", danger = false } = {}) {
+  return new Promise((resolve) => {
+    if (!confirmEls.modal) { resolve(window.confirm(message || title)); return; }
+    confirmEls.title.textContent = title;
+    confirmEls.message.textContent = message;
+    confirmEls.ok.textContent = confirmLabel;
+    confirmEls.ok.classList.toggle("btn-danger", !!danger);
+    confirmEls.ok.classList.toggle("btn-primary", !danger);
+    confirmEls.modal.hidden = false;
+    const cleanup = () => {
+      confirmEls.modal.hidden = true;
+      confirmEls.ok.removeEventListener("click", onOk);
+      confirmEls.cancel.removeEventListener("click", onCancel);
+      confirmEls.modal.removeEventListener("click", onBackdrop);
+      document.removeEventListener("keydown", onKey);
+    };
+    const onOk = () => { cleanup(); resolve(true); };
+    const onCancel = () => { cleanup(); resolve(false); };
+    const onBackdrop = (e) => { if (e.target === confirmEls.modal) onCancel(); };
+    const onKey = (e) => {
+      if (e.key === "Escape") onCancel();
+      else if (e.key === "Enter") onOk();
+    };
+    confirmEls.ok.addEventListener("click", onOk);
+    confirmEls.cancel.addEventListener("click", onCancel);
+    confirmEls.modal.addEventListener("click", onBackdrop);
+    document.addEventListener("keydown", onKey);
+    setTimeout(() => confirmEls.cancel.focus(), 0);
+  });
+}
+
+async function deleteChat(id) {
   const idx = store.chats.findIndex((c) => c.id === id);
   if (idx < 0) return;
   const chat = store.chats[idx];
   const label = chat.title && chat.title !== "new chat" ? `"${truncate(chat.title, 32)}"` : "this chat";
-  // Minimal confirmation: a chat is reversible only via the trash bin,
-  // and we don't have one. So we ask once — yes/no is the trash bin.
-  if (!confirm(`delete ${label}? this can't be undone.`)) return;
+  const ok = await confirmDialog({
+    title: "delete chat?",
+    message: `delete ${label}? this can't be undone.`,
+    confirmLabel: "delete",
+    danger: true,
+  });
+  if (!ok) return;
   store.chats.splice(idx, 1);
   if (store.activeId === id) {
     setActiveId(store.chats.length > 0 ? store.chats[0].id : null);
@@ -723,10 +773,16 @@ document.querySelectorAll(".chip[data-suggest]").forEach((btn) => {
 els.newChat.addEventListener("click", startNewChat);
 
 if (els.clearChats) {
-  els.clearChats.addEventListener("click", () => {
+  els.clearChats.addEventListener("click", async () => {
     if (store.chats.length === 0) return;
     const n = store.chats.length;
-    if (!confirm(`clear all ${n} chat${n === 1 ? "" : "s"}? this can't be undone.`)) return;
+    const ok = await confirmDialog({
+      title: "clear all chats?",
+      message: `clear all ${n} chat${n === 1 ? "" : "s"}? this can't be undone.`,
+      confirmLabel: "clear all",
+      danger: true,
+    });
+    if (!ok) return;
     store.chats = [];
     setActiveId(null);
     clearChatsRemote();
@@ -983,6 +1039,13 @@ async function stopTunnel() {
   } catch (e) { return null; }
 }
 
+// Stage → (sub-text, progress %). Backend emits these in TunnelState::Starting.
+const TUNNEL_STAGES = {
+  spawning:   { label: "spawning cloudflared…",            pct: 20 },
+  requesting: { label: "requesting tunnel from cloudflare…", pct: 55 },
+  connecting: { label: "negotiating connection…",          pct: 85 },
+};
+
 function renderTunnel(s) {
   if (!s || !els.tunnelToggle) return;
   const state = s.state;
@@ -997,24 +1060,32 @@ function renderTunnel(s) {
     els.tunnelUrl.dataset.copy = linkHref;
     els.tunnelLink.hidden = false;
     els.tunnelWarn.hidden = false;
+    if (els.tunnelProgress) els.tunnelProgress.hidden = true;
   } else if (state === "starting") {
+    const stage = TUNNEL_STAGES[s.stage] || TUNNEL_STAGES.spawning;
     els.tunnelLabel.textContent = "starting…";
-    els.tunnelStatus.textContent = "spawning cloudflared, waiting for url…";
+    els.tunnelStatus.textContent = stage.label;
     els.tunnelStatus.dataset.state = "starting";
     els.tunnelLink.hidden = true;
     els.tunnelWarn.hidden = true;
+    if (els.tunnelProgress) {
+      els.tunnelProgress.hidden = false;
+      els.tunnelProgressBar.style.width = stage.pct + "%";
+    }
   } else if (state === "failed") {
     els.tunnelLabel.textContent = "enable";
     els.tunnelStatus.textContent = "failed: " + (s.error || "unknown");
     els.tunnelStatus.dataset.state = "failed";
     els.tunnelLink.hidden = true;
     els.tunnelWarn.hidden = true;
+    if (els.tunnelProgress) els.tunnelProgress.hidden = true;
   } else {
     els.tunnelLabel.textContent = "enable";
     els.tunnelStatus.textContent = "off — your daemon is only reachable on this network.";
     els.tunnelStatus.dataset.state = "idle";
     els.tunnelLink.hidden = true;
     els.tunnelWarn.hidden = true;
+    if (els.tunnelProgress) els.tunnelProgress.hidden = true;
   }
 }
 
