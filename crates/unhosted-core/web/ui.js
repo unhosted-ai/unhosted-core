@@ -1098,15 +1098,25 @@ function renderTunnel(s) {
   }
 }
 
-function setTunnelPolling(on) {
+// Tunnel state polling. We use two cadences:
+//   - 1.5s "fast" while state is "starting" (progress-bar updates)
+//   - 8s "slow" the rest of the time (keeps UI in sync if the daemon's
+//     tunnel state changes from outside — another browser tab, CLI, etc.)
+// Without the slow heartbeat, if a poll ever stopped while the UI was
+// mid-frame (e.g., a transient fetch failure during a daemon restart),
+// the UI would stay frozen on whatever was last rendered until the
+// user clicked the toggle.
+function setTunnelPolling(mode) {
   if (tunnelPollTimer) { clearInterval(tunnelPollTimer); tunnelPollTimer = null; }
-  if (on) {
-    tunnelPollTimer = setInterval(async () => {
-      const s = await fetchTunnel();
-      renderTunnel(s);
-      if (s && s.state !== "starting") setTunnelPolling(false);
-    }, 1500);
-  }
+  const interval = mode === "fast" ? 1500 : mode === "slow" ? 8000 : null;
+  if (!interval) return;
+  tunnelPollTimer = setInterval(async () => {
+    const s = await fetchTunnel();
+    if (s) renderTunnel(s);
+    // Promote/demote cadence as state changes.
+    if (s && s.state === "starting" && mode !== "fast") setTunnelPolling("fast");
+    else if (s && s.state !== "starting" && mode === "fast") setTunnelPolling("slow");
+  }, interval);
 }
 
 if (els.tunnelToggle) {
@@ -1117,7 +1127,7 @@ if (els.tunnelToggle) {
       const isOn = cur && (cur.state === "running" || cur.state === "starting");
       const next = isOn ? await stopTunnel() : await startTunnel();
       renderTunnel(next);
-      if (next && next.state === "starting") setTunnelPolling(true);
+      if (next && next.state === "starting") setTunnelPolling("fast"); else setTunnelPolling("slow");
     } finally {
       els.tunnelToggle.disabled = false;
     }
@@ -1542,12 +1552,19 @@ bootstrapChats().then(() => {
 
 fetchTunnel().then((s) => {
   renderTunnel(s);
-  if (s && s.state === "starting") setTunnelPolling(true);
+  // Always have *some* poll running so the UI re-syncs if the daemon's
+  // state changes from another tab/CLI. Fast cadence while starting,
+  // slow heartbeat otherwise.
+  setTunnelPolling(s && s.state === "starting" ? "fast" : "slow");
 });
 
 // Cross-device sync: when this tab comes back to the foreground, pull
 // fresh state so a chat edited on another paired device (phone PWA,
 // other browser) shows up. Cheap GET, skipped while we're mid-stream.
+// Also re-syncs the tunnel state, which can drift if the WebView's
+// poll timer paused while backgrounded.
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) refreshChatsFromServer();
+  if (document.hidden) return;
+  refreshChatsFromServer();
+  fetchTunnel().then((s) => { if (s) renderTunnel(s); });
 });
