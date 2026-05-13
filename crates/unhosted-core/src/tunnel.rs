@@ -132,15 +132,30 @@ impl TunnelManager {
         // URL *several seconds* before the QUIC connection to Cloudflare's
         // edge is registered. If we flipped to `Running` the instant the URL
         // appeared, users would tap the link on their phone and hit 502s
-        // because the tunnel wasn't live yet. So we capture the URL but
-        // stay in `Starting` until we also see "Registered tunnel connection".
+        // because the tunnel wasn't live yet. So we wait for whichever comes
+        // first: an explicit "Registered tunnel connection" line, or a 5s
+        // fallback timer after URL detection (cloudflared log format has
+        // shifted across versions; the timer guarantees we don't strand the
+        // user on the Connecting stage forever).
         tokio::spawn(async move {
             let mut reader = BufReader::new(stderr).lines();
             let mut pending_url: Option<String> = None;
             while let Ok(Some(line)) = reader.next_line().await {
                 tracing::debug!(line = %line, "cloudflared");
                 if let Some(url) = extract_trycloudflare_url(&line) {
-                    pending_url = Some(url);
+                    pending_url = Some(url.clone());
+                    // Fire the fallback timer the moment we get the URL.
+                    // If "Registered" arrives first, the check inside this
+                    // task will see Running and bail out.
+                    let inner_fallback = inner_arc.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        let mut guard = inner_fallback.lock().await;
+                        if matches!(guard.state, TunnelState::Starting { .. }) {
+                            guard.state = TunnelState::Running { url: url.clone() };
+                            tracing::info!(url = %url, "cloudflared tunnel up (timer)");
+                        }
+                    });
                 }
                 if line.contains("Registered tunnel connection") {
                     if let Some(url) = pending_url.take() {
