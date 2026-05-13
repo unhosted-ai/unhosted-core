@@ -81,6 +81,14 @@ codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
 # Tell Finder to refresh icon caches for this binary.
 touch "$APP"
 
+# LaunchServices will register this dist build the first time anyone opens it,
+# competing with /Applications/unhosted.app (same CFBundleIdentifier). When
+# two paths claim the same bundle id, Dock alternates icons unpredictably —
+# users see the "logo switches" symptom. Unregister the build artifact here
+# so only the installed copy advertises itself.
+LSREG=/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister
+[ -x "$LSREG" ] && "$LSREG" -u "$APP" >/dev/null 2>&1 || true
+
 echo
 echo "Done."
 echo "  $APP"
