@@ -1094,9 +1094,30 @@ function renderPhoneQr(linkHref) {
   }
 }
 
+// Track the last tunnel state we rendered so we can emit transition
+// notifications (e.g. "tunnel live", "tunnel down", "url rotated").
+let lastTunnelState = null;
+let lastTunnelUrl = null;
+
 function renderTunnel(s) {
   if (!s || !els.tunnelToggle) return;
   const state = s.state;
+  // Transition notifications — fire once per state change, not on every poll.
+  const url = s.url || null;
+  if (lastTunnelState !== null) {
+    if (state === "running" && lastTunnelState !== "running") {
+      notify("tunnel live — your phone can chat with this mac now", { level: "success", key: "tunnel" });
+    } else if (state === "running" && url && lastTunnelUrl && url !== lastTunnelUrl) {
+      notify("tunnel url rotated — re-scan the qr on your phone", { level: "info", key: "tunnel", duration: 6000 });
+    } else if (state === "failed" && lastTunnelState !== "failed") {
+      notify("tunnel failed: " + (s.error || "unknown"), { level: "error", key: "tunnel", duration: 6000 });
+    } else if (state === "idle" && (lastTunnelState === "running" || lastTunnelState === "starting")) {
+      notify("tunnel is off — your daemon is local-only", { level: "info", key: "tunnel" });
+    }
+  }
+  lastTunnelState = state;
+  lastTunnelUrl = url;
+
   if (state === "running") {
     const token = getToken() || "";
     const sep = s.url.includes("?") ? "&" : "?";
@@ -1186,11 +1207,13 @@ if (els.tunnelCopy) {
         labelEl.textContent = "copied";
         setTimeout(() => { labelEl.textContent = "copy"; }, 1400);
       }
+      notify("tunnel url copied to clipboard", { level: "success", duration: 2000 });
     } catch (e) {
       if (labelEl) {
         labelEl.textContent = "failed";
         setTimeout(() => { labelEl.textContent = "copy"; }, 1400);
       }
+      notify("couldn't access clipboard — long-press the url to copy", { level: "error" });
     }
   });
 }
@@ -1444,6 +1467,52 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+// ---------------------------------------------------------------- toast notifications
+//
+// Non-blocking status feedback. Called from state-change points (tunnel
+// went live, URL rotated, copy succeeded/failed, etc.) so the user has a
+// running narrative of what the daemon is doing instead of staring at
+// silent UI.
+//
+// notify(message, { level, duration, key }):
+//   level    "info" (default) | "success" | "error"
+//   duration ms before auto-dismiss (default 4000; 0 to require manual)
+//   key      stable id — re-firing with the same key replaces the
+//            existing toast (so "tunnel live" doesn't pile up on every
+//            poll). Omit for one-shot toasts.
+const toastStack = document.getElementById("toast-stack");
+const liveToasts = new Map(); // key -> {el, timer}
+
+function notify(message, { level = "info", duration = 4000, key = null } = {}) {
+  if (!toastStack) return;
+  if (key && liveToasts.has(key)) {
+    // refresh in place
+    const existing = liveToasts.get(key);
+    existing.el.textContent = message;
+    existing.el.dataset.level = level;
+    if (existing.timer) clearTimeout(existing.timer);
+    existing.timer = duration ? setTimeout(() => dismissToast(key, existing.el), duration) : null;
+    return;
+  }
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.dataset.level = level;
+  el.textContent = message;
+  toastStack.appendChild(el);
+  const localKey = key || `k${Date.now()}_${Math.random()}`;
+  const timer = duration ? setTimeout(() => dismissToast(localKey, el), duration) : null;
+  liveToasts.set(localKey, { el, timer });
+  el.addEventListener("click", () => dismissToast(localKey, el));
+}
+function dismissToast(key, el) {
+  if (!el || !el.parentNode) { liveToasts.delete(key); return; }
+  el.classList.add("toast-leaving");
+  setTimeout(() => {
+    if (el.parentNode) el.parentNode.removeChild(el);
+    liveToasts.delete(key);
+  }, 180);
+}
+
 // ---------------------------------------------------------------- developer modal
 //
 // "for developers" panel. The Unhosted daemon already speaks an
@@ -1580,7 +1649,10 @@ if (els.devSnippetCopy) {
       const old = els.devSnippetCopy.textContent;
       els.devSnippetCopy.textContent = "copied";
       setTimeout(() => { els.devSnippetCopy.textContent = old; }, 1200);
-    } catch (e) { /* clipboard denied */ }
+      notify("snippet copied — paste it into your code", { level: "success", duration: 2000 });
+    } catch (e) {
+      notify("couldn't access clipboard", { level: "error" });
+    }
   });
 }
 

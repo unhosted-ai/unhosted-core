@@ -1354,6 +1354,53 @@ button:focus-visible, input:focus-visible, textarea:focus-visible,
   line-height: 1.4;
 }
 
+/* toast notifications — non-blocking status feedback. notify() appends
+   a .toast into .toast-stack; CSS handles the slide-in animation; JS
+   removes after ~4s (or sooner on click). */
+.toast-stack {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 200; /* above .modal-backdrop (z=100) */
+  pointer-events: none; /* let clicks through the empty space */
+  max-width: min(420px, calc(100vw - 32px));
+}
+.toast {
+  pointer-events: auto;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 13px;
+  line-height: 1.4;
+  border: 1px solid var(--fg);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.18);
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  animation: toast-in 180ms ease-out;
+}
+.toast[data-level="success"] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.toast[data-level="error"]   { background: var(--danger, #c33); border-color: var(--danger, #c33); color: #fff; }
+.toast[data-level="info"]    { background: var(--fg); color: var(--bg); }
+.toast.toast-leaving { animation: toast-out 180ms ease-in forwards; }
+@keyframes toast-in  { from { transform: translateY(-10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@keyframes toast-out { from { transform: translateY(0); opacity: 1; } to { transform: translateY(-10px); opacity: 0; } }
+
+@media (max-width: 760px) {
+  .toast-stack {
+    top: auto;
+    bottom: max(16px, env(safe-area-inset-bottom, 16px));
+    right: 12px;
+    left: 12px;
+    max-width: none;
+  }
+}
+
 /* Touch-device polish: kill hover-only styles, beef up tap targets.
    `hover: none` matches phones/tablets without a fine pointer. */
 @media (hover: none) {

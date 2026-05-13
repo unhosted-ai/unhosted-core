@@ -320,6 +320,12 @@
 
   </div>
 
+  <!-- Toast container. Notifications are appended here from notify();
+       each toast auto-dismisses after a few seconds. Stacks bottom-up
+       on phones, top-right on desktop. Lives outside .app so it sits
+       above modals via z-index. -->
+  <div class="toast-stack" id="toast-stack" role="status" aria-live="polite"></div>
+
   <!-- In-app confirm modal. Replaces window.confirm() — many WebViews
        (including ours under Tauri) silently return false from window.confirm,
        which silently swallowed every "delete chat" click. -->
