@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use serde::Serialize;
@@ -32,7 +32,10 @@ pub struct DiscoveredPeer {
 
 #[derive(Clone)]
 pub struct Discovery {
-    inner: Arc<Mutex<HashMap<String, DiscoveredPeer>>>,
+    /// RwLock instead of Mutex: reads dominate (every UI render of the
+    /// "discovered on this network" panel takes a snapshot) while writes
+    /// arrive only on mDNS ServiceResolved / ServiceRemoved events.
+    inner: Arc<RwLock<HashMap<String, DiscoveredPeer>>>,
     /// Hold the daemon handle alive for the lifetime of the daemon.
     /// Dropping it tears down both the registration and the browse.
     _handle: Arc<ServiceDaemon>,
@@ -77,7 +80,8 @@ impl Discovery {
             .browse(SERVICE_TYPE)
             .map_err(|e| anyhow::anyhow!("mdns browse: {e}"))?;
 
-        let map: Arc<Mutex<HashMap<String, DiscoveredPeer>>> = Arc::new(Mutex::new(HashMap::new()));
+        let map: Arc<RwLock<HashMap<String, DiscoveredPeer>>> =
+            Arc::new(RwLock::new(HashMap::new()));
         let map_clone = map.clone();
         let local_port = local_addr.port();
         let local_name = name.to_string();
@@ -115,7 +119,7 @@ impl Discovery {
                             last_seen_ms: now_ms(),
                         };
 
-                        if let Ok(mut m) = map_clone.lock() {
+                        if let Ok(mut m) = map_clone.write() {
                             m.insert(svc_name, peer);
                         }
                     }
@@ -124,7 +128,7 @@ impl Discovery {
                             .strip_suffix(&format!(".{SERVICE_TYPE}"))
                             .map(|s| s.to_string())
                             .unwrap_or(fullname);
-                        if let Ok(mut m) = map_clone.lock() {
+                        if let Ok(mut m) = map_clone.write() {
                             m.remove(&svc_name);
                         }
                     }
@@ -143,7 +147,7 @@ impl Discovery {
     /// the last 60s so the UI doesn't show ghosts.
     pub fn snapshot(&self) -> Vec<DiscoveredPeer> {
         let cutoff = now_ms().saturating_sub(60_000);
-        let m = match self.inner.lock() {
+        let m = match self.inner.read() {
             Ok(m) => m,
             Err(_) => return vec![],
         };

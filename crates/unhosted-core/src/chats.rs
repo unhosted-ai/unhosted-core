@@ -116,7 +116,9 @@ impl ChatStore {
     pub fn list(&self) -> Vec<Chat> {
         let inner = self.inner.lock().unwrap();
         let mut out: Vec<Chat> = inner.file.chats.clone();
-        out.sort_by(|a, b| chat_sort_key(b).cmp(&chat_sort_key(a)));
+        // Descending by sort key (most-recent activity first) — Reverse
+        // around the key lets us use sort_by_key for the simpler form.
+        out.sort_by_key(|c| std::cmp::Reverse(chat_sort_key(c)));
         out
     }
 

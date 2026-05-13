@@ -132,6 +132,11 @@ struct NodeState {
     /// when the user clicks "open to internet" in the UI; lets the
     /// phone PWA reach this daemon from any network.
     tunnel: Arc<tunnel::TunnelManager>,
+    /// Shared HTTP client for upstream (llama-server / Ollama / LM Studio)
+    /// proxy calls. One client = one connection pool = HTTP keep-alive
+    /// across chat requests instead of TCP handshake per turn. Reqwest
+    /// itself is internally an Arc, so cloning it is cheap.
+    http: reqwest::Client,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -227,6 +232,14 @@ pub async fn serve(node: Node) -> Result<()> {
     let chat_store = chats::ChatStore::load_or_create().context("loading chat store")?;
     let tunnel_mgr = Arc::new(tunnel::TunnelManager::new(node.addr.port()));
 
+    // Shared HTTP client. No total-request timeout (chat streams can run
+    // for minutes), but a generous tcp_keepalive so idle connections in
+    // the pool stay alive between user turns.
+    let http = reqwest::Client::builder()
+        .tcp_keepalive(Some(std::time::Duration::from_secs(60)))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
     let state = NodeState {
         node: Arc::new(node.clone()),
         router: router.clone(),
@@ -240,6 +253,7 @@ pub async fn serve(node: Node) -> Result<()> {
         quic,
         chats: chat_store,
         tunnel: tunnel_mgr,
+        http,
     };
 
     // Eager tunnel: if the operator opted in (--eager-tunnel /
@@ -1641,24 +1655,27 @@ async fn chat_completions_handler(
     };
 
     match target {
-        Target::Local => proxy_chat_local(&state.node, body).await,
+        Target::Local => proxy_chat_local(&state.node, &state.http, body).await,
         Target::Peer { ref name, addr } => match proxy_chat_peer(name, addr, &body).await {
             Ok(r) => Ok(r),
             Err(e) => {
                 tracing::warn!(peer = %name, error = %e, "chat: peer unreachable, falling back to local");
-                proxy_chat_local(&state.node, body).await
+                proxy_chat_local(&state.node, &state.http, body).await
             }
         },
     }
 }
 
-async fn proxy_chat_local(node: &Node, body: bytes::Bytes) -> Result<Response, StatusCode> {
+async fn proxy_chat_local(
+    node: &Node,
+    client: &reqwest::Client,
+    body: bytes::Bytes,
+) -> Result<Response, StatusCode> {
     let Some(live) = upstream::select_live(&node.llama_server_url).await else {
         return Ok(upstream_offline_response(&node.llama_server_url));
     };
     let base = live.url;
     let url = format!("{base}/v1/chat/completions");
-    let client = reqwest::Client::new();
     let upstream = client
         .post(&url)
         .header("content-type", "application/json")
@@ -1763,7 +1780,7 @@ async fn models_handler(
         return Ok(upstream_offline_response(&state.node.llama_server_url));
     };
     let url = format!("{}/v1/models", live.url);
-    let upstream = reqwest::Client::new().get(&url).send().await.map_err(|e| {
+    let upstream = state.http.get(&url).send().await.map_err(|e| {
         tracing::error!(error = %e, %url, "models: upstream call failed");
         StatusCode::BAD_GATEWAY
     })?;
