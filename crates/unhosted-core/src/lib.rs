@@ -271,6 +271,12 @@ pub async fn serve(node: Node) -> Result<()> {
                 Err(e) => tracing::warn!(error = %e, "eager tunnel: start failed"),
             }
         });
+        // Stickiness: a long-running watchdog revives the tunnel from
+        // Idle/Failed (e.g. supervisor budget exhausted, accidental stop)
+        // unless the user explicitly clicked off. Survives any bug that
+        // strands the state machine in a "should be running but isn't"
+        // state — which is exactly what users were hitting before.
+        state.tunnel.clone().spawn_eager_watchdog();
     }
 
     // Spawn the QUIC accept loop now that NodeState is ready. Each

@@ -64,6 +64,11 @@ struct Inner {
     /// Capped at [`MAX_AUTO_RESTARTS`] so a permanently broken cloudflared
     /// doesn't churn forever.
     restart_attempts: u32,
+    /// Set when `stop()` is called. The eager-tunnel watchdog respects
+    /// this so an explicit user "off" click is honored. A subsequent
+    /// `start()` clears it. Without this, the watchdog would fight the
+    /// user every 30s.
+    user_stopped: bool,
 }
 
 /// Hard cap on consecutive auto-restarts. After this many failed revivals
@@ -73,6 +78,15 @@ const MAX_AUTO_RESTARTS: u32 = 3;
 /// Backoff between auto-restart attempts. Short enough that a transient
 /// crash heals before the user notices their phone stopped working.
 const AUTO_RESTART_DELAY_SECS: u64 = 3;
+/// Eager-tunnel watchdog interval. We re-check the tunnel state this
+/// often; on Idle/Failed (and only when the user hasn't explicitly
+/// pressed stop) we kick a new start. 30s balances "phone doesn't
+/// stay broken for long" against not burning through quick-tunnel
+/// URLs on every blip.
+const WATCHDOG_INTERVAL_SECS: u64 = 30;
+/// Grace period before the watchdog's first health check, to let the
+/// initial eager start() complete without racing it.
+const WATCHDOG_INITIAL_DELAY_SECS: u64 = 15;
 
 impl TunnelManager {
     pub fn new(local_port: u16) -> Self {
@@ -81,6 +95,7 @@ impl TunnelManager {
                 state: TunnelState::Idle,
                 child: None,
                 restart_attempts: 0,
+                user_stopped: false,
             })),
             local_port,
         }
@@ -88,6 +103,44 @@ impl TunnelManager {
 
     pub async fn status(&self) -> TunnelState {
         self.inner.lock().await.state.clone()
+    }
+
+    /// Background watchdog for `--eager-tunnel`. Polls the tunnel
+    /// state every [`WATCHDOG_INTERVAL_SECS`] seconds, and if it's
+    /// Idle or Failed *without* the user explicitly clicking stop,
+    /// kicks a fresh `start()`. Keeps the public URL alive across:
+    ///   - the supervisor's MAX_AUTO_RESTARTS budget being exhausted
+    ///   - any path that lands in Idle without a user "off" click
+    ///     (transient bugs, accidental stop calls, etc.)
+    /// Respects `user_stopped` so an explicit "off" doesn't get fought.
+    pub fn spawn_eager_watchdog(self: Arc<Self>) {
+        tokio::spawn(async move {
+            // Initial delay to let the first eager start() complete
+            // before the watchdog starts measuring health.
+            tokio::time::sleep(std::time::Duration::from_secs(
+                WATCHDOG_INITIAL_DELAY_SECS,
+            ))
+            .await;
+            loop {
+                let needs_revive = {
+                    let inner = self.inner.lock().await;
+                    let dead = matches!(
+                        inner.state,
+                        TunnelState::Idle | TunnelState::Failed { .. }
+                    );
+                    dead && !inner.user_stopped
+                };
+                if needs_revive {
+                    tracing::warn!(
+                        "tunnel watchdog: state is dead and user hasn't stopped — restarting"
+                    );
+                    if let Err(e) = self.clone().start().await {
+                        tracing::warn!(error = %e, "tunnel watchdog: start failed");
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(WATCHDOG_INTERVAL_SECS)).await;
+            }
+        });
     }
 
     /// Spawn cloudflared. Returns immediately with `Starting`; the URL
@@ -100,13 +153,16 @@ impl TunnelManager {
     /// (e.g. `state.tunnel`) should pass `state.tunnel.clone()`.
     pub async fn start(self: Arc<Self>) -> Result<TunnelState> {
         {
-            let inner = self.inner.lock().await;
+            let mut inner = self.inner.lock().await;
             if matches!(
                 inner.state,
                 TunnelState::Starting { .. } | TunnelState::Running { .. }
             ) {
                 return Ok(inner.state.clone());
             }
+            // Explicit start clears the "user said off" sticky flag so
+            // the watchdog can revive future unexpected deaths.
+            inner.user_stopped = false;
         }
 
         // Probe for cloudflared on PATH first so we can give a clean
@@ -156,6 +212,8 @@ impl TunnelManager {
 
     pub async fn stop(&self) -> Result<TunnelState> {
         let mut inner = self.inner.lock().await;
+        let prev = inner.state.clone();
+        tracing::info!(prev_state = ?prev, "tunnel stop() called");
         if let Some(mut child) = inner.child.take() {
             let _ = child.start_kill();
             // Don't await waiting — kill_on_drop already handles cleanup
@@ -166,6 +224,10 @@ impl TunnelManager {
         // fresh restart budget. The supervisor in the reader task sees
         // state==Idle here and won't revive.
         inner.restart_attempts = 0;
+        // Tell the eager-tunnel watchdog to back off — the user's
+        // explicit "off" click outranks the operator's "keep it up"
+        // intent until they click again.
+        inner.user_stopped = true;
         Ok(inner.state.clone())
     }
 }
@@ -178,6 +240,7 @@ impl TunnelManager {
 ///   - state == Failed for any other reason (e.g. spawn error)
 async fn supervisor_loop(inner: Arc<Mutex<Inner>>, local_port: u16) {
     let target = format!("http://127.0.0.1:{}", local_port);
+    tracing::info!("tunnel supervisor: entering loop");
     loop {
         let mut cmd = Command::new("cloudflared");
         cmd.arg("tunnel")
@@ -280,10 +343,13 @@ async fn supervisor_loop(inner: Arc<Mutex<Inner>>, local_port: u16) {
                 }
                 // Idle (stop pressed) or Failed: leave the state, exit
                 // the supervisor.
-                _ => {}
+                ref other => {
+                    tracing::info!(state = ?other, "tunnel supervisor: stderr closed in non-Running/Starting state, exiting");
+                }
             }
         }
         if !should_revive {
+            tracing::info!("tunnel supervisor: exiting loop");
             return;
         }
         tokio::time::sleep(std::time::Duration::from_secs(AUTO_RESTART_DELAY_SECS)).await;
