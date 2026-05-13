@@ -230,6 +230,9 @@ const els = {
   tunnelUrl: $("#tunnel-url"),
   tunnelCopy: $("#tunnel-copy"),
   tunnelWarn: $("#tunnel-warn"),
+  phoneQrCanvas: $("#phone-qr-canvas"),
+  phoneQrHint:   $("#phone-qr-hint"),
+  phoneSection:  $("#phone-section"),
   developerOpen: $("#developer-open"),
   developerModal: $("#developer-modal"),
   developerModalClose: $("#developer-modal-close"),
@@ -1055,6 +1058,42 @@ const TUNNEL_STAGES = {
   connecting: { label: "negotiating connection…",          pct: 85 },
 };
 
+// QR rendering for the "send to my phone" panel. Encodes the live tunnel
+// URL + bearer token, so a phone scanning it lands on the chat already
+// authenticated. Updates on every renderTunnel() call so the QR tracks
+// tunnel state changes (Running -> shows code; anything else -> hint).
+let lastQrUrl = null;
+function renderPhoneQr(linkHref) {
+  if (!els.phoneQrCanvas) return;
+  if (!linkHref) {
+    els.phoneQrCanvas.innerHTML =
+      '<span class="phone-qr-hint" id="phone-qr-hint">enable "open to internet" first — the qr appears once your tunnel is live.</span>';
+    lastQrUrl = null;
+    return;
+  }
+  if (linkHref === lastQrUrl) return; // no-op when URL hasn't changed
+  if (typeof window.qrcode !== "function") {
+    // Library still loading (defer'd from CDN). Retry shortly.
+    els.phoneQrCanvas.innerHTML =
+      '<span class="phone-qr-hint">loading qr…</span>';
+    setTimeout(() => renderPhoneQr(linkHref), 200);
+    return;
+  }
+  try {
+    // typeNumber=0 = auto-pick the smallest version that fits.
+    // "M" = medium error correction (~15% recoverable), good balance.
+    const qr = window.qrcode(0, "M");
+    qr.addData(linkHref);
+    qr.make();
+    els.phoneQrCanvas.innerHTML = qr.createSvgTag({ scalable: true, margin: 0 });
+    lastQrUrl = linkHref;
+  } catch (e) {
+    els.phoneQrCanvas.innerHTML =
+      '<span class="phone-qr-hint">qr render failed — copy the url instead.</span>';
+    lastQrUrl = null;
+  }
+}
+
 function renderTunnel(s) {
   if (!s || !els.tunnelToggle) return;
   const state = s.state;
@@ -1070,6 +1109,7 @@ function renderTunnel(s) {
     els.tunnelLink.hidden = false;
     els.tunnelWarn.hidden = false;
     if (els.tunnelProgress) els.tunnelProgress.hidden = true;
+    renderPhoneQr(linkHref);
   } else if (state === "starting") {
     const stage = TUNNEL_STAGES[s.stage] || TUNNEL_STAGES.spawning;
     els.tunnelLabel.textContent = "starting…";
@@ -1088,6 +1128,7 @@ function renderTunnel(s) {
     els.tunnelLink.hidden = true;
     els.tunnelWarn.hidden = true;
     if (els.tunnelProgress) els.tunnelProgress.hidden = true;
+    renderPhoneQr(null);
   } else {
     els.tunnelLabel.textContent = "enable";
     els.tunnelStatus.textContent = "off — your daemon is only reachable on this network.";
@@ -1095,6 +1136,7 @@ function renderTunnel(s) {
     els.tunnelLink.hidden = true;
     els.tunnelWarn.hidden = true;
     if (els.tunnelProgress) els.tunnelProgress.hidden = true;
+    renderPhoneQr(null);
   }
 }
 

@@ -12,10 +12,16 @@
   "categories": ["productivity", "utilities", "developer"],
   "icons": [
     {
+      "src": "/app-icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any"
+    },
+    {
       "src": "/favicon.svg",
       "type": "image/svg+xml",
       "sizes": "any",
-      "purpose": "any maskable"
+      "purpose": "maskable"
     }
   ]
 }

@@ -1325,6 +1325,52 @@ button:focus-visible, input:focus-visible, textarea:focus-visible,
   color: var(--mute);
 }
 
+/* "send to my phone" panel — sidebar QR for the live tunnel URL+token.
+   Rendered SVG comes from qrcode-generator and is responsive-sized. */
+.phone-body { display: flex; flex-direction: column; gap: 8px; }
+.phone-qr {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.phone-qr-canvas { width: 100%; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; }
+.phone-qr-canvas svg { width: 100%; height: 100%; display: block; }
+.phone-qr-hint {
+  color: var(--mute);
+  font-size: 11px;
+  text-align: center;
+  line-height: 1.4;
+  padding: 0 8px;
+}
+.phone-hint {
+  margin: 2px 4px 0;
+  font-size: 11px;
+  color: var(--mute);
+  line-height: 1.4;
+}
+
+/* Touch-device polish: kill hover-only styles, beef up tap targets.
+   `hover: none` matches phones/tablets without a fine pointer. */
+@media (hover: none) {
+  .pair-btn:hover, .send:hover, .stop:hover, .copy-btn:hover, .btn-primary:hover,
+  .btn-secondary:hover, .btn-danger:hover, .chat-item:hover, .modal-close:hover,
+  .dev-tab:hover, .tunnel-copy:hover {
+    /* explicitly inherit so hover doesn't fire on tap-and-hold */
+    background: inherit;
+    color: inherit;
+    border-color: inherit;
+  }
+  .pair-btn, .send, .stop, .btn-primary, .btn-secondary, .btn-danger {
+    min-height: 44px; /* Apple HIG / Material minimum touch target */
+  }
+  .chat-item { padding-top: 10px; padding-bottom: 10px; }
+}
+
 @media (max-width: 760px) {
   /* phone: drop the sidebar, give the chat the full viewport. */
   .app { grid-template-columns: 1fr; }
@@ -1332,10 +1378,27 @@ button:focus-visible, input:focus-visible, textarea:focus-visible,
   .main-head, .composer-wrap { padding-left: 14px; padding-right: 14px; }
   .scroll { padding: 0 14px; }
 
-  /* compose surface comfortable for thumbs */
+  /* Use dynamic viewport height so the soft keyboard doesn't push the
+     composer off-screen. `100dvh` shrinks with the keyboard; `100vh`
+     stays the full screen and clips the input. Fall back to 100vh
+     where dvh isn't supported. */
+  html, body { height: 100dvh; }
+  .app { height: 100dvh; min-height: 100dvh; }
+
+  /* compose surface comfortable for thumbs. Bottom padding honors the
+     home-indicator safe area on iPhone so the input doesn't sit under
+     the indicator bar. */
+  .composer-wrap { padding-bottom: max(16px, env(safe-area-inset-bottom, 16px)); }
   .composer { padding: 10px 12px; border-radius: 12px; }
-  .composer textarea { font-size: 16px; min-height: 36px; }
-  .send { padding: 8px 18px; min-height: 36px; }
+  .composer textarea { font-size: 16px; min-height: 40px; }
+  .send, .stop {
+    padding: 10px 20px;
+    min-height: 44px; /* 44pt is the iOS HIG minimum tap target */
+  }
+
+  /* QR panel on phone: in case someone opens the daemon URL on the
+     same phone (rare), keep the QR readable without dominating. */
+  .phone-qr { max-width: 240px; margin: 0 auto; }
 
   /* pair modal: phone-friendly. */
   .modal-backdrop { padding: 16px; align-items: flex-end; }

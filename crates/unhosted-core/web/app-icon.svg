@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>unhosted — macOS app icon source</title>
+  <!-- macOS Big Sur icon template: 824×824 rounded plate centered in a 1024
+       canvas, ~100px bleed on each side, corner radius 185.4. macOS does NOT
+       auto-mask app icons — apps must draw their own squircle. -->
+  <rect x="100" y="100" width="824" height="824" rx="185.4" ry="185.4" fill="#0A0A0A"/>
+
+  <!-- Trust-gradient mark, centered inside the plate. -->
+  <g transform="translate(512, 512)" fill="none" stroke="#F5F5F0" stroke-width="20" stroke-linecap="round">
+    <circle cx="0" cy="0" r="245" stroke-dasharray="9 33"/>
+    <circle cx="0" cy="0" r="155"/>
+    <circle cx="0" cy="0" r="66" fill="#F5F5F0" stroke="none"/>
+  </g>
+</svg>
