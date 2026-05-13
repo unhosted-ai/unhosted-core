@@ -92,6 +92,18 @@ impl TunnelManager {
         // error instead of a subprocess-spawn failure.
         which_cloudflared()?;
 
+        // Preflight the network. Without internet, cloudflared would sit at
+        // "Requesting new quick Tunnel" indefinitely and the UI would show
+        // a hung progress bar with no useful error. A 1.5s HEAD to
+        // cloudflare.com fails fast and lets us surface a clear message
+        // instead.
+        if !has_internet().await {
+            inner.state = TunnelState::Failed {
+                error: "no internet — open to internet needs an outbound connection".into(),
+            };
+            return Ok(inner.state.clone());
+        }
+
         let target = format!("http://127.0.0.1:{}", self.local_port);
         let mut cmd = Command::new("cloudflared");
         cmd.arg("tunnel")
@@ -174,6 +186,26 @@ impl TunnelManager {
         inner.state = TunnelState::Idle;
         Ok(inner.state.clone())
     }
+}
+
+/// Fast preflight: are we online enough to reach Cloudflare? Returns true
+/// if a HEAD to cloudflare.com completes within 1.5s. We probe the same
+/// vendor we're about to tunnel through so a working result actually
+/// implies the tunnel will reach somebody.
+async fn has_internet() -> bool {
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(1500))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    client
+        .head("https://www.cloudflare.com")
+        .send()
+        .await
+        .map(|r| r.status().is_success() || r.status().is_redirection())
+        .unwrap_or(false)
 }
 
 fn which_cloudflared() -> Result<()> {
