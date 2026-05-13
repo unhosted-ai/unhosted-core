@@ -230,6 +230,15 @@ const els = {
   tunnelUrl: $("#tunnel-url"),
   tunnelCopy: $("#tunnel-copy"),
   tunnelWarn: $("#tunnel-warn"),
+  developerOpen: $("#developer-open"),
+  developerModal: $("#developer-modal"),
+  developerModalClose: $("#developer-modal-close"),
+  devBaseUrl: $("#dev-base-url"),
+  devToken: $("#dev-token"),
+  devTunnelNote: $("#dev-tunnel-note"),
+  devTunnelUrl: $("#dev-tunnel-url"),
+  devSnippetCode: $("#dev-snippet-code"),
+  devSnippetCopy: $("#dev-snippet-copy"),
 };
 
 let streaming = false;
@@ -1377,6 +1386,146 @@ document.addEventListener("keydown", (e) => {
     closePairModal();
   }
 });
+
+// ---------------------------------------------------------------- developer modal
+//
+// "for developers" panel. The Unhosted daemon already speaks an
+// OpenAI-compatible API on /v1/* — this modal just makes it discoverable:
+// shows the user their endpoint + token, plus copy-pasteable curl /
+// Python / JavaScript snippets so they can plug their local daemon into
+// any app without reading source.
+
+function devSnippet(lang, baseUrl, token) {
+  const tokenDisplay = token || "<your-token>";
+  if (lang === "curl") {
+    return `curl ${baseUrl}/v1/chat/completions \\
+  -H "Authorization: Bearer ${tokenDisplay}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "local",
+    "messages": [{"role": "user", "content": "hello"}],
+    "stream": true
+  }'`;
+  }
+  if (lang === "python") {
+    return `# pip install openai
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="${baseUrl}/v1",
+    api_key="${tokenDisplay}",
+)
+
+stream = client.chat.completions.create(
+    model="local",
+    messages=[{"role": "user", "content": "hello"}],
+    stream=True,
+)
+for chunk in stream:
+    print(chunk.choices[0].delta.content or "", end="", flush=True)`;
+  }
+  // javascript
+  return `const r = await fetch("${baseUrl}/v1/chat/completions", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer ${tokenDisplay}",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    model: "local",
+    messages: [{ role: "user", content: "hello" }],
+    stream: false,
+  }),
+});
+const j = await r.json();
+console.log(j.choices[0].message.content);`;
+}
+
+let currentDevTab = "curl";
+
+async function populateDeveloperModal() {
+  const baseUrl = `${location.protocol}//${location.host}`;
+  const token = getToken() || "";
+  els.devBaseUrl.textContent = baseUrl;
+  els.devBaseUrl.dataset.copy = baseUrl;
+  els.devToken.textContent = token || "(loopback only — no token needed)";
+  els.devToken.dataset.copy = token;
+  // If a tunnel is running, show the public URL so users know to swap in
+  // the public origin when calling from a remote app.
+  const t = await fetchTunnel();
+  if (t && t.state === "running" && t.url) {
+    els.devTunnelUrl.textContent = t.url;
+    els.devTunnelNote.hidden = false;
+  } else {
+    els.devTunnelNote.hidden = true;
+  }
+  renderDevSnippet(baseUrl, token);
+}
+
+function renderDevSnippet(baseUrl, token) {
+  els.devSnippetCode.textContent = devSnippet(currentDevTab, baseUrl, token);
+}
+
+function openDeveloperModal() {
+  if (!els.developerModal) return;
+  els.developerModal.hidden = false;
+  populateDeveloperModal();
+}
+function closeDeveloperModal() {
+  if (!els.developerModal) return;
+  els.developerModal.hidden = true;
+}
+
+if (els.developerOpen) els.developerOpen.addEventListener("click", openDeveloperModal);
+if (els.developerModalClose) els.developerModalClose.addEventListener("click", closeDeveloperModal);
+if (els.developerModal) {
+  els.developerModal.addEventListener("click", (e) => {
+    if (e.target === els.developerModal) closeDeveloperModal();
+  });
+}
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && els.developerModal && !els.developerModal.hidden) {
+    closeDeveloperModal();
+  }
+});
+
+// Tab switching inside the developer modal.
+document.querySelectorAll(".dev-tab").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    currentDevTab = btn.dataset.tab;
+    document.querySelectorAll(".dev-tab").forEach((b) => b.classList.toggle("active", b === btn));
+    renderDevSnippet(`${location.protocol}//${location.host}`, getToken() || "");
+  });
+});
+
+// Copy buttons inside the developer modal. Re-uses the data-copy-target
+// → element id convention so we don't reinvent clipboard plumbing.
+document.querySelectorAll("[data-copy-target]").forEach((btn) => {
+  btn.addEventListener("click", async () => {
+    const targetEl = document.getElementById(btn.dataset.copyTarget);
+    if (!targetEl) return;
+    const text = targetEl.dataset.copy ?? targetEl.textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      const old = btn.querySelector("span")?.textContent;
+      if (old) {
+        btn.querySelector("span").textContent = "copied";
+        setTimeout(() => { btn.querySelector("span").textContent = old; }, 1200);
+      }
+    } catch (e) { /* clipboard denied; user can still hand-select */ }
+  });
+});
+
+if (els.devSnippetCopy) {
+  els.devSnippetCopy.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(els.devSnippetCode.textContent);
+      const old = els.devSnippetCopy.textContent;
+      els.devSnippetCopy.textContent = "copied";
+      setTimeout(() => { els.devSnippetCopy.textContent = old; }, 1200);
+    } catch (e) { /* clipboard denied */ }
+  });
+}
 
 // ---------------------------------------------------------------- boot
 
