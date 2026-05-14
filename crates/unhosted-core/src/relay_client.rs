@@ -246,11 +246,7 @@ impl RelayClient {
     /// This is diagnostic for now — we don't yet run a real transport
     /// over the punched channel. Once the QUIC transport lands it will
     /// take over the socket on success.
-    pub async fn try_punch(
-        &self,
-        peer_pubkey: &str,
-        timeout: Duration,
-    ) -> Result<PunchOutcome> {
+    pub async fn try_punch(&self, peer_pubkey: &str, timeout: Duration) -> Result<PunchOutcome> {
         let out = {
             let guard = self.out_tx.lock().await;
             guard
@@ -304,22 +300,19 @@ impl RelayClient {
         });
 
         let mut buf = [0u8; 64];
-        let bidirectional = match tokio::time::timeout(
-            Duration::from_secs(3),
-            send_sock.recv_from(&mut buf),
-        )
-        .await
-        {
-            Ok(Ok((n, from))) => {
-                tracing::info!(
-                    %from,
-                    bytes = n,
-                    "punch: received inbound UDP, hole appears open"
-                );
-                from.ip() == peer_addr.ip()
-            }
-            _ => false,
-        };
+        let bidirectional =
+            match tokio::time::timeout(Duration::from_secs(3), send_sock.recv_from(&mut buf)).await
+            {
+                Ok(Ok((n, from))) => {
+                    tracing::info!(
+                        %from,
+                        bytes = n,
+                        "punch: received inbound UDP, hole appears open"
+                    );
+                    from.ip() == peer_addr.ip()
+                }
+                _ => false,
+            };
         sprayer.abort();
 
         Ok(PunchOutcome {
@@ -347,10 +340,7 @@ enum ClientMessage<'a> {
     /// Ask the relay to coordinate a UDP hole-punch with `peer_pubkey`.
     /// Both sides must send this; relay matches them up and replies with
     /// PunchTarget on each side.
-    PunchRequest {
-        peer_pubkey: &'a str,
-        udp_port: u16,
-    },
+    PunchRequest { peer_pubkey: &'a str, udp_port: u16 },
 }
 
 #[derive(Deserialize, Debug)]

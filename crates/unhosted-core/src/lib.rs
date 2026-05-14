@@ -216,18 +216,21 @@ pub async fn serve(node: Node) -> Result<()> {
     // inbound run requests against the daemon's inference path.
     let quic_bind = SocketAddr::new(node.addr.ip(), node.addr.port().saturating_add(1));
     let registry_for_quic = registry.clone();
-    let (quic, quic_endpoint_for_accept) =
-        match transport::PeerEndpoint::bind(quic_bind, &identity, registry_for_quic) {
-            Ok(ep) => {
-                tracing::info!(addr = %quic_bind, "quic peer endpoint listening");
-                let handle = ep.handle();
-                (Some(Arc::new(ep)), Some(handle))
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, addr = %quic_bind, "quic: failed to bind — peer encryption disabled");
-                (None, None)
-            }
-        };
+    let (quic, quic_endpoint_for_accept) = match transport::PeerEndpoint::bind(
+        quic_bind,
+        &identity,
+        registry_for_quic,
+    ) {
+        Ok(ep) => {
+            tracing::info!(addr = %quic_bind, "quic peer endpoint listening");
+            let handle = ep.handle();
+            (Some(Arc::new(ep)), Some(handle))
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, addr = %quic_bind, "quic: failed to bind — peer encryption disabled");
+            (None, None)
+        }
+    };
 
     let chat_store = chats::ChatStore::load_or_create().context("loading chat store")?;
     let tunnel_mgr = Arc::new(tunnel::TunnelManager::new(node.addr.port()));
@@ -1293,18 +1296,17 @@ async fn punch_handler(
 
     // The peer must be in our registry — we only punch trusted peers.
     let peer_pubkey: String = {
-        let reg = state
-            .registry
-            .lock()
-            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "registry poisoned".into()))?;
+        let reg = state.registry.lock().map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "registry poisoned".into(),
+            )
+        })?;
         let matched = reg
             .peers
             .iter()
             .find(|p| p.name == req.peer || p.pubkey.as_deref() == Some(req.peer.as_str()))
-            .ok_or((
-                StatusCode::NOT_FOUND,
-                format!("no peer named {}", req.peer),
-            ))?;
+            .ok_or((StatusCode::NOT_FOUND, format!("no peer named {}", req.peer)))?;
         matched.pubkey.clone().ok_or((
             StatusCode::PRECONDITION_FAILED,
             "peer has no pubkey on file — re-pair to enable punch".into(),
@@ -1383,10 +1385,12 @@ async fn quic_ping_handler(
     };
 
     let peer_http_addr = {
-        let reg = state
-            .registry
-            .lock()
-            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "registry poisoned".into()))?;
+        let reg = state.registry.lock().map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "registry poisoned".into(),
+            )
+        })?;
         reg.peers
             .iter()
             .find(|p| p.name == req.peer)
@@ -1395,10 +1399,7 @@ async fn quic_ping_handler(
     };
     let target = SocketAddr::new(peer_http_addr.ip(), peer_http_addr.port().saturating_add(1));
 
-    match quic
-        .ping(target, &state.identity.public_b64())
-        .await
-    {
+    match quic.ping(target, &state.identity.public_b64()).await {
         Ok(rtt) => Ok(axum::Json(QuicPingResponse {
             ok: true,
             rtt_ms: Some(rtt.as_millis() as u64),
@@ -1883,7 +1884,9 @@ async fn chats_list_handler(
 ) -> Result<axum::Json<serde_json::Value>, StatusCode> {
     let outcome = state.classify(&headers, Some(remote.ip()), &[]);
     require_auth(&outcome, true)?;
-    Ok(axum::Json(serde_json::json!({ "chats": state.chats.list() })))
+    Ok(axum::Json(
+        serde_json::json!({ "chats": state.chats.list() }),
+    ))
 }
 
 async fn chats_get_handler(
@@ -1925,14 +1928,10 @@ async fn chats_upsert_handler(
     if chat.id.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
-    state
-        .chats
-        .upsert(chat)
-        .map(axum::Json)
-        .map_err(|e| {
-            tracing::error!(error = %e, "chats upsert: write failed");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })
+    state.chats.upsert(chat).map(axum::Json).map_err(|e| {
+        tracing::error!(error = %e, "chats upsert: write failed");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
 }
 
 async fn chats_delete_handler(
@@ -2301,8 +2300,7 @@ async fn run_handler(
             // network shape breaks the new transport.
             if quic_first {
                 if let Some(ref quic) = state.quic {
-                    let quic_target =
-                        SocketAddr::new(addr.ip(), addr.port().saturating_add(1));
+                    let quic_target = SocketAddr::new(addr.ip(), addr.port().saturating_add(1));
                     match run_peer_via_quic(quic, quic_target, &req).await {
                         Ok(resp) => return Ok(resp),
                         Err(e) => {
@@ -2613,7 +2611,10 @@ async fn handle_quic_run(
 ) -> Result<()> {
     // Read the request body until end-of-stream (capped at 256KB so a
     // bug or hostile peer can't exhaust memory).
-    let body = recv.read_to_end(256 * 1024).await.context("quic: read body")?;
+    let body = recv
+        .read_to_end(256 * 1024)
+        .await
+        .context("quic: read body")?;
     let req: RunRequest = serde_json::from_slice(&body).context("quic: parse run req")?;
 
     // Reuse the local-inference path. Build a fake axum Response and

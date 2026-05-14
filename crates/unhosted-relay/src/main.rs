@@ -260,10 +260,7 @@ enum ClientMessage {
     /// `udp_port` is the local UDP port the requester has bound and is
     /// ready to receive on. Relay tells both sides each other's external
     /// addr (IP from the WS connection + the supplied UDP port).
-    PunchRequest {
-        peer_pubkey: String,
-        udp_port: u16,
-    },
+    PunchRequest { peer_pubkey: String, udp_port: u16 },
 }
 
 #[derive(Serialize, Debug)]
@@ -335,8 +332,8 @@ async fn handle_socket(socket: WebSocket, state: AppState, remote: SocketAddr) {
     }
 
     // Wait for Register.
-    let (pubkey, tx, mut rx) =
-        match register(&mut receiver, &mut sender, &challenge, &state).await {
+    let (pubkey, tx, mut rx) = match register(&mut receiver, &mut sender, &challenge, &state).await
+    {
         Ok(v) => v,
         Err(e) => {
             tracing::debug!(%remote, error = %e, "register failed");
@@ -416,8 +413,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, remote: SocketAddr) {
                         // GC stale entries.
                         let now = std::time::Instant::now();
                         pending.retain(|_, p| {
-                            now.duration_since(p.created)
-                                < std::time::Duration::from_secs(30)
+                            now.duration_since(p.created) < std::time::Duration::from_secs(30)
                         });
 
                         // Is the other side already waiting on us?
@@ -438,12 +434,11 @@ async fn handle_socket(socket: WebSocket, state: AppState, remote: SocketAddr) {
 
                             // Tell them where to dial me.
                             if let Some(peer_tx) = peer_tx {
-                                let to_them =
-                                    serde_json::to_string(&ServerMessage::PunchTarget {
-                                        peer_pubkey: &pubkey,
-                                        addr: &my_external.to_string(),
-                                    })
-                                    .unwrap_or_default();
+                                let to_them = serde_json::to_string(&ServerMessage::PunchTarget {
+                                    peer_pubkey: &pubkey,
+                                    addr: &my_external.to_string(),
+                                })
+                                .unwrap_or_default();
                                 let _ = peer_tx.send(Message::Text(to_them.into()));
                             }
 

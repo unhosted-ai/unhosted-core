@@ -349,12 +349,18 @@ async fn handle_punch(node: &str, peer: &str, timeout_secs: u64) -> Result<()> {
         anyhow::bail!("punch request failed ({status}): {text}");
     }
     let parsed: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
-    let coordinated = parsed.get("coordinated").and_then(|v| v.as_bool()).unwrap_or(false);
+    let coordinated = parsed
+        .get("coordinated")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let bidirectional = parsed
         .get("bidirectional")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    let peer_addr = parsed.get("peer_addr").and_then(|v| v.as_str()).unwrap_or("-");
+    let peer_addr = parsed
+        .get("peer_addr")
+        .and_then(|v| v.as_str())
+        .unwrap_or("-");
     let local_port = parsed
         .get("local_port")
         .and_then(|v| v.as_u64())

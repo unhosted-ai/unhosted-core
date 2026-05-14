@@ -195,27 +195,24 @@ pub async fn select_live(configured: &str) -> Option<LiveUpstream> {
 /// behavior (i.e., it's not the bare /health-only case).
 async fn try_backend(base: &str) -> Option<LiveUpstream> {
     let base = base.trim_end_matches('/').to_string();
-    let client = reqwest::Client::builder().timeout(PROBE_TIMEOUT).build().ok()?;
+    let client = reqwest::Client::builder()
+        .timeout(PROBE_TIMEOUT)
+        .build()
+        .ok()?;
 
     // Discover a chat model. `/v1/models` is OpenAI-compat across
     // all three backends; we pick the first id that doesn't look
     // like an embedding model.
     if let Ok(resp) = client.get(format!("{base}/v1/models")).send().await {
         if resp.status().is_success() {
-            let model = resp
-                .json::<serde_json::Value>()
-                .await
-                .ok()
-                .and_then(|v| {
-                    v.get("data")
-                        .and_then(|d| d.as_array())
-                        .and_then(|arr| {
-                            arr.iter()
-                                .filter_map(|m| m.get("id").and_then(|id| id.as_str()))
-                                .find(|id| !is_embedding_model(id))
-                                .map(|s| s.to_string())
-                        })
-                });
+            let model = resp.json::<serde_json::Value>().await.ok().and_then(|v| {
+                v.get("data").and_then(|d| d.as_array()).and_then(|arr| {
+                    arr.iter()
+                        .filter_map(|m| m.get("id").and_then(|id| id.as_str()))
+                        .find(|id| !is_embedding_model(id))
+                        .map(|s| s.to_string())
+                })
+            });
             return Some(LiveUpstream { url: base, model });
         }
     }

@@ -94,7 +94,8 @@ impl ReplayGuard {
 
         // Evict stale entries lazily.
         if self.seen.len() >= REPLAY_MAX_ENTRIES {
-            self.seen.retain(|_, seen_at| now.duration_since(*seen_at) < window);
+            self.seen
+                .retain(|_, seen_at| now.duration_since(*seen_at) < window);
             // If still full, drop the oldest. Picking the oldest is O(n);
             // at 65k entries this is once per ~20k inserts max, fine.
             if self.seen.len() >= REPLAY_MAX_ENTRIES {
@@ -165,8 +166,7 @@ impl LocalToken {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating {}", parent.display()))?;
         }
-        std::fs::write(path, &token)
-            .with_context(|| format!("writing {}", path.display()))?;
+        std::fs::write(path, &token).with_context(|| format!("writing {}", path.display()))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

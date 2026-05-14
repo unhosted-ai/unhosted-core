@@ -109,25 +109,22 @@ impl TunnelManager {
     /// state every [`WATCHDOG_INTERVAL_SECS`] seconds, and if it's
     /// Idle or Failed *without* the user explicitly clicking stop,
     /// kicks a fresh `start()`. Keeps the public URL alive across:
+    ///
     ///   - the supervisor's MAX_AUTO_RESTARTS budget being exhausted
     ///   - any path that lands in Idle without a user "off" click
     ///     (transient bugs, accidental stop calls, etc.)
+    ///
     /// Respects `user_stopped` so an explicit "off" doesn't get fought.
     pub fn spawn_eager_watchdog(self: Arc<Self>) {
         tokio::spawn(async move {
             // Initial delay to let the first eager start() complete
             // before the watchdog starts measuring health.
-            tokio::time::sleep(std::time::Duration::from_secs(
-                WATCHDOG_INITIAL_DELAY_SECS,
-            ))
-            .await;
+            tokio::time::sleep(std::time::Duration::from_secs(WATCHDOG_INITIAL_DELAY_SECS)).await;
             loop {
                 let needs_revive = {
                     let inner = self.inner.lock().await;
-                    let dead = matches!(
-                        inner.state,
-                        TunnelState::Idle | TunnelState::Failed { .. }
-                    );
+                    let dead =
+                        matches!(inner.state, TunnelState::Idle | TunnelState::Failed { .. });
                     dead && !inner.user_stopped
                 };
                 if needs_revive {
@@ -325,10 +322,7 @@ async fn supervisor_loop(inner: Arc<Mutex<Inner>>, local_port: u16) {
                         should_revive = true;
                     } else {
                         let attempts = guard.restart_attempts;
-                        tracing::error!(
-                            attempts,
-                            "cloudflared crashed too many times — giving up"
-                        );
+                        tracing::error!(attempts, "cloudflared crashed too many times — giving up");
                         guard.state = TunnelState::Failed {
                             error: format!(
                                 "cloudflared crashed {attempts} times in a row — check the binary"
@@ -429,7 +423,9 @@ fn extract_trycloudflare_url(line: &str) -> Option<String> {
     let pos = line.find(needle)?;
     // Walk backwards to the start of "https://" or "http://".
     let prefix = &line[..pos];
-    let scheme_pos = prefix.rfind("https://").or_else(|| prefix.rfind("http://"))?;
+    let scheme_pos = prefix
+        .rfind("https://")
+        .or_else(|| prefix.rfind("http://"))?;
     let after = &line[scheme_pos..];
     // Cut at the first whitespace or pipe.
     let end = after

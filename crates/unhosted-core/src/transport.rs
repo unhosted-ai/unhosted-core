@@ -79,9 +79,8 @@ pub fn cert_from_identity(identity: &Identity) -> Result<PeerIdentityCert> {
     pkcs8.extend_from_slice(&secret_bytes);
 
     let pkcs8_der = rustls_pki_types::PrivatePkcs8KeyDer::from(pkcs8);
-    let key_pair =
-        rcgen::KeyPair::from_pkcs8_der_and_sign_algo(&pkcs8_der, &rcgen::PKCS_ED25519)
-            .context("rcgen: building Ed25519 key pair")?;
+    let key_pair = rcgen::KeyPair::from_pkcs8_der_and_sign_algo(&pkcs8_der, &rcgen::PKCS_ED25519)
+        .context("rcgen: building Ed25519 key pair")?;
 
     let mut params = rcgen::CertificateParams::new(vec!["unhosted".to_string()])
         .context("rcgen: cert params")?;
@@ -179,14 +178,11 @@ impl PeerKeyVerifier {
             ));
         };
         // Sanity: the embedded key must round-trip through ed25519-dalek.
-        let _ = VerifyingKey::from_bytes(&pk).map_err(|e| {
-            rustls::Error::General(format!("peer cert Ed25519 key invalid: {e}"))
-        })?;
+        let _ = VerifyingKey::from_bytes(&pk)
+            .map_err(|e| rustls::Error::General(format!("peer cert Ed25519 key invalid: {e}")))?;
 
-        let pk_b64 = base64::engine::Engine::encode(
-            &base64::engine::general_purpose::STANDARD_NO_PAD,
-            pk,
-        );
+        let pk_b64 =
+            base64::engine::Engine::encode(&base64::engine::general_purpose::STANDARD_NO_PAD, pk);
         let trusted = self
             .registry
             .lock()
@@ -288,10 +284,11 @@ fn build_server_config(
     registry: Arc<std::sync::Mutex<PeerRegistry>>,
 ) -> Result<ServerConfig> {
     let verifier = Arc::new(PeerKeyVerifier::new(registry));
-    let mut rustls_cfg = rustls::ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
-        .with_client_cert_verifier(verifier)
-        .with_single_cert(vec![id_cert.cert.clone()], id_cert.key.clone_key())
-        .context("rustls server config")?;
+    let mut rustls_cfg =
+        rustls::ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
+            .with_client_cert_verifier(verifier)
+            .with_single_cert(vec![id_cert.cert.clone()], id_cert.key.clone_key())
+            .context("rustls server config")?;
     rustls_cfg.alpn_protocols = vec![ALPN.to_vec()];
 
     let quic_crypto = QuicServerConfig::try_from(rustls_cfg)
@@ -305,11 +302,12 @@ fn build_client_config(
     registry: Arc<std::sync::Mutex<PeerRegistry>>,
 ) -> Result<ClientConfig> {
     let verifier = Arc::new(PeerKeyVerifier::new(registry));
-    let mut rustls_cfg = rustls::ClientConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
-        .dangerous()
-        .with_custom_certificate_verifier(verifier)
-        .with_client_auth_cert(vec![id_cert.cert.clone()], id_cert.key.clone_key())
-        .context("rustls client config")?;
+    let mut rustls_cfg =
+        rustls::ClientConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
+            .dangerous()
+            .with_custom_certificate_verifier(verifier)
+            .with_client_auth_cert(vec![id_cert.cert.clone()], id_cert.key.clone_key())
+            .context("rustls client config")?;
     rustls_cfg.alpn_protocols = vec![ALPN.to_vec()];
 
     let quic_crypto = QuicClientConfig::try_from(rustls_cfg)
@@ -341,8 +339,7 @@ impl PeerEndpoint {
         let server_cfg = build_server_config(&id_cert, registry.clone())?;
         let client_cfg = build_client_config(&id_cert, registry)?;
 
-        let endpoint = Endpoint::server(server_cfg, bind_addr)
-            .context("binding quinn endpoint")?;
+        let endpoint = Endpoint::server(server_cfg, bind_addr).context("binding quinn endpoint")?;
         Ok(Self {
             endpoint,
             client_cfg,
@@ -396,7 +393,9 @@ impl PeerEndpoint {
         let (mut send, mut recv) = conn.open_bi().await.context("open bi stream")?;
         let probe = format!("ping\n{our_pubkey}\n");
         let started = std::time::Instant::now();
-        send.write_all(probe.as_bytes()).await.context("write ping")?;
+        send.write_all(probe.as_bytes())
+            .await
+            .context("write ping")?;
         send.finish().context("finish ping stream")?;
         let mut buf = Vec::with_capacity(128);
         let _ = recv.read_to_end(1024).await.map(|b| buf = b);
@@ -521,7 +520,10 @@ mod tests {
         });
 
         let rtt = ep_a.ping(addr_b, &pk_a).await.expect("ping succeeds");
-        assert!(rtt.as_secs() < 2, "ping should complete quickly on loopback");
+        assert!(
+            rtt.as_secs() < 2,
+            "ping should complete quickly on loopback"
+        );
     }
 
     #[tokio::test]
@@ -555,6 +557,9 @@ mod tests {
 
         let addr_a = ep_a.local_addr().unwrap();
         let res = ep_s.ping(addr_a, &id_stranger.public_b64()).await;
-        assert!(res.is_err(), "stranger must not be able to ping a non-pairing peer");
+        assert!(
+            res.is_err(),
+            "stranger must not be able to ping a non-pairing peer"
+        );
     }
 }

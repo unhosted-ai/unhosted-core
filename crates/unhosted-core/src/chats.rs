@@ -177,14 +177,12 @@ fn now_ms() -> u64 {
 /// (since NTFS journaling); a crash mid-write leaves the old file intact.
 fn write_atomic(path: &PathBuf, file: &ChatsFile) -> Result<()> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| {
-            format!("creating chats dir {}", parent.display())
-        })?;
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating chats dir {}", parent.display()))?;
     }
     let tmp = path.with_extension("json.tmp");
     let body = serde_json::to_vec_pretty(file).context("serializing chats")?;
-    std::fs::write(&tmp, &body)
-        .with_context(|| format!("writing {}", tmp.display()))?;
+    std::fs::write(&tmp, &body).with_context(|| format!("writing {}", tmp.display()))?;
     std::fs::rename(&tmp, path)
         .with_context(|| format!("renaming {} → {}", tmp.display(), path.display()))?;
     Ok(())

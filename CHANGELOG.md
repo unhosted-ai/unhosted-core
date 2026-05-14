@@ -6,6 +6,33 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.9] — 2026-05-14
+
+Re-release of v0.0.8 with the CI release pipeline fixed. v0.0.8 was
+tagged but never published — the Tauri updater-signing step failed
+(`incorrect updater private key password`), the four platform builds
+exited 1 before staging artifacts, and `publish release` was skipped.
+No GitHub release exists for v0.0.8.
+
+### Fixed
+- **`createUpdaterArtifacts: false`** in `tauri.conf.json` so `cargo
+  tauri build` doesn't attempt to sign the updater bundle. The
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` repo secret is wrong / rotated
+  and needs to be re-set in GitHub before re-enabling. In-app
+  auto-update is paused until then; manual reinstall via install.sh
+  works either way.
+- **`cargo fmt --check`** was failing across the workspace
+  (`unhosted-cli/src/main.rs`, `unhosted-core/src/auth.rs`, etc).
+  Reformatted in-tree to match `rustfmt` defaults.
+- **`clippy --all-targets --all-features -- -D warnings`** was failing
+  on a `doc-lazy-continuation` lint in
+  `crates/unhosted-core/src/tunnel.rs`. Added blank lines around the
+  bulleted list in `spawn_eager_watchdog`'s rustdoc so the lint
+  passes.
+
+All of v0.0.8's feature work ships under this release — see notes
+under v0.0.8 below.
+
 ## [0.0.8] — 2026-05-14
 
 Reliability + phone-onboarding pass on top of v0.0.7. The "open to
