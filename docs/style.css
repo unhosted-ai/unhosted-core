@@ -129,6 +129,22 @@ hr.divider {
   opacity: 1;
   color: var(--accent);
 }
+/* "get started" CTA in the nav — makes the primary action visible at
+   the top of the page, not just in the hero. Pill-shaped to distinguish
+   from regular nav links. */
+.nav a.nav-cta {
+  opacity: 1;
+  padding: 6px 14px;
+  background: var(--fg);
+  color: var(--bg);
+  border-radius: 999px;
+  font-weight: 500;
+  font-size: 13.5px;
+}
+.nav a.nav-cta:hover {
+  background: var(--accent, #16a34a);
+  color: var(--bg);
+}
 .nav a.active {
   opacity: 1;
   color: var(--fg);
