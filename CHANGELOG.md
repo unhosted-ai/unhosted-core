@@ -6,6 +6,30 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.11] — 2026-05-14
+
+Re-release of v0.0.10 with the publish step actually finishing, plus
+an extra hardening fix.
+
+### Fixed
+- **CI publish step.** v0.0.10's tag built all four platform artifacts
+  successfully but the final `Create GitHub release` step hit a stale
+  draft release that the bot couldn't clean up, leaving the release
+  unpublished. Draft cleaned out; fresh tag here triggers a clean run.
+
+### Added
+- **Server-side stop-guard.** `/v1/tunnel/stop` now requires the
+  header `X-Unhosted-Confirm: yes` and returns `428 Precondition
+  Required` without it. Stale browser tabs running pre-confirm-dialog
+  JS — which the daemon log proved were the source of every "phone
+  URL just stopped working" complaint — can no longer kill the
+  tunnel. The active `web/ui.js` attaches the header from
+  `stopTunnel()`; anything else 428s.
+
+### Also in this release
+- Everything from v0.0.10 (desktop-app blank-window fix in the
+  bundled placeholder, JS health-probe + retry).
+
 ## [0.0.10] — 2026-05-14
 
 Critical fix: the released v0.0.9 desktop app showed a blank window on
