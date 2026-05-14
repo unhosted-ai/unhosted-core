@@ -58,9 +58,28 @@ fn serve_path(path: &str) -> Response {
     match WebAssets::get(path) {
         Some(asset) => {
             let mime = mime_guess::from_path(path).first_or_octet_stream();
+            // HTML / JS / CSS / manifest change between releases (and on
+            // every `cargo build` during dev). WKWebView's default cache
+            // is happy to serve `no-cache` content from disk while it
+            // revalidates in the background, which surfaced as a "I
+            // shipped a UI fix but the user's WebView is still running
+            // yesterday's JS" bug across multiple sessions. `no-store,
+            // max-age=0` forces a fresh fetch on every page load so the
+            // running app always reflects the daemon's currently-served
+            // assets.
+            //
+            // Images / fonts can still cache normally — they don't
+            // change between dev iterations and re-fetching them on
+            // every load is wasteful.
+            let cache_control = match path.rsplit('.').next() {
+                Some("html") | Some("js") | Some("css") | Some("json") => {
+                    "no-store, max-age=0, must-revalidate"
+                }
+                _ => "no-cache",
+            };
             Response::builder()
                 .header(header::CONTENT_TYPE, mime.as_ref())
-                .header(header::CACHE_CONTROL, "no-cache")
+                .header(header::CACHE_CONTROL, cache_control)
                 .body(axum::body::Body::from(asset.data.into_owned()))
                 .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
         }
