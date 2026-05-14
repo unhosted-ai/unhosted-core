@@ -267,7 +267,18 @@ pub async fn serve(node: Node) -> Result<()> {
     // tunnel status the same way a manual click would.
     if node.eager_tunnel {
         let tunnel = state.tunnel.clone();
+        let upstream_url = node.llama_server_url.clone();
         tokio::spawn(async move {
+            // Don't burn a public URL on a daemon that can't serve chat.
+            // Wait for an LLM backend (configured upstream, Ollama, LM
+            // Studio, or llama-server) to be reachable before spawning
+            // cloudflared. The watchdog below keeps polling for it.
+            if upstream::select_live(&upstream_url).await.is_none() {
+                tracing::info!(
+                    "eager tunnel: skipping at boot — no LLM backend reachable yet (watchdog will retry once one comes up)"
+                );
+                return;
+            }
             tracing::info!("eager tunnel: starting cloudflared at boot");
             match tunnel.clone().start().await {
                 Ok(s) => tracing::info!(state = ?s, "eager tunnel: kicked off"),
@@ -279,7 +290,11 @@ pub async fn serve(node: Node) -> Result<()> {
         // unless the user explicitly clicked off. Survives any bug that
         // strands the state machine in a "should be running but isn't"
         // state — which is exactly what users were hitting before.
-        state.tunnel.clone().spawn_eager_watchdog();
+        // Also picks up the case where the LLM came up *after* the
+        // eager-boot skip above.
+        let watchdog_upstream = node.llama_server_url.clone();
+        let watchdog_tunnel = state.tunnel.clone();
+        watchdog_tunnel.spawn_eager_watchdog_gated(watchdog_upstream);
     }
 
     // Spawn the QUIC accept loop now that NodeState is ready. Each

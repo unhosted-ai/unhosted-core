@@ -140,6 +140,40 @@ impl TunnelManager {
         });
     }
 
+    /// Same contract as [`spawn_eager_watchdog`] but also requires the
+    /// configured LLM upstream to be reachable before reviving. This
+    /// stops the watchdog from spinning up a public URL on a daemon
+    /// that has no LLM behind it (which would just 502 on every
+    /// request from the phone).
+    pub fn spawn_eager_watchdog_gated(self: Arc<Self>, upstream_url: String) {
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(WATCHDOG_INITIAL_DELAY_SECS)).await;
+            loop {
+                let needs_revive = {
+                    let inner = self.inner.lock().await;
+                    let dead =
+                        matches!(inner.state, TunnelState::Idle | TunnelState::Failed { .. });
+                    dead && !inner.user_stopped
+                };
+                if needs_revive {
+                    if crate::upstream::select_live(&upstream_url).await.is_some() {
+                        tracing::warn!(
+                            "tunnel watchdog (gated): LLM reachable and tunnel dead — restarting"
+                        );
+                        if let Err(e) = self.clone().start().await {
+                            tracing::warn!(error = %e, "tunnel watchdog: start failed");
+                        }
+                    } else {
+                        tracing::debug!(
+                            "tunnel watchdog (gated): tunnel dead but no LLM upstream — staying down"
+                        );
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(WATCHDOG_INTERVAL_SECS)).await;
+            }
+        });
+    }
+
     /// Spawn cloudflared. Returns immediately with `Starting`; the URL
     /// becomes available a second or two later once cloudflared logs
     /// the `*.trycloudflare.com` line.

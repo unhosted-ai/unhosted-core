@@ -625,7 +625,48 @@ async function refreshStatus() {
   }
 }
 
+// Gates the share UI (tunnel toggle, QR panel, developer panel) based on
+// whether the daemon can actually serve chat. There's no point handing
+// out a public URL when the underlying LLM is unreachable. Called from
+// renderStatus on every poll so it stays in sync as backends come up.
+let shareGatedReason = null;
+function setShareGated(gated, ctx = {}) {
+  const reason = gated
+    ? (ctx.discovered && ctx.discovered.length > 0
+        ? "no local LLM — pair a peer on your network first"
+        : "no LLM detected — start ollama, llama-server, or lm studio to enable sharing")
+    : null;
+  // Only mutate DOM when the gate-state or reason actually changed; avoids
+  // hammering the layout on every 8s status poll.
+  if (reason === shareGatedReason) return;
+  shareGatedReason = reason;
+  if (els.tunnelToggle) els.tunnelToggle.disabled = !!gated;
+  if (els.tunnelStatus && gated) {
+    els.tunnelStatus.textContent = reason;
+    els.tunnelStatus.dataset.state = "gated";
+  }
+  if (els.tunnelLink) els.tunnelLink.hidden = gated || els.tunnelLink.hidden;
+  if (els.tunnelWarn) els.tunnelWarn.hidden = gated || els.tunnelWarn.hidden;
+  if (els.tunnelProgress) els.tunnelProgress.hidden = gated || els.tunnelProgress.hidden;
+  if (els.phoneSection) els.phoneSection.hidden = gated;
+  const developerSection = document.getElementById("developer-section");
+  if (developerSection) developerSection.hidden = gated;
+}
+
 function renderStatus(s) {
+  // Compute LLM readiness from status. The share/tunnel UI gates on
+  // this — there's no point handing out a public URL to a daemon that
+  // can't actually serve chat. Routes:
+  //   1. configured upstream is reachable          → ready, local
+  //   2. another known backend is reachable        → ready, will auto-route
+  //   3. at least one paired peer is live          → ready, will proxy
+  //   4. otherwise                                 → NOT ready, hide share
+  const localReady = !!s.upstream.reachable;
+  const altReady = (s.upstream.backends || []).some((b) => b.reachable);
+  const peerReady = (s.peers || []).some((p) => p.live || p.trusted);
+  const llmReady = localReady || altReady || peerReady;
+  setShareGated(!llmReady, { localReady, altReady, peerReady, discovered: s.discovered });
+
   if (s.upstream.reachable) {
     setStatusDot("ok", `node ready · v${s.node.version}`);
     els.connModel.textContent = s.upstream.model || "(model not reported)";
