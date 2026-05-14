@@ -569,6 +569,14 @@ hr.divider {
   max-width: 92vw;
   scroll-snap-align: start;
 }
+/* Two-card variant — install moved up to the hero, so the rail dot
+   strip + horizontal-scroll affordance are overkill. Stack to a row
+   that doesn't horizontal-scroll, equal-width cards on desktop. */
+.qs-steps-2 { overflow-x: visible; scroll-snap-type: none; }
+.qs-steps-2 .qs-step { flex: 1 1 0; max-width: none; }
+@media (max-width: 760px) {
+  .qs-steps-2 { flex-direction: column; gap: 12px; }
+}
 @media (min-width: 1100px) {
   /* on wide screens, give each card a fair share of the row so
      all three fit comfortably without scrolling. */

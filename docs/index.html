@@ -84,48 +84,27 @@
     </div>
   </section>
 
-  <!-- quickstart: three commands to get inference flowing.
-       A progress strip at the top connects the three steps so the
-       flow reads as 01 → 02 → 03 instead of three siblings. Motion
-       animates the connector line growing through the dots when the
-       section scrolls into view, and the cards stagger in below. -->
+  <!-- after-install steps: install lives in the hero now, so this
+       section is the *what next* — pick a runtime, start serving.
+       Two numbered cards instead of three; the dot rail is gone
+       since it was load-bearing only when there were three siblings. -->
   <section class="quickstart" id="quickstart">
     <div class="head">
-      <h3>quickstart</h3>
+      <h3>after install</h3>
       <a class="view-all" href="docs.html#quickstart">long version with screenshots</a>
     </div>
 
-    <!-- timeline strip: three numbered dots connected by a line.
-         data-qs-line is animated to grow from 0 to 100% by motion.js. -->
-    <div class="qs-rail" aria-hidden="true">
-      <div class="qs-rail-track">
-        <div class="qs-rail-fill" data-qs-fill></div>
-      </div>
-      <div class="qs-rail-dots">
-        <a href="#qs-1" class="qs-rail-dot" data-qs-dot="1"><span>01</span><em>install</em></a>
-        <a href="#qs-2" class="qs-rail-dot" data-qs-dot="2"><span>02</span><em>backend</em></a>
-        <a href="#qs-3" class="qs-rail-dot" data-qs-dot="3"><span>03</span><em>serve</em></a>
-      </div>
-    </div>
-
-    <ol class="qs-steps">
+    <ol class="qs-steps qs-steps-2">
       <li class="qs-step" id="qs-1">
         <div class="qs-num">01</div>
-        <h4>install unhosted</h4>
-        <p>one binary, ~12&nbsp;mb. cli daemon + native desktop shell.</p>
-        <pre><code>curl -fsSL https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.sh | sh</code></pre>
-        <p class="qs-note">windows: <code>irm …/install.ps1 | iex</code>. or <a href="#download">grab the tarball</a>.</p>
-      </li>
-      <li class="qs-step" id="qs-2">
-        <div class="qs-num">02</div>
         <h4>start a model runtime</h4>
         <p>pick one. all three speak the same openai-compatible api.</p>
         <pre><code>brew install llama.cpp &amp;&amp; \
 unhosted pull llama3.2:3b</code></pre>
         <p class="qs-note">already running ollama or lm studio? <code>unhosted doctor</code> finds them.</p>
       </li>
-      <li class="qs-step" id="qs-3">
-        <div class="qs-num">03</div>
+      <li class="qs-step" id="qs-2">
+        <div class="qs-num">02</div>
         <h4>serve + chat</h4>
         <p>daemon on <code>:7777</code>, ui in your browser.</p>
         <pre><code>unhosted serve
