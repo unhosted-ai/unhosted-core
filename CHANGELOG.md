@@ -6,6 +6,81 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.8] — 2026-05-14
+
+Reliability + phone-onboarding pass on top of v0.0.7. The "open to
+internet" path used to fail in a dozen subtle ways and the phone PWA
+assumed you already knew the URL. Both are fixed.
+
+### Added
+- **Live QR code in the sidebar** ("send to my phone") encoding the
+  active tunnel URL with bearer token baked in. Scan with the phone's
+  camera → URL opens → token auto-bootstraps → chat starts. Zero typing.
+- **"For developers" panel + modal** showing the daemon's base URL,
+  bearer token, and copy-pasteable `curl` / `python` / `javascript`
+  snippets pre-filled with the user's actual endpoint and token.
+- **`--eager-tunnel` flag (and `UNHOSTED_EAGER_TUNNEL=1` env)** for
+  `unhosted serve`. Spawns cloudflared at boot so the public URL is
+  already live by the time the UI opens.
+- **Auto-restart supervisor** for cloudflared (revives unexpected exits
+  with a 3s backoff, up to 3 attempts in a row).
+- **Eager-tunnel watchdog** polling every 30s to revive the tunnel from
+  Idle/Failed states — unless the user explicitly clicked stop.
+- **Toast notification system** for tunnel state changes, URL rotation,
+  copy success/failure, and other transient feedback.
+- **In-app confirm modal** replacing `window.confirm()` (which silently
+  returns false in WKWebView). Used by delete-chat, clear-chats, and
+  the new turn-off-tunnel guard.
+- **Bundle scripts for Linux + Windows** (`bundle-linux.sh`,
+  `bundle-windows.ps1`) and a local cross-compile recipe via `zig` +
+  `cargo-zigbuild` in `RELEASING.md`.
+
+### Changed
+- **Default chat model substitution.** `/v1/chat/completions` rewrites
+  placeholder model names ("local" / "default" / "auto" / missing) to
+  the upstream's actual model id. Lets the docs snippet work on Ollama
+  and LM Studio, which strictly resolve names.
+- **Tunnel toggle now confirms** before turning off a live tunnel.
+  Starting from idle stays a single click.
+- **Internet preflight before cloudflared spawn** (1.5s HEAD to
+  `cloudflare.com`); fails fast with "no internet" instead of hanging.
+- **Shared `reqwest::Client`** in `NodeState.http` for HTTP keep-alive
+  across chat-completion turns.
+- **`Discovery` switched from `Mutex<HashMap>` to `RwLock<HashMap>`** —
+  reads dominate, writes are rare mDNS events.
+- **App icons regenerated from a single SVG source** so the macOS Dock
+  icon matches Tauri's runtime icon — fixes the "icon morphs between
+  rounded plate and square blob during launch" bug.
+- **Tunnel UI polling hardened** against WKWebView's setInterval
+  throttling: two cadences (1.5s fast / 8s slow) plus window focus,
+  click-to-refresh on the tunnel header, and an automatic refetch
+  800ms after every state-change toast.
+- **Mobile / PWA polish.** Safe-area-aware composer, `100dvh` for
+  keyboard-aware viewport, 44pt minimum tap targets, hover-only styles
+  suppressed on touch. Manifest's primary icon is the rounded plate
+  so iOS "Add to Home Screen" matches the Dock icon.
+
+### Fixed
+- **Delete-chat and clear-chats silently aborting** in the desktop app.
+- **Send/stop button swap** showing both buttons at once (`display:
+  inline-flex` was beating `[hidden]`).
+- **Stale dock icon after upgrade** — duplicate Launch Services
+  registrations of the same bundle id from `dist/` and `/Applications/`.
+- **`/v1/chat/completions` returning 502 over the tunnel** with the
+  documented `model: "local"` placeholder against Ollama. Fixed by
+  the model-name rewrite above.
+
+### Reliability
+- **Diagnostic logging on every `POST /v1/tunnel/stop`** (remote addr,
+  user-agent, referer, cf-connecting-ip) so unexpected stops can be
+  traced.
+
+### Performance / cache
+- **UI assets now use `Cache-Control: no-store, max-age=0,
+  must-revalidate`** for HTML/JS/CSS/JSON. WKWebView's interpretation of
+  the previous `no-cache` was serving stale-while-revalidate, which kept
+  shipping yesterday's JS to the user. Binary assets keep `no-cache`.
+
 ## [0.0.7] — 2026-05-12
 
 ### Added
