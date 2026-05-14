@@ -2007,6 +2007,30 @@ async fn tunnel_stop_handler(
 ) -> Result<axum::Json<tunnel::TunnelState>, StatusCode> {
     let outcome = state.classify(&headers, Some(remote.ip()), &[]);
     require_auth(&outcome, true)?;
+    // Log the caller so we can identify who keeps killing the tunnel.
+    // The tunnel has been getting stop()'d unexpectedly across hours;
+    // recording the remote + UA + referer + cf-connecting-ip on every
+    // explicit stop tells us whether it's the WebView, a stale tab, a
+    // remote phone, or an external script.
+    let ua = headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("-");
+    let referer = headers
+        .get("referer")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("-");
+    let cf_ip = headers
+        .get("cf-connecting-ip")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("-");
+    tracing::warn!(
+        remote = %remote,
+        cf_connecting_ip = %cf_ip,
+        user_agent = %ua,
+        referer = %referer,
+        "POST /v1/tunnel/stop — identifying caller"
+    );
     let s = state.tunnel.stop().await.map_err(|e| {
         tracing::error!(error = %e, "tunnel stop failed");
         StatusCode::INTERNAL_SERVER_ERROR

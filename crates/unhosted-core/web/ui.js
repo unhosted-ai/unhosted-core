@@ -1188,9 +1188,29 @@ if (els.tunnelToggle) {
     try {
       const cur = await fetchTunnel();
       const isOn = cur && (cur.state === "running" || cur.state === "starting");
-      const next = isOn ? await stopTunnel() : await startTunnel();
-      renderTunnel(next);
-      if (next && next.state === "starting") setTunnelPolling("fast"); else setTunnelPolling("slow");
+      if (isOn) {
+        // Confirm before stopping a live tunnel. Without this, a single
+        // accidental tap (or a click from a stale browser tab still
+        // bound to /v1/tunnel) kills the tunnel and rotates the URL,
+        // breaking every share. Daemon logs revealed this was happening
+        // unprompted across hours.
+        const ok = await confirmDialog({
+          title: "turn off tunnel?",
+          message: cur.state === "running"
+            ? "the public url will stop working and any phone using it will lose connection."
+            : "this will cancel the tunnel that's starting up.",
+          confirmLabel: "turn off",
+          danger: true,
+        });
+        if (!ok) return;
+        const next = await stopTunnel();
+        renderTunnel(next);
+        setTunnelPolling("slow");
+      } else {
+        const next = await startTunnel();
+        renderTunnel(next);
+        if (next && next.state === "starting") setTunnelPolling("fast"); else setTunnelPolling("slow");
+      }
     } finally {
       els.tunnelToggle.disabled = false;
     }
