@@ -6,6 +6,31 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.14] — 2026-05-14
+
+### Fixed
+- **Blank window on first launch (real-real fix this time, Rust-side).**
+  Both v0.0.10 (embedded JS probe page) and v0.0.13 (`url` field removed
+  so the probe page would actually load) tried to fix this inside the
+  WebView. Both failed: WKWebView throttled the `setTimeout` chain and
+  the probe page wasn't reliably running. We now do the wait Rust-side
+  in `unhosted-desktop/src/main.rs` *before* Tauri ever opens the
+  WebView — `wait_for_daemon` polls `/health` every 200ms for up to 60s,
+  and only then calls `Tauri::run`. The WebView always opens against a
+  live daemon, so the first paint is always the real UI.
+
+### Added
+- **Auto-spawn the daemon from the .app.** If the daemon isn't already
+  listening when the user opens the .app, the desktop shell now
+  searches a short whitelist of standard install locations
+  (`/usr/local/bin`, `/opt/homebrew/bin`, `$HOME/.local/bin`,
+  `$HOME/.cargo/bin`, `/usr/bin`) for an `unhosted` binary and spawns
+  `unhosted serve` as a detached background process. Users who
+  installed via `install.sh` no longer need to keep a terminal running
+  to use the .app. The spawned daemon is intentionally not tied to the
+  .app's lifetime so the phone PWA / API / cron jobs keep working when
+  the user closes the desktop window.
+
 ## [0.0.13] — 2026-05-14
 
 ### Fixed
