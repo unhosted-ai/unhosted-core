@@ -6,6 +6,21 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.13] — 2026-05-14
+
+### Fixed
+- **Blank window on first launch (real fix this time).** v0.0.10's
+  commit message claimed to fix the blank-window bug by adding a JS
+  health-probe page to `crates/unhosted-desktop/dist/index.html`, but
+  only bumped the version in `tauri.conf.json` — it never removed the
+  `url: "http://127.0.0.1:7777"` window field. With `url` set, Tauri
+  navigates the WebView directly at the daemon URL and the bundled
+  probe page is dead code. When the daemon was down at launch (e.g.
+  user installs + launches before running `unhosted serve`), WKWebView
+  showed a blank error page that never retried. Removed the `url`
+  field so Tauri now loads the bundled `dist/index.html` first, which
+  polls `/health` and `location.replace`s to the daemon once it's up.
+
 ## [0.0.12] — 2026-05-14
 
 ### Fixed
