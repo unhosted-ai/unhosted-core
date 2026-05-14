@@ -2022,10 +2022,6 @@ async fn tunnel_stop_handler(
     let outcome = state.classify(&headers, Some(remote.ip()), &[]);
     require_auth(&outcome, true)?;
     // Log the caller so we can identify who keeps killing the tunnel.
-    // The tunnel has been getting stop()'d unexpectedly across hours;
-    // recording the remote + UA + referer + cf-connecting-ip on every
-    // explicit stop tells us whether it's the WebView, a stale tab, a
-    // remote phone, or an external script.
     let ua = headers
         .get("user-agent")
         .and_then(|v| v.to_str().ok())
@@ -2038,13 +2034,31 @@ async fn tunnel_stop_handler(
         .get("cf-connecting-ip")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("-");
+    let confirm = headers
+        .get("x-unhosted-confirm")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
     tracing::warn!(
         remote = %remote,
         cf_connecting_ip = %cf_ip,
         user_agent = %ua,
         referer = %referer,
+        has_confirm = !confirm.is_empty(),
         "POST /v1/tunnel/stop — identifying caller"
     );
+    // Server-side guard: require an explicit X-Unhosted-Confirm: yes header
+    // before honoring a stop. Stale tabs running pre-confirm JS, accidental
+    // scripts, and anything other than the current UI cannot kill the
+    // tunnel anymore. The active web/ui.js attaches this header from the
+    // toggle handler immediately after the user confirms the in-app modal.
+    if confirm != "yes" {
+        tracing::warn!(
+            remote = %remote,
+            user_agent = %ua,
+            "tunnel stop refused: missing X-Unhosted-Confirm: yes header (caller is likely stale UI)"
+        );
+        return Err(StatusCode::PRECONDITION_REQUIRED);
+    }
     let s = state.tunnel.stop().await.map_err(|e| {
         tracing::error!(error = %e, "tunnel stop failed");
         StatusCode::INTERNAL_SERVER_ERROR

@@ -1087,7 +1087,16 @@ async function startTunnel() {
 
 async function stopTunnel() {
   try {
-    const r = await fetch("/v1/tunnel/stop", { method: "POST" });
+    // The X-Unhosted-Confirm header is now required by the daemon's
+    // /v1/tunnel/stop. It's a server-side guard against stale tabs
+    // (or anything else running pre-confirm-dialog JS) accidentally
+    // killing the tunnel. The current UI always sends this header,
+    // and is the only thing the UI does so — anything that lands in
+    // the stop endpoint without it gets 428'd.
+    const r = await fetch("/v1/tunnel/stop", {
+      method: "POST",
+      headers: { "X-Unhosted-Confirm": "yes" },
+    });
     return r.ok ? await r.json() : null;
   } catch (e) { return null; }
 }
