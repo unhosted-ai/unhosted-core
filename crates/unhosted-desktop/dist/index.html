@@ -3,21 +3,87 @@
 <head>
   <meta charset="utf-8">
   <title>unhosted</title>
-  <meta http-equiv="refresh" content="0; url=http://127.0.0.1:7777">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body { font-family: system-ui, -apple-system, sans-serif; background: #F5F5F0; color: #222; margin: 0; padding: 48px; }
     .box { max-width: 480px; margin: 80px auto; text-align: center; }
-    h1 { font-size: 22px; font-weight: 500; }
-    p { font-size: 14px; line-height: 1.5; color: #666; }
-    code { background: #e9e9e2; padding: 2px 6px; border-radius: 3px; }
+    h1 { font-size: 22px; font-weight: 500; margin-bottom: 6px; }
+    p  { font-size: 14px; line-height: 1.5; color: #666; }
+    code { background: #e9e9e2; padding: 2px 6px; border-radius: 3px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .spinner {
+      display: inline-block; width: 14px; height: 14px;
+      border: 2px solid #cccccc; border-top-color: #222;
+      border-radius: 50%; vertical-align: -2px; margin-right: 6px;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-color-scheme: dark) {
+      body { background: #0A0A0A; color: #eee; }
+      p { color: #999; }
+      code { background: #1a1a1a; }
+    }
   </style>
 </head>
 <body>
   <div class="box">
     <h1>unhosted</h1>
-    <p>looking for the daemon at <code>http://127.0.0.1:7777</code>…</p>
-    <p>if this page doesn't redirect, the daemon isn't running. open a terminal and run:</p>
-    <p><code>unhosted serve</code></p>
+    <p id="status"><span class="spinner"></span>connecting to the daemon at <code id="target">http://127.0.0.1:7777</code>…</p>
+    <p id="hint" style="margin-top:32px;font-size:12px;color:#999;">
+      if this takes more than a few seconds, open a terminal and run <code>unhosted serve</code>.
+    </p>
   </div>
+  <script>
+    // The desktop shell bundles this placeholder via Tauri's frontendDist.
+    // It loads at tauri://localhost/index.html and needs to navigate the
+    // WebView to the daemon's actual UI at http://127.0.0.1:7777.
+    //
+    // The previous version used <meta http-equiv="refresh"> for that, but
+    // Tauri 2's WebView silently drops the cross-origin HTTP redirect on
+    // macOS (and apparently Linux) — leaving a blank window. JS-based
+    // navigation works fine, and lets us:
+    //   - probe /health first so we don't navigate to a dead daemon
+    //   - retry with a backoff if the daemon is slow to come up
+    //   - surface a real error to the user instead of a blank screen
+    //
+    // The UNHOSTED_NODE_URL env var (set by the Rust main.rs before
+    // launching the WebView) overrides the default; we read it from
+    // a <meta> tag the launcher injects, falling back to localhost.
+    var target = (document.querySelector('meta[name="unhosted-node-url"]') || {}).content
+                 || "http://127.0.0.1:7777";
+    document.getElementById("target").textContent = target;
+
+    var statusEl = document.getElementById("status");
+    var hintEl   = document.getElementById("hint");
+    var attempts = 0;
+    var maxFast  = 20;   // 20 * 250ms  = 5s
+    var slowGap  = 1500; // then every 1.5s indefinitely
+
+    function tick() {
+      attempts += 1;
+      // We use fetch instead of straight navigation so we know when the
+      // daemon is actually answering before we navigate.
+      fetch(target + "/health", { cache: "no-store" })
+        .then(function (r) {
+          if (r.ok) {
+            // Daemon is up — navigate the WebView to the real UI.
+            window.location.replace(target);
+          } else {
+            schedule(attempts < maxFast ? 250 : slowGap);
+          }
+        })
+        .catch(function () {
+          // Probe failed (connection refused etc) — keep retrying.
+          if (attempts === Math.min(maxFast, 8)) {
+            hintEl.innerHTML =
+              "still waiting on the daemon. " +
+              "open a terminal and run <code>unhosted serve</code>, " +
+              "then this window will catch up.";
+          }
+          schedule(attempts < maxFast ? 250 : slowGap);
+        });
+    }
+    function schedule(ms) { setTimeout(tick, ms); }
+    tick();
+  </script>
 </body>
 </html>

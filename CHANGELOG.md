@@ -6,6 +6,32 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.10] — 2026-05-14
+
+Critical fix: the released v0.0.9 desktop app showed a blank window on
+both macOS and Linux. The cross-origin meta-refresh in the bundled
+placeholder index.html was being silently dropped by Tauri 2's
+WebView, so the redirect from `tauri://localhost/` to
+`http://127.0.0.1:7777` never fired. The daemon's UI itself was fine
+(reachable in Safari/Chrome at the same URL); only the bundled .app
+launcher was broken.
+
+### Fixed
+- **`crates/unhosted-desktop/dist/index.html`** — replaced the
+  `<meta http-equiv="refresh">` redirect with a JS health-probe loop.
+  It pings `/health` every 250ms for the first 5s then every 1.5s,
+  navigates the WebView the moment the daemon answers, and surfaces a
+  real "still waiting — run `unhosted serve`" hint instead of a blank
+  page when the daemon isn't up.
+
+  Also adds a dark-mode style block for the placeholder so the
+  pre-connect splash matches the system theme. Listens for an optional
+  `<meta name="unhosted-node-url">` override the Rust launcher can
+  inject so non-default ports work end-to-end.
+
+### Also in this release
+- All v0.0.9 features (CI re-release of v0.0.8, see notes below).
+
 ## [0.0.9] — 2026-05-14
 
 Re-release of v0.0.8 with the CI release pipeline fixed. v0.0.8 was
