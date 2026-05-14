@@ -1104,19 +1104,30 @@ function renderTunnel(s) {
   const state = s.state;
   // Transition notifications — fire once per state change, not on every poll.
   const url = s.url || null;
+  let liveStateChanged = false;
   if (lastTunnelState !== null) {
     if (state === "running" && lastTunnelState !== "running") {
       notify("tunnel live — your phone can chat with this mac now", { level: "success", key: "tunnel" });
+      liveStateChanged = true;
     } else if (state === "running" && url && lastTunnelUrl && url !== lastTunnelUrl) {
       notify("tunnel url rotated — re-scan the qr on your phone", { level: "info", key: "tunnel", duration: 6000 });
+      liveStateChanged = true;
     } else if (state === "failed" && lastTunnelState !== "failed") {
       notify("tunnel failed: " + (s.error || "unknown"), { level: "error", key: "tunnel", duration: 6000 });
+      liveStateChanged = true;
     } else if (state === "idle" && (lastTunnelState === "running" || lastTunnelState === "starting")) {
       notify("tunnel is off — your daemon is local-only", { level: "info", key: "tunnel" });
+      liveStateChanged = true;
     }
   }
   lastTunnelState = state;
   lastTunnelUrl = url;
+  // After a state transition that emitted a toast, schedule a quick
+  // second poll so the inline UI can't drift from what the toast just
+  // claimed. Belt and suspenders against any WKWebView timer throttling.
+  if (liveStateChanged) {
+    setTimeout(() => { refreshTunnelNow(); }, 800);
+  }
 
   if (state === "running") {
     const token = getToken() || "";
@@ -1180,6 +1191,32 @@ function setTunnelPolling(mode) {
     if (s && s.state === "starting" && mode !== "fast") setTunnelPolling("fast");
     else if (s && s.state !== "starting" && mode === "fast") setTunnelPolling("slow");
   }, interval);
+}
+
+// One-shot force refresh of tunnel state. Used by visibilitychange,
+// window focus, and "click the tunnel panel" — any moment the user
+// gives us reason to suspect our cached UI may be stale (WKWebView
+// throttles setInterval aggressively when the window isn't focused).
+async function refreshTunnelNow() {
+  const s = await fetchTunnel();
+  if (s) renderTunnel(s);
+  return s;
+}
+
+// Re-sync on window focus too — visibilitychange only fires when the
+// window goes hidden/visible (e.g. tab switch in a browser). For our
+// desktop WebView the user often just clicks another macOS app while
+// our window is still "visible". `focus` covers that case.
+window.addEventListener("focus", () => { refreshTunnelNow(); });
+
+// Manual escape hatch: clicking the tunnel section header re-syncs
+// immediately. Belt and suspenders for the rare case both polling
+// and focus events failed to wake us up.
+const tunnelHeader = document.querySelector("#tunnel-section > h4");
+if (tunnelHeader) {
+  tunnelHeader.style.cursor = "pointer";
+  tunnelHeader.title = "click to refresh tunnel state";
+  tunnelHeader.addEventListener("click", () => { refreshTunnelNow(); });
 }
 
 if (els.tunnelToggle) {
