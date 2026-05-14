@@ -136,6 +136,30 @@ if [ "$PLATFORM" = "linux" ] && [ -x "$INSTALL_DIR/unhosted-desktop" ]; then
   echo "    Debian/Ubuntu:  sudo apt install libgtk-3-0 libsoup-3.0-0 libwebkit2gtk-4.1-0"
   echo "    Fedora:         sudo dnf install gtk3 libsoup3 webkit2gtk4.1"
   echo "    Arch:           sudo pacman -S gtk3 libsoup3 webkit2gtk-4.1"
+
+  # ---- Linux systemd user service ------------------------------------------
+  # Without this, users tend to run `unhosted serve` in a terminal (or worse:
+  # a VS Code integrated terminal). Close the terminal and the daemon dies,
+  # taking the tunnel and chat sync with it. Drop the unit file and tell
+  # the user how to enable it persistently — same pattern as e.g. ollama's
+  # installer.
+  SERVICE_SRC="$(find "$TMP" -type f -name 'unhosted.service' | head -1)"
+  if [ -n "$SERVICE_SRC" ]; then
+    SYSTEMD_DIR="$HOME/.config/systemd/user"
+    mkdir -p "$SYSTEMD_DIR"
+    # Rewrite ExecStart so the unit doesn't depend on $PATH at boot.
+    sed "s|^ExecStart=.*|ExecStart=$INSTALL_DIR/unhosted serve|" \
+      "$SERVICE_SRC" > "$SYSTEMD_DIR/unhosted.service"
+    echo "  installed: $SYSTEMD_DIR/unhosted.service"
+    echo
+    echo "  to run unhosted as a background service (survives terminal/VS Code closing):"
+    echo "    systemctl --user daemon-reload"
+    echo "    systemctl --user enable --now unhosted"
+    echo "    journalctl --user -u unhosted -f         # follow logs"
+    echo
+    echo "  to keep it running even when logged out (Linux):"
+    echo "    sudo loginctl enable-linger \$USER"
+  fi
 fi
 
 # ---- macOS .app install (optional, separate asset) --------------------------
