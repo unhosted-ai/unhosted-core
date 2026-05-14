@@ -58,42 +58,30 @@
     </nav>
   </header>
 
-  <!-- pitch: lede, primary CTAs, install one-liner, hardware list -->
+  <!-- pitch: tightened above-the-fold. One line on what unhosted is,
+       the install command immediately copyable, then a compact "runs on"
+       row. The deep hardware + runtime tables now live in #download. -->
   <section class="pitch">
     <div class="lede">
       <h2>
-        you have
-        <br>hardware
+        AI on hardware
+        <br>you own.
         <span class="badges">
           <span class="badge">open source</span>
           <span class="badge">agpl-3.0</span>
         </span>
       </h2>
-      <p class="sub">we build the software that pools it into one inference cluster — local, trusted, and public. one daemon per device, end-to-end encryption between paired peers, no server in the middle.</p>
+      <p class="sub">one daemon per device pools your hardware into a private inference cluster. local-first, trusted between paired peers, no server in the middle.</p>
 
-      <div class="hero-cta">
-        <a class="btn btn-primary" href="#download">download</a>
-        <a class="btn-link" href="#quickstart">quickstart →</a>
+      <div class="hero-install">
+        <pre class="hero-install-cmd"><code>curl -fsSL https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.sh | sh</code><button class="hero-install-copy" type="button" aria-label="copy install command" data-copy="curl -fsSL https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.sh | sh">copy</button></pre>
+        <p class="hero-install-note">windows: <code>irm …/install.ps1 | iex</code> · or <a href="#download">grab the bundle</a>.</p>
       </div>
-    </div>
 
-    <aside class="lede-side">
-      <h3 class="side-head">supported hardware</h3>
-      <ul class="hardware-list" aria-label="supported hardware">
-        <li>m-series mac</li>
-        <li>rtx 4090</li>
-        <li>rtx 5090</li>
-        <li>amd / rocm</li>
-        <li>raspberry pi 5</li>
+      <ul class="hero-runs-on" aria-label="runs on">
+        <li>m-series mac</li><li>rtx 4090/5090</li><li>amd · rocm</li><li>raspberry pi 5</li>
       </ul>
-      <h3 class="side-head side-head-tight">requires a runtime</h3>
-      <ul class="runtime-list">
-        <li><strong>llama.cpp</strong> · default · port 8080</li>
-        <li><strong>ollama</strong> · port 11434</li>
-        <li><strong>lm studio</strong> · port 1234</li>
-      </ul>
-      <p class="side-note">the daemon auto-detects whichever is running. run <code>unhosted doctor</code> to check.</p>
-    </aside>
+    </div>
   </section>
 
   <!-- quickstart: three commands to get inference flowing.
@@ -1334,6 +1322,27 @@ $ unhosted run llama3.1:70b "..."
             }
           });
         }
+      });
+    });
+  </script>
+
+  <!-- Hero install command: click-to-copy. Tiny enough to keep inline.
+       Bails silently if the Clipboard API isn't available (older browsers,
+       insecure-context pages) — the command stays selectable anyway. -->
+  <script>
+    document.querySelectorAll(".hero-install-copy").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var text = btn.getAttribute("data-copy") || "";
+        if (!navigator.clipboard) return;
+        navigator.clipboard.writeText(text).then(function () {
+          var prev = btn.textContent;
+          btn.textContent = "copied";
+          btn.setAttribute("data-copied", "1");
+          setTimeout(function () {
+            btn.textContent = prev;
+            btn.removeAttribute("data-copied");
+          }, 1400);
+        });
       });
     });
   </script>

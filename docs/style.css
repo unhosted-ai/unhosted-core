@@ -146,13 +146,97 @@ hr.divider {
 /* --- PITCH ---------------------------------------------------------------- */
 
 .pitch {
-  display: grid;
-  grid-template-columns: 1fr 280px;
-  gap: 64px;
+  /* Was a two-col grid (lede + hardware-list aside). The aside moved
+     to #download to clear the above-the-fold space for the install
+     command. Now a single-column lede capped to ~860px so the
+     install one-liner doesn't stretch across an ultrawide. */
+  display: block;
   padding: 80px var(--pad) 64px;
   max-width: var(--max);
   margin: 0 auto;
-  align-items: end;
+}
+.lede { max-width: 860px; }
+
+.hero-install {
+  margin: 32px 0 18px;
+  max-width: 720px;
+}
+.hero-install-cmd {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 12px 14px 12px 18px;
+  background: var(--surface, #efefe9);
+  border: 1px solid var(--line, #d9d9d2);
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13.5px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.hero-install-cmd code {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  flex: 1;
+}
+.hero-install-copy {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  border: 1px solid var(--line-strong, #c4c4bd);
+  border-radius: 6px;
+  background: var(--bg, #fff);
+  color: var(--fg, #222);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+.hero-install-copy:hover { background: var(--fg, #222); color: var(--bg, #fff); border-color: var(--fg, #222); }
+.hero-install-copy[data-copied="1"] { background: var(--accent, #16a34a); color: var(--bg, #fff); border-color: var(--accent, #16a34a); }
+.hero-install-note {
+  margin: 8px 4px 0;
+  font-size: 12px;
+  color: var(--mute, #777);
+}
+.hero-install-note code {
+  font-size: 11.5px;
+  background: var(--surface, #efefe9);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.hero-runs-on {
+  list-style: none;
+  padding: 0;
+  margin: 24px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12.5px;
+}
+.hero-runs-on li {
+  padding: 5px 11px;
+  background: var(--surface, #efefe9);
+  border: 1px solid var(--line, #d9d9d2);
+  border-radius: 999px;
+  color: var(--mute-strong, #555);
+}
+.hero-runs-on::before {
+  content: "runs on";
+  align-self: center;
+  margin-right: 6px;
+  color: var(--mute, #777);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 760px) {
+  .hero-install-cmd { font-size: 12px; padding: 10px 12px; }
+  .hero-install-copy { padding: 6px 10px; font-size: 11.5px; }
 }
 
 .lede h2 {
