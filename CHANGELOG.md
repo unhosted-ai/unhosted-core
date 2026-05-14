@@ -6,6 +6,20 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.12] — 2026-05-14
+
+### Fixed
+- **Missing app icon on macOS Dock / Finder / cmd-tab switcher.**
+  `crates/unhosted-desktop/Info.plist` said `CFBundleIconFile =
+  "unhosted"` (expecting `Resources/unhosted.icns`), but Tauri's
+  bundler writes the icon as `Resources/icon.icns`. macOS couldn't
+  find the named file and fell back to the generic application icon.
+  Fixed by changing `CFBundleIconFile` to `"icon"` to match what
+  Tauri actually produces.
+- **`CFBundleVersion` was hardcoded at `0.0.7`** in the manual
+  `Info.plist` and bled through into every Tauri-built release since.
+  Now matches the workspace version (0.0.12).
+
 ## [0.0.11] — 2026-05-14
 
 Re-release of v0.0.10 with the publish step actually finishing, plus

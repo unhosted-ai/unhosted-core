@@ -11,11 +11,11 @@
   <key>CFBundleExecutable</key>
   <string>unhosted-desktop</string>
   <key>CFBundleIconFile</key>
-  <string>unhosted</string>
+  <string>icon</string>
   <key>CFBundleVersion</key>
-  <string>0.0.7</string>
+  <string>0.0.12</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.0.7</string>
+  <string>0.0.12</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleSignature</key>
