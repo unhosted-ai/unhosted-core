@@ -152,6 +152,15 @@ struct NodeState {
     /// across chat requests instead of TCP handshake per turn. Reqwest
     /// itself is internally an Arc, so cloning it is cheap.
     http: reqwest::Client,
+    /// Per-chat in-flight summarizer task handles, keyed by `chat_id`.
+    /// Used to debounce auto-summarization: every `chats_upsert_handler`
+    /// call cancels the previous task for the same chat (if any) and
+    /// spawns a new one that sleeps before summarizing. The net effect
+    /// is "summarize the chat ~30 s after the user stops typing", so
+    /// long conversations don't trigger N upstream-LLM round trips,
+    /// just one. Memory feature is the only consumer today.
+    summarize_inflight:
+        Arc<std::sync::Mutex<std::collections::HashMap<String, tokio::task::JoinHandle<()>>>>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -272,6 +281,7 @@ pub async fn serve(node: Node) -> Result<()> {
         chats: chat_store,
         tunnel: tunnel_mgr,
         http,
+        summarize_inflight: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     // Eager tunnel: if the operator opted in (--eager-tunnel /
@@ -2077,10 +2087,160 @@ async fn chats_upsert_handler(
     if chat.id.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
-    state.chats.upsert(chat).map(axum::Json).map_err(|e| {
+    let saved = state.chats.upsert(chat).map_err(|e| {
         tracing::error!(error = %e, "chats upsert: write failed");
         StatusCode::INTERNAL_SERVER_ERROR
-    })
+    })?;
+    // Auto-summarize feed: if the user has private memory turned on,
+    // kick off a debounced summarizer for this chat. The summarizer
+    // calls the local LLM ~30 s after the last upsert, so we only
+    // pay one round-trip per "burst" of activity instead of one per
+    // turn. Cheap no-op when memory is off.
+    if memory::is_enabled() && saved.messages.len() >= 2 {
+        tracing::info!(chat_id = %saved.id, msgs = saved.messages.len(), "memory: scheduling summarizer");
+        schedule_chat_summarize(&state, &saved.id);
+    }
+    Ok(axum::Json(saved))
+}
+
+/// How long to wait after the last chat upsert before kicking the
+/// summarizer. Long enough to skip the per-token saves a streaming
+/// chat does, short enough that closing the app or starting a new
+/// chat catches the summary on disk.
+const SUMMARIZE_DEBOUNCE_SECS: u64 = 30;
+
+/// Cap on chat-message slice we feed the summarizer. Older context
+/// matters less for "what does this chat reveal about the user", and
+/// the local LLM has limited context — 10 turns (so ~5 user + 5
+/// assistant) covers the salient bits without blowing the budget.
+const SUMMARIZE_MESSAGE_TAIL: usize = 10;
+
+fn schedule_chat_summarize(state: &NodeState, chat_id: &str) {
+    let chat_id = chat_id.to_string();
+
+    // Cancel any in-flight summarizer for this chat — every new
+    // message resets the debounce timer.
+    {
+        let mut inflight = match state.summarize_inflight.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        if let Some(prev) = inflight.remove(&chat_id) {
+            prev.abort();
+        }
+    }
+
+    // Clone the bits the task needs into separately-owned values so
+    // we can still touch `state` after spawning to insert the handle.
+    let state_for_task = state.clone();
+    let inflight_for_task = state.summarize_inflight.clone();
+    let chat_id_for_task = chat_id.clone();
+    let handle = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(SUMMARIZE_DEBOUNCE_SECS)).await;
+        if !memory::is_enabled() {
+            return;
+        }
+        let Some(chat) = state_for_task.chats.get(&chat_id_for_task) else {
+            return;
+        };
+        if chat.messages.len() < 2 {
+            return;
+        }
+        match summarize_chat_via_upstream(&state_for_task, &chat).await {
+            Ok(Some(summary)) => {
+                let trimmed = summary.trim().to_string();
+                if !trimmed.is_empty() {
+                    if let Err(e) = memory::upsert_for_chat(chat_id_for_task.clone(), trimmed) {
+                        tracing::warn!(error = %e, chat_id = %chat_id_for_task, "memory: summary write failed");
+                    } else {
+                        tracing::info!(chat_id = %chat_id_for_task, "memory: chat summary updated");
+                    }
+                }
+            }
+            Ok(None) => {
+                // Upstream didn't return usable text — skip silently.
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, chat_id = %chat_id_for_task, "memory: summarize call failed");
+            }
+        }
+        // Self-remove from the inflight map so the next upsert spawns fresh.
+        if let Ok(mut g) = inflight_for_task.lock() {
+            g.remove(&chat_id_for_task);
+        }
+    });
+
+    match state.summarize_inflight.lock() {
+        Ok(mut g) => {
+            g.insert(chat_id, handle);
+        }
+        Err(p) => {
+            p.into_inner().insert(chat_id, handle);
+        }
+    }
+}
+
+/// Ask the configured local LLM to summarize a chat into the format
+/// the memory store expects: third-person, focused on the user (not
+/// the topic), 1–2 sentences. Returns `Ok(None)` if upstream is
+/// unreachable or returns a non-JSON body — those are recoverable
+/// "skip this round" cases, not hard errors.
+async fn summarize_chat_via_upstream(
+    state: &NodeState,
+    chat: &chats::Chat,
+) -> anyhow::Result<Option<String>> {
+    let Some(live) = upstream::select_live(&state.node.llama_server_url).await else {
+        return Ok(None);
+    };
+    let mut transcript = String::new();
+    let tail = chat
+        .messages
+        .iter()
+        .rev()
+        .take(SUMMARIZE_MESSAGE_TAIL)
+        .collect::<Vec<_>>();
+    for msg in tail.iter().rev() {
+        let role = if msg.role == "assistant" {
+            "assistant"
+        } else {
+            "user"
+        };
+        transcript.push_str(role);
+        transcript.push_str(": ");
+        transcript.push_str(msg.text.trim());
+        transcript.push_str("\n\n");
+    }
+    let system = "you summarize chats for a private memory store. your output is read later by the same model as background context. write 1–2 sentences, third person, about the USER — their interests, preferences, technical level, or any persistent facts they shared. do not summarize the topic of the conversation itself, do not include greetings, do not say \"the user asks about X\". return only the summary text, no preamble.";
+    let body = serde_json::json!({
+        "model": live.model.clone().unwrap_or_else(|| "local".to_string()),
+        "messages": [
+            { "role": "system", "content": system },
+            { "role": "user", "content": format!("transcript:\n\n{transcript}\nsummary:") }
+        ],
+        "max_tokens": 200,
+        "stream": false,
+    });
+    let url = format!("{}/v1/chat/completions", live.url);
+    let resp = state
+        .http
+        .post(&url)
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        return Ok(None);
+    }
+    let json: serde_json::Value = resp.json().await?;
+    let content = json
+        .get("choices")
+        .and_then(|c| c.as_array())
+        .and_then(|c| c.first())
+        .and_then(|c| c.get("message"))
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_str())
+        .map(|s| s.to_string());
+    Ok(content)
 }
 
 async fn chats_delete_handler(

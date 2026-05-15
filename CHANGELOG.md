@@ -6,6 +6,49 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.21] — 2026-05-15
+
+### Added
+- **Private memory — phase 2: auto-summarize.** v0.0.20 shipped the
+  storage layer with a manual "+ add note" textarea. v0.0.21 removes
+  the manual step: every chat that's been updated with at least two
+  messages now triggers a debounced background summarizer that calls
+  the local LLM 30 s after the last edit, asks for a 1–2 sentence
+  third-person summary "about the user, not the topic", and writes
+  the result to the memory store keyed by `chat_id`. The same chat
+  re-summarized later replaces its old entry (new
+  `memory::upsert_for_chat`) rather than stacking duplicates, so even
+  a chat that's been touched twenty times occupies one slot.
+
+  Debounce is per-chat: rapid back-to-back saves (e.g., the per-token
+  saves a streaming chat does) collapse into one upstream-LLM round
+  trip 30 s after the burst stops, instead of N. Net cost on a
+  typical session: ~1 short summarization call per active chat per
+  burst, not per turn.
+
+  `NodeState` gains a `summarize_inflight` map keyed by `chat_id`
+  to hold the active `tokio::JoinHandle` so each new upsert can
+  cancel and re-spawn the timer.
+
+  Privacy posture is unchanged: still off by default. The
+  summarizer no-ops on every entry path (chats_upsert handler check,
+  inside the task before calling upstream) when `memory::is_enabled()`
+  returns false. Nothing about chat history goes to anything other
+  than the user's own configured local LLM.
+
+  Verified locally end-to-end:
+    `PUT /v1/chats/...` (4 msgs)
+    →  log: "memory: scheduling summarizer ... msgs=4"
+    →  (30 s)
+    →  log: "memory: chat summary updated chat_id=..."
+    →  `GET /v1/memory` shows the LLM-written summary
+
+### Pending
+- Replace the keyword retriever with a bundled embedder
+  (`fastembed-rs`, ~25 MB ONNX). The summarization quality already
+  makes a meaningful difference; embedding-based retrieval is the
+  last piece before this loop reaches its target accuracy.
+
 ## [0.0.20] — 2026-05-15
 
 ### Added
