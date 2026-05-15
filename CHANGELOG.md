@@ -6,6 +6,37 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.18] — 2026-05-15
+
+### Fixed
+- **Tunnel goes live but UI never shows URL / QR / copy button.**
+  When the tunnel transitioned to running, the toast fired
+  ("tunnel live — your phone can chat with this mac now"), then
+  `renderTunnel`'s running branch immediately tripped on
+  `const token = getToken() || "";` — `getToken` was never defined
+  anywhere in `ui.js`. The function had always been called
+  `getApiToken`. The `ReferenceError` aborted the rest of the
+  render, so:
+
+  - `els.tunnelUrl.textContent` never got the URL
+  - `els.tunnelLink.hidden = false` never ran → copy button stayed
+    hidden
+  - `renderPhoneQr(linkHref)` never ran → QR stayed on the
+    "enable open to internet first" hint
+
+  User-visible outcome: enabling the tunnel showed the green toast,
+  then nothing else changed — making the whole panel look broken,
+  which is why this got tagged as the foundational gap blocking
+  agentic AI use. The bug had been latent since v0.0.7 (when the
+  toast was introduced); only the recent v0.0.17 optimistic-UI
+  click handler made it consistently reachable end-to-end and
+  surfaced it.
+
+  Fixed by renaming the three call sites (`getToken()` → the
+  actual function name `getApiToken()`). Same bug class was sitting
+  in the dev-snippet panel and the phone-link builder too — those
+  are also fixed.
+
 ## [0.0.17] — 2026-05-15
 
 ### Fixed

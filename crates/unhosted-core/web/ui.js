@@ -1180,7 +1180,7 @@ function renderTunnel(s) {
   }
 
   if (state === "running") {
-    const token = getToken() || "";
+    const token = getApiToken() || "";
     const sep = s.url.includes("?") ? "&" : "?";
     const linkHref = token ? `${s.url}${sep}api_token=${encodeURIComponent(token)}` : s.url;
     els.tunnelLabel.textContent = "stop";
@@ -1713,7 +1713,7 @@ let currentDevTab = "curl";
 
 async function populateDeveloperModal() {
   const baseUrl = `${location.protocol}//${location.host}`;
-  const token = getToken() || "";
+  const token = getApiToken() || "";
   els.devBaseUrl.textContent = baseUrl;
   els.devBaseUrl.dataset.copy = baseUrl;
   els.devToken.textContent = token || "(loopback only — no token needed)";
@@ -1762,7 +1762,7 @@ document.querySelectorAll(".dev-tab").forEach((btn) => {
   btn.addEventListener("click", () => {
     currentDevTab = btn.dataset.tab;
     document.querySelectorAll(".dev-tab").forEach((b) => b.classList.toggle("active", b === btn));
-    renderDevSnippet(`${location.protocol}//${location.host}`, getToken() || "");
+    renderDevSnippet(`${location.protocol}//${location.host}`, getApiToken() || "");
   });
 });
 
