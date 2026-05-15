@@ -6,6 +6,65 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.25] — 2026-05-15
+
+### Added
+- **LLM web browsing — phase 1: the endpoint.** New
+  `POST /v1/tools/web_fetch` lets the UI, an external agent, or
+  (eventually) the LLM via a tool-use loop pull a web page through
+  the daemon and get back plain-text content the model can reason
+  about. Local-user-only auth, same posture as `/v1/memory` and
+  `/v1/tunnel` — only the daemon owner can drive outbound fetches
+  through their machine.
+
+  New module `unhosted-core/src/web_fetch.rs`. The request is a
+  thin `{ url, max_bytes? }`, the response carries `final_url`,
+  `status`, `content_type`, `bytes`, `truncated`, and a stripped
+  `content` field suitable for splicing into a chat-completion
+  request.
+
+  Phase 2 (separate release) will close the tool-use loop:
+  intercept model output for `<fetch>...</fetch>` markers, resolve
+  them, feed the result back into the next turn, and pipe the
+  reads through the memory summarizer so what the model
+  researches becomes persistent context.
+
+### Security
+- **SSRF guards.** The fetcher refuses any host that resolves to
+  loopback, RFC-1918 (10/8, 172.16/12, 192.168/16), link-local
+  (169.254/16, fe80::/10), unique-local (fc00::/7), CGNAT
+  (100.64/10), multicast, broadcast, or the unspecified address
+  (0.0.0.0, ::). Resolution is done up-front via `tokio::net::
+  lookup_host` so a public hostname resolving to a private IP is
+  rejected — not just literal private IPs typed into the URL.
+- **HTTPS-only.** `http://` is refused at the URL parser, before
+  DNS or any network IO. The only safe HTTP target inside the
+  same machine is the daemon itself, which callers can reach
+  directly.
+- **Bandwidth cap.** Default `max_bytes = 200_000`. Callers can
+  request smaller but not larger. The body is streamed; the
+  connection drops the moment the cap is hit, so an attacker
+  can't make the daemon spool a multi-GB response.
+- **Network timeout.** 15 s connect+read deadline. A slow-loris
+  source can't tie up the chat loop indefinitely.
+- **Recognizable User-Agent.** `unhosted/<version>
+  (+https://github.com/unhosted-ai/unhosted-core)` — target
+  sites can robots.txt us if they want; we're not hiding behind
+  a vanilla curl UA.
+- **No request-header passthrough.** The outbound fetch is a
+  fresh client. Cookies, auth headers, and any other headers on
+  the incoming `/v1/tools/web_fetch` request never reach the
+  target.
+
+### Tests
+- 6 unit tests cover the SSRF guard against every IPv4/v6
+  private range, the HTML stripper's tag/script/style removal,
+  whitespace collapsing, entity decoding, and the text/binary
+  content-type discrimination. 5 e2e smoke tests verified
+  locally before push: real HTTPS fetch through `example.com`,
+  HTTP rejected, RFC-1918 rejected, invalid URL rejected,
+  byte-cap honored with `truncated: true`.
+
 ## [0.0.24] — 2026-05-15
 
 ### Added

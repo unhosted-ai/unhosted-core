@@ -21,6 +21,7 @@ pub mod transport;
 pub mod tunnel;
 pub mod upstream;
 mod web;
+pub mod web_fetch;
 
 pub use auth::{AuthOutcome, LocalToken, ReplayGuard};
 pub use discovery::{default_node_name, DiscoveredPeer, Discovery};
@@ -406,6 +407,10 @@ pub async fn serve(node: Node) -> Result<()> {
         )
         .route("/v1/memory/clear", post(memory_clear_handler))
         .route("/v1/memory/enable", post(memory_enable_handler))
+        // Web fetch tool — exposed so external agents (and eventually
+        // the LLM itself via a tool-use loop) can pull web pages
+        // through the daemon. SSRF-guarded; only HTTPS to public IPs.
+        .route("/v1/tools/web_fetch", post(web_fetch_handler))
         .with_state(state);
 
     let app = api
@@ -2506,6 +2511,55 @@ async fn memory_enable_handler(
     require_auth(&outcome, true)?;
     memory::set_enabled(req.enabled);
     Ok(axum::Json(serde_json::json!({ "enabled": req.enabled })))
+}
+
+// ─── tool: web_fetch ──────────────────────────────────────────────────────
+// Server-side URL fetcher for the LLM tool-use loop. SSRF + scheme +
+// size guards live in `web_fetch::fetch`; this handler is the thin
+// auth + JSON layer in front of it. Local-user-only, same posture as
+// /v1/memory and /v1/tunnel — only the daemon owner should be able to
+// drive outbound fetches through their machine.
+
+async fn web_fetch_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    axum::Json(req): axum::Json<web_fetch::WebFetchRequest>,
+) -> Result<axum::Json<web_fetch::WebFetchResponse>, axum::http::Response<axum::body::Body>> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    if let Err(status) = require_auth(&outcome, true) {
+        // Return a structured-but-empty body so the caller's JSON
+        // parser doesn't choke on a raw status.
+        let body = serde_json::json!({ "error": "unauthorized" });
+        return Err(axum::http::Response::builder()
+            .status(status)
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body.to_string()))
+            .expect("valid response"));
+    }
+    tracing::info!(url = %req.url, "web_fetch: requested");
+    match web_fetch::fetch(&state.http, req).await {
+        Ok(resp) => {
+            tracing::info!(
+                final_url = %resp.final_url,
+                status = resp.status,
+                bytes = resp.bytes,
+                truncated = resp.truncated,
+                "web_fetch: ok"
+            );
+            Ok(axum::Json(resp))
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "web_fetch: rejected");
+            let status = web_fetch::error_status(&e);
+            let body = serde_json::json!({ "error": e.to_string() });
+            Err(axum::http::Response::builder()
+                .status(status)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(body.to_string()))
+                .expect("valid response"))
+        }
+    }
 }
 
 /// Route an inbound relay request by its `kind` to the right local handler.
