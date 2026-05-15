@@ -6,6 +6,36 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.19] — 2026-05-15
+
+### Added
+- **Tunnel-enabled state persists across daemon restarts.** Until this
+  release, every time the user closed the .app (or the system rebooted),
+  cloudflared came down with the daemon and the user had to re-click
+  "open to internet" before their phone / agent could reach the daemon
+  again. Now the tunnel manager writes
+  `~/.config/unhosted/tunnel-autostart.txt` on every `start`/`stop`
+  call, and the daemon boot path OR's that file into its `eager_tunnel`
+  decision alongside the existing `UNHOSTED_EAGER_TUNNEL` env var and
+  the `--eager-tunnel` CLI flag.
+
+  Effect: click `enable` once, and the tunnel comes back up
+  automatically on every subsequent .app launch — no more re-clicking
+  before the phone can reach the daemon. Click `stop` and it stays
+  off until you re-enable.
+
+  Reason this matters for agentic AI: an agent calling
+  `/v1/chat/completions` over the public URL needs the daemon to be
+  reachable without a human in the loop. Persistence closes that
+  gap. The URL itself still rotates per cloudflared Quick Tunnel
+  restart — that's a Cloudflare-side limit; the agent has to either
+  re-resolve via a discovery channel or accept short-lived URLs.
+
+  Defaults stay conservative: a missing or unreadable file reads as
+  "off", so we can never publish the daemon without an affirmative
+  user click. The env var still wins for operators running `unhosted
+  serve` from systemd.
+
 ## [0.0.18] — 2026-05-15
 
 ### Fixed

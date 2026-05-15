@@ -94,9 +94,23 @@ impl Node {
             peers: Vec::new(),
             name: default_node_name(),
             relay_url: std::env::var("UNHOSTED_RELAY").ok(),
+            // Eager-tunnel intent comes from two independent sources:
+            //   1. UNHOSTED_EAGER_TUNNEL env var — for operators running
+            //      `unhosted serve` from systemd / a config file, who
+            //      want the tunnel up unconditionally.
+            //   2. The persisted user-click state at
+            //      `~/.config/unhosted/tunnel-autostart.txt`, written by
+            //      `TunnelManager::start/stop`. Lets the desktop user
+            //      enable the tunnel once and have it come back on every
+            //      .app cold-start without re-clicking.
+            // Either source opting in is enough. Persisted "disabled"
+            // never overrides an operator's env var, which matches the
+            // env var being "operator policy" and the file being "user
+            // preference".
             eager_tunnel: std::env::var("UNHOSTED_EAGER_TUNNEL")
                 .map(|v| matches!(v.as_str(), "1" | "true" | "yes"))
-                .unwrap_or(false),
+                .unwrap_or(false)
+                || crate::tunnel::load_autostart(),
         }
     }
 }

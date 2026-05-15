@@ -195,10 +195,20 @@ async fn main() -> Result<()> {
                 );
             }
             let relay_url = relay.or_else(|| std::env::var("UNHOSTED_RELAY").ok());
+            // Eager-tunnel intent OR's three independent sources:
+            //   1. `--eager-tunnel` CLI flag (explicit per-invocation).
+            //   2. `UNHOSTED_EAGER_TUNNEL` env var (operator policy).
+            //   3. Persisted user-click state at
+            //      `~/.config/unhosted/tunnel-autostart.txt`, written by
+            //      the tunnel UI's start/stop handlers. This is what
+            //      makes "I enabled the tunnel once" survive a daemon
+            //      restart for desktop users without them rediscovering
+            //      the env var.
             let eager_tunnel = eager_tunnel
                 || std::env::var("UNHOSTED_EAGER_TUNNEL")
                     .map(|v| matches!(v.as_str(), "1" | "true" | "yes"))
-                    .unwrap_or(false);
+                    .unwrap_or(false)
+                || unhosted_core::tunnel::load_autostart();
             let node = Node {
                 addr,
                 llama_server_url,

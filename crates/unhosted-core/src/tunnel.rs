@@ -75,6 +75,51 @@ struct Inner {
 /// the supervisor gives up and leaves the tunnel in `Failed` so the user
 /// can investigate.
 const MAX_AUTO_RESTARTS: u32 = 3;
+
+/// File at `~/.config/unhosted/tunnel-autostart.txt` recording whether the
+/// user wants the tunnel to come up automatically on next daemon boot.
+/// Written by [`save_autostart`] on every successful `start()` / `stop()`,
+/// read by [`load_autostart`] in `Node::local()`.
+const AUTOSTART_FILE: &str = "tunnel-autostart.txt";
+
+fn autostart_path() -> Option<std::path::PathBuf> {
+    crate::paths::config_file(AUTOSTART_FILE).ok()
+}
+
+/// Returns whether the user last left the tunnel toggled on, as recorded
+/// by the most recent call to [`save_autostart`]. Returns `false` on any
+/// IO error — a missing file or unreadable config dir is read as "off",
+/// because conservatively defaulting to "off" can never expose a daemon
+/// to the public network without an affirmative user click.
+pub fn load_autostart() -> bool {
+    let Some(path) = autostart_path() else {
+        return false;
+    };
+    match std::fs::read_to_string(&path) {
+        Ok(s) => s.trim() == "enabled",
+        Err(_) => false,
+    }
+}
+
+/// Persist the user's tunnel-enabled choice so it survives daemon
+/// restarts. Best-effort: IO failures are logged and swallowed —
+/// failing to remember a preference must not break the tunnel itself.
+fn save_autostart(enabled: bool) {
+    let Some(path) = autostart_path() else {
+        tracing::warn!("tunnel autostart: no config path available, not persisting");
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            tracing::warn!(error = %e, dir = %parent.display(), "tunnel autostart: mkdir failed");
+            return;
+        }
+    }
+    let body = if enabled { "enabled" } else { "disabled" };
+    if let Err(e) = std::fs::write(&path, body) {
+        tracing::warn!(error = %e, path = %path.display(), "tunnel autostart: write failed");
+    }
+}
 /// Backoff between auto-restart attempts. Short enough that a transient
 /// crash heals before the user notices their phone stopped working.
 const AUTO_RESTART_DELAY_SECS: u64 = 3;
@@ -238,6 +283,13 @@ impl TunnelManager {
             supervisor_loop(supervisor_inner, local_port).await;
         });
 
+        // Persist the user's "on" intent. Writing here rather than only
+        // after Running succeeds keeps the recorded state aligned with
+        // what the user clicked, even if cloudflared subsequently dies
+        // — the watchdog will keep retrying, which matches "I want this
+        // on" semantics.
+        save_autostart(true);
+
         Ok(self.status().await)
     }
 
@@ -259,7 +311,12 @@ impl TunnelManager {
         // explicit "off" click outranks the operator's "keep it up"
         // intent until they click again.
         inner.user_stopped = true;
-        Ok(inner.state.clone())
+        // Drop the lock before doing disk IO so the autostart write
+        // can't deadlock against anything that might also want the
+        // inner mutex (e.g., a concurrent status() request).
+        drop(inner);
+        save_autostart(false);
+        Ok(TunnelState::Idle)
     }
 }
 
