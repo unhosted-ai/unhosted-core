@@ -1271,11 +1271,32 @@ if (tunnelHeader) {
 
 if (els.tunnelToggle) {
   els.tunnelToggle.addEventListener("click", async () => {
+    // Decide based on what the user is LOOKING AT (last-rendered state),
+    // not on a fresh refetch. The previous version awaited fetchTunnel()
+    // before deciding, which had two failure modes that both surfaced as
+    // "I click enable and nothing happens":
+    //   1. fetchTunnel() returns null on transient network blips (WKWebView
+    //      throttles fetches when the window is backgrounded, and an
+    //      unfocused tab can also stall the async chain). null → cur is
+    //      falsy → isOn is false → tries to start a tunnel that may
+    //      already be running → no observable UI change.
+    //   2. If the UI was showing stale "off" state but the daemon was
+    //      actually "running" (e.g., user enabled the tunnel from the
+    //      phone PWA), clicking the toggle that LOOKED like "enable"
+    //      would pop a "turn off tunnel?" confirm dialog instead, with
+    //      no preceding indication that the tunnel was actually live.
+    //      The user reads it as "the dialog is confused" and dismisses,
+    //      then loops.
+    // Using `lastTunnelState` matches the rendered UI by construction.
+    // It is `null` until the first poll lands, in which case treating
+    // it as "off" (fall into the else branch) is the right default —
+    // click on a fresh page = "I want to enable".
+    const renderedRunning =
+      lastTunnelState === "running" || lastTunnelState === "starting";
+
     els.tunnelToggle.disabled = true;
     try {
-      const cur = await fetchTunnel();
-      const isOn = cur && (cur.state === "running" || cur.state === "starting");
-      if (isOn) {
+      if (renderedRunning) {
         // Confirm before stopping a live tunnel. Without this, a single
         // accidental tap (or a click from a stale browser tab still
         // bound to /v1/tunnel) kills the tunnel and rotates the URL,
@@ -1283,20 +1304,34 @@ if (els.tunnelToggle) {
         // unprompted across hours.
         const ok = await confirmDialog({
           title: "turn off tunnel?",
-          message: cur.state === "running"
+          message: lastTunnelState === "running"
             ? "the public url will stop working and any phone using it will lose connection."
             : "this will cancel the tunnel that's starting up.",
           confirmLabel: "turn off",
           danger: true,
         });
         if (!ok) return;
+        // Optimistic UI: flip the panel to idle the instant the click
+        // is committed. If the daemon roundtrip later succeeds the next
+        // poll just reaffirms; if it fails the poll surfaces the actual
+        // state. Either way the user sees motion right now.
+        renderTunnel({ state: "idle" });
+        notify("stopping tunnel…", { level: "info", key: "tunnel", duration: 3000 });
         const next = await stopTunnel();
-        renderTunnel(next);
+        if (next) renderTunnel(next);
         setTunnelPolling("slow");
       } else {
+        // Optimistic UI for the cold-start path. Paint "starting…" at
+        // 20% before anything hits the network, so the progress bar
+        // shows up the same frame the click registers. This is the
+        // change that fixes the "I click enable and nothing happens"
+        // complaint — even if startTunnel()'s POST hangs or returns
+        // null, the user already sees the panel reacting.
+        renderTunnel({ state: "starting", stage: "spawning" });
+        notify("starting tunnel…", { level: "info", key: "tunnel", duration: 3000 });
+        setTunnelPolling("fast");
         const next = await startTunnel();
-        renderTunnel(next);
-        if (next && next.state === "starting") setTunnelPolling("fast"); else setTunnelPolling("slow");
+        if (next) renderTunnel(next);
       }
     } finally {
       els.tunnelToggle.disabled = false;

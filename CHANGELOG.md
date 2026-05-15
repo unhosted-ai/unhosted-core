@@ -6,6 +6,34 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.17] — 2026-05-15
+
+### Fixed
+- **"Click 'enable' on tunnel toggle, nothing happens."** The toggle's
+  click handler used to await `fetchTunnel()` before deciding what
+  action to take. That had two failure modes both surfacing as a dead
+  toggle:
+
+  1. WKWebView throttles fetches when the window is backgrounded, so
+     the initial `fetchTunnel()` could return `null` on transient
+     blips. `cur === null` made the handler think no tunnel was
+     running, it tried to start one, and if `startTunnel()` was
+     similarly throttled the panel never visibly moved.
+  2. If the rendered UI was stale "off" but the daemon was actually
+     "running" (e.g., tunnel started from the phone PWA), clicking
+     the toggle that *read* "enable" popped a "turn off tunnel?"
+     confirm dialog instead — confusing enough that users would
+     dismiss it and report "the button does nothing".
+
+  The handler now keys off `lastTunnelState` (the same value driving
+  the rendered UI) so the action matches what the user is looking
+  at. And the panel optimistically flips to `starting…` (with the
+  progress bar at the spawning stage) the same frame the click
+  registers, before any network call lands — so even when fetch is
+  silently slow the user sees the click took effect. A toast
+  ("starting tunnel…" / "stopping tunnel…") fires on click as
+  belt-and-suspenders feedback.
+
 ## [0.0.16] — 2026-05-15
 
 ### Fixed
