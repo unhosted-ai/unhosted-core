@@ -571,9 +571,21 @@ your prompt
           </tr>
           <tr>
             <td>web ui / desktop app</td>
-            <td><span class="pill mid">building</span></td>
-            <td>v0.1.0+</td>
-            <td>tao + wry native shell. see design/0002.</td>
+            <td><span class="pill on">shipped</span></td>
+            <td>v0.0.14</td>
+            <td>tauri 2 native shell. auto-spawns the daemon on launch — no terminal needed.</td>
+          </tr>
+          <tr>
+            <td>open to internet (cloudflare tunnel)</td>
+            <td><span class="pill on">shipped</span></td>
+            <td>v0.0.19</td>
+            <td>one-click public url + live qr for your phone. enabled state persists across .app restarts.</td>
+          </tr>
+          <tr>
+            <td>signed auto-updater</td>
+            <td><span class="pill on">shipped</span></td>
+            <td>v0.0.15</td>
+            <td>minisign-signed releases on all four platforms (darwin-aarch64 / linux-x86_64 / linux-aarch64 / windows-x86_64). in-app prompt on new release.</td>
           </tr>
           <tr>
             <td>public swarm (usdc payments)</td>
@@ -682,7 +694,7 @@ your prompt
       <h3>download</h3>
       <a class="view-all" href="https://github.com/unhosted-ai/unhosted-core/releases">all releases</a>
     </div>
-    <p class="sub">two ways to install: <strong>double-click</strong> the bundle for your os, or <strong>paste one line</strong> into a terminal. both fetch the same v0.0.11 binaries. you'll also need a local model runtime — <a href="docs.html#install">llama.cpp, ollama, or lm studio</a> — the daemon auto-detects whichever is running.</p>
+    <p class="sub">two ways to install: <strong>double-click</strong> the bundle for your os, or <strong>paste one line</strong> into a terminal. both fetch the same v0.0.19 binaries. you'll also need a local model runtime — <a href="docs.html#install">llama.cpp, ollama, or lm studio</a> — the daemon auto-detects whichever is running.</p>
 
     <!-- easy install: auto-detects the visitor's OS and shows the right
          primary CTA (double-click installer) + the copy-paste one-liner. -->
@@ -736,7 +748,7 @@ your prompt
         </div>
       </div>
 
-      <p class="ei-foot">all installers fetch the latest <code>v0.0.11</code> tarball from <a href="https://github.com/unhosted-ai/unhosted-core/releases/latest">github releases</a>. nothing leaves your machine after install — see <a href="#network">network &amp; security</a>.</p>
+      <p class="ei-foot">all installers fetch the latest <code>v0.0.19</code> tarball from <a href="https://github.com/unhosted-ai/unhosted-core/releases/latest">github releases</a>. nothing leaves your machine after install — see <a href="#network">network &amp; security</a>.</p>
     </div>
 
     <!-- phone install: PWA from the daemon's web UI. Two buttons that
@@ -816,7 +828,7 @@ your prompt
           </ol>
         </div>
 
-        <p class="phone-foot">phone and host must be on the same wifi. no traffic leaves your network. for off-lan access (your phone on cellular, mac at home), pair via <a href="#network">trusted-peer mode</a> — coming in v0.1.0.</p>
+        <p class="phone-foot">on the same wifi, no traffic leaves your network. for off-lan access (your phone on cellular, mac at home), flip the <strong>open to internet</strong> switch in the desktop app — the daemon publishes a signed cloudflare tunnel and the qr embeds the bearer token, so the phone authenticates on first scan. the choice persists across .app restarts. pairing via trusted-peer mode (no third party at all) — coming in v0.1.0.</p>
       </div>
     </section>
 
@@ -885,7 +897,7 @@ your prompt
     <div class="desktop-install" id="desktop">
       <div class="head">
         <h4>desktop app — per-os install</h4>
-        <span class="tag">tao + wry · not electron</span>
+        <span class="tag">tauri 2 · not electron</span>
       </div>
       <p class="sub">the gui is a thin native shell wrapping the daemon's web ui. one binary, no chromium runtime, no node. the one-line installer above does all of this for you — these steps are for people who want to do it by hand.</p>
 
@@ -1159,7 +1171,7 @@ $ unhosted run llama3.1:70b "..."
         <p><a href="https://github.com/unhosted-ai/unhosted-core/blob/main/LICENSE">agpl-3.0</a>. read it, fork it, audit it. <a href="https://github.com/unhosted-ai/unhosted-core/blob/main/SECURITY.md">security</a>.</p>
         <p class="badges">
           <span class="badge">pre-alpha</span>
-          <span class="badge">v0.0.11</span>
+          <span class="badge">v0.0.19</span>
         </p>
       </div>
 
