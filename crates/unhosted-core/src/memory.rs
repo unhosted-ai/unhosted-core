@@ -153,6 +153,43 @@ pub fn add(summary: String, chat_id: Option<String>) -> Result<MemoryEntry> {
     Ok(entry)
 }
 
+/// Insert a memory for a chat, replacing any existing entry with the
+/// same `chat_id` instead of duplicating. This is what the auto-
+/// summarizer calls: every chat ends up with exactly one rolling
+/// summary, kept fresh by the debounced re-summarize on each new
+/// message. Without this, every turn of a long chat would stack a
+/// separate near-identical memory entry and blow past [`MEMORY_CAP`].
+pub fn upsert_for_chat(chat_id: String, summary: String) -> Result<MemoryEntry> {
+    let mut store = load();
+    let now = now_secs();
+    if let Some(existing) = store
+        .entries
+        .iter_mut()
+        .find(|e| e.chat_id.as_deref() == Some(chat_id.as_str()))
+    {
+        existing.summary = summary;
+        existing.created_at = now;
+        let entry = existing.clone();
+        save(&store)?;
+        return Ok(entry);
+    }
+    // No existing entry for this chat — fall through to a normal add
+    // (handles the FIFO cap too).
+    let entry = MemoryEntry {
+        id: new_id(),
+        summary,
+        created_at: now,
+        chat_id: Some(chat_id),
+    };
+    store.entries.push(entry.clone());
+    if store.entries.len() > MEMORY_CAP {
+        let excess = store.entries.len() - MEMORY_CAP;
+        store.entries.drain(0..excess);
+    }
+    save(&store)?;
+    Ok(entry)
+}
+
 /// Remove a single entry by id. Returns whether the id existed.
 pub fn remove(id: &str) -> Result<bool> {
     let mut store = load();
