@@ -123,14 +123,35 @@ jobs:
             cp "$BUNDLE_DIR/dmg/"*.dmg dist-stage/ 2>/dev/null || true
           fi
           if [ -d "$BUNDLE_DIR/macos" ]; then
-            # tar the .app for distribution outside the .dmg path
-            APP=$(find "$BUNDLE_DIR/macos" -name "*.app" -maxdepth 1 | head -1)
-            if [ -n "$APP" ]; then
-              tar -czf "dist-stage/unhosted-macos-app-${{ matrix.target }}.tar.gz" -C "$(dirname "$APP")" "$(basename "$APP")"
+            # Tauri's updater plugin requires the .app.tar.gz that *Tauri
+            # itself* produced, because the matching .sig file is signed
+            # against those exact bytes. If we re-tar the .app from
+            # scratch the bytes drift (timestamps, file order) and the
+            # signature fails to verify — that's why v0.0.15's manifest
+            # had no darwin-aarch64 entry. So: copy Tauri's tarball
+            # straight through, and rename its companion .sig to match
+            # the asset name install.sh expects.
+            SRC_TGZ=$(find "$BUNDLE_DIR/macos" -maxdepth 1 -name "*.app.tar.gz" | head -1)
+            DEST_NAME="unhosted-macos-app-${{ matrix.target }}.tar.gz"
+            if [ -n "$SRC_TGZ" ]; then
+              cp "$SRC_TGZ" "dist-stage/${DEST_NAME}"
+              if [ -f "${SRC_TGZ}.sig" ]; then
+                cp "${SRC_TGZ}.sig" "dist-stage/${DEST_NAME}.sig"
+              fi
+            else
+              # Fallback: Tauri didn't produce a .app.tar.gz (e.g. older
+              # tauri-cli, or createUpdaterArtifacts is off). Re-tar so
+              # install.sh still gets *something*, but the manifest builder
+              # won't find a matching .sig and will skip darwin-aarch64.
+              APP=$(find "$BUNDLE_DIR/macos" -name "*.app" -maxdepth 1 | head -1)
+              if [ -n "$APP" ]; then
+                tar -czf "dist-stage/${DEST_NAME}" -C "$(dirname "$APP")" "$(basename "$APP")"
+              fi
             fi
           fi
-          # Updater sig files (e.g. *.dmg.sig)
-          find "$BUNDLE_DIR" -maxdepth 3 -name "*.sig" -exec cp {} dist-stage/ \; 2>/dev/null || true
+          # Any remaining .sig files (e.g. dmg.sig) — copy without renaming.
+          find "$BUNDLE_DIR" -maxdepth 3 -name "*.sig" -not -name "*.app.tar.gz.sig" \
+            -exec cp {} dist-stage/ \; 2>/dev/null || true
           for f in dist-stage/*.dmg dist-stage/*.tar.gz; do
             [ -f "$f" ] && shasum -a 256 "$f" > "$f.sha256"
           done

@@ -6,6 +6,38 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.16] — 2026-05-15
+
+### Fixed
+- **macOS + linux-aarch64 missing from updater manifest.** v0.0.15
+  re-enabled the Tauri updater and published `.sig` files, but the
+  resulting `latest.json` listed only `linux-x86_64` and
+  `windows-x86_64` — meaning darwin-aarch64 (every Apple Silicon
+  Mac) and linux-aarch64 had no auto-update path. Two bugs:
+
+  1. `.github/workflows/release.yml`'s macOS staging step re-tarred
+     the .app under a new name, but Tauri's signature was already
+     committed to the bytes of the original `unhosted.app.tar.gz`,
+     so the renamed asset and its `.sig` no longer matched. The
+     manifest builder dropped the entry because it couldn't find an
+     asset whose bytes the signature would verify against. Fixed
+     by copying Tauri's `unhosted.app.tar.gz` straight through to
+     `unhosted-macos-app-<target>.tar.gz` and renaming the `.sig`
+     to match — no re-tar, byte-identical to what Tauri signed.
+
+  2. `.github/scripts/build-updater-manifest.py`'s platform
+     classifier listed `.AppImage` and `.deb` as needles for
+     `linux-x86_64` only, so an `_aarch64.AppImage` matched
+     x86_64 first and a real linux-aarch64 entry was never
+     created. Re-ordered the keys (specific arches first) and
+     replaced generic suffix needles with arch-specific ones
+     (`aarch64.AppImage`, `amd64.AppImage`, etc.) so the two
+     architectures can't poach each other's slot.
+
+  Result: `latest.json` for v0.0.16 should list all four
+  platforms we actually ship for. Verified locally by replaying
+  the classifier against the v0.0.15 asset list before pushing.
+
 ## [0.0.15] — 2026-05-14
 
 ### Changed

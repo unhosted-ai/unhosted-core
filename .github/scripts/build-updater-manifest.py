@@ -41,14 +41,21 @@ import sys
 from pathlib import Path
 
 
-# Map an asset filename to the Tauri platform key. We match by substring
-# rather than glob so naming-scheme drift in the bundler doesn't break us.
+# Map an asset filename to the Tauri platform key. ORDER MATTERS: more
+# specific arch matchers run first so e.g. `unhosted_0.0.15_aarch64.AppImage`
+# doesn't get snagged by linux-x86_64's generic `.AppImage` needle (which
+# is what happened in v0.0.15 — the manifest had linux-x86_64 pointing at
+# the arm64 AppImage and no linux-aarch64 entry at all). Each needle has
+# to be specific enough to its arch that it can't accidentally match the
+# other one: that's why linux-aarch64 lists every flavor of "aarch64" or
+# "arm64" you might see in a Tauri bundle filename, and linux-x86_64's
+# needles all explicitly name x86_64 / amd64 / x64.
 PLATFORM_KEYS = [
     ("darwin-aarch64", ["aarch64-apple-darwin"]),
     ("darwin-x86_64", ["x86_64-apple-darwin"]),
-    ("linux-x86_64", ["x86_64-unknown-linux", ".AppImage", ".deb"]),
-    ("linux-aarch64", ["aarch64-unknown-linux"]),
-    ("windows-x86_64", ["x86_64-pc-windows", ".msi", "nsis", "x64-setup"]),
+    ("linux-aarch64", ["aarch64-unknown-linux", "aarch64.AppImage", "arm64.AppImage", "arm64.deb"]),
+    ("linux-x86_64", ["x86_64-unknown-linux", "amd64.AppImage", "amd64.deb", "x86_64.AppImage"]),
+    ("windows-x86_64", ["x86_64-pc-windows", ".msi", "x64-setup", "x64_en-US"]),
 ]
 
 
