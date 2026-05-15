@@ -6,6 +6,25 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.15] — 2026-05-14
+
+### Changed
+- **Tauri auto-updater re-enabled.** The updater was switched off back
+  in v0.0.7 when the `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secret in CI
+  drifted out of sync with the locally-held private key, breaking every
+  signing step in the release pipeline. Rather than keep guessing which
+  half of the keypair was wrong, the keypair has been fully regenerated:
+  fresh public key committed to `tauri.conf.json`, fresh private key
+  and password rotated into the matching GitHub secrets in one shot.
+  `createUpdaterArtifacts` flipped back to `true`, so each platform's
+  bundle now ships with a `.sig` and the release job publishes a signed
+  `latest.json`.
+
+  **One-time manual install:** v0.0.14 was built with the updater
+  disabled, so it won't pick this up automatically — users on v0.0.14
+  need to run `install.sh` once more to get v0.0.15. From v0.0.15
+  onward, the .app will prompt to install signed updates itself.
+
 ## [0.0.14] — 2026-05-14
 
 ### Fixed

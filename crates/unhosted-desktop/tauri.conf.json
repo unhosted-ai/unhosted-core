@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "unhosted",
-  "version": "0.0.14",
+  "version": "0.0.15",
   "identifier": "ai.unhosted.app",
   "build": {
     "frontendDist": "dist"
@@ -25,7 +25,7 @@
   },
   "bundle": {
     "active": true,
-    "createUpdaterArtifacts": false,
+    "createUpdaterArtifacts": true,
     "targets": ["app", "dmg", "deb", "appimage", "rpm", "msi", "nsis"],
     "icon": [
       "icons/32x32.png",
@@ -45,7 +45,7 @@
       "endpoints": [
         "https://github.com/unhosted-ai/unhosted-core/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRBMDJDOTUyRjA1RUZCMjMKUldRaisxN3dVc2tDU3ZuQSs1N2QyQ0QvVlMvd2RnQU9rUUNlTmUwRmdvU0xNdXR1Nzc0dmtBUy8K"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYxQTY4MTUyODM1NTI5RUQKUldUdEtWV0RVb0dtWVJTeXBBQlJZMXNNSlk1VmNXZGZkR3JITFhKOHovelVZeU5BbjA2RVk5YXEK"
     }
   }
 }
