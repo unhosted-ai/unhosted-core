@@ -118,9 +118,46 @@ The point of slicing this hard is that **the v0.1.0 slice is shippable in roughl
 ## Open questions
 
 1. **Does `llama-server` cleanly hot-add peers, or does adding a new RPC backend require a restart?** Upstream behavior we should test before promising live re-plan in v0.3.0. If restart-required, v0.3.0 still works but the conversation has to absorb a 2–5 s gap when topology changes.
+
+   **Status:** Blocked. Test requires two RPC-capable machines and we only have one in the current dev environment. Deferring until a real test cluster exists. v0.1.0 doesn't depend on this answer (no hot-add in v0.1.0); v0.3.0 design assumes restart-required and adds a "topology change ↦ short pause" UX affordance. If hot-add turns out to be free, that affordance becomes optional polish.
+
 2. **What's the right answer when the orchestrator's local backend is *also* RPC-capable but offers worse-than-LAN bandwidth (e.g., the orchestrator is on Wi-Fi 5)?** Probably: skip the orchestrator's GPU as a layer host, use it only as the request endpoint. Needs measurement before deciding.
-3. **Should the plan be ephemeral (recomputed every `vram-pool start`) or persisted (so a reboot of one peer doesn't kill the pool)?** Lean ephemeral for v0.1.0 — restarts are rare enough that recompute is cheap and persistence has a flock of edge cases (peer added a new GPU? quant changed?).
-4. **Distribution: who builds RPC-enabled llama.cpp for the average user?** Options: maintain our own Homebrew tap, ship a static binary in the unhosted release, document a build-from-source procedure, lobby upstream. Each has costs. The choice gates how usable v0.1.0 actually is for non-developer users.
+
+3. **Should the plan be ephemeral (recomputed every `vram-pool start`) or persisted (so a reboot of one peer doesn't kill the pool)?** Lean ephemeral for v0.1.0 — restarts are rare enough that recompute is cheap and persistence has a flock of edge cases (peer added a new GPU? quant changed?). **Resolved: ephemeral for v0.1.0.**
+
+4. **Distribution: who builds RPC-enabled llama.cpp for the average user?**
+
+   **Investigated 2026-05-15:**
+   - Homebrew `llama.cpp` 9090 (current release) does **not** ship with RPC support. `which rpc-server` returns nothing, `llama-server --help` doesn't list `--rpc`.
+   - The upstream formula's CMake args:
+     ```
+     -DBUILD_SHARED_LIBS=ON
+     -DCMAKE_INSTALL_RPATH=#{rpath}
+     -DLLAMA_ALL_WARNINGS=OFF
+     -DLLAMA_BUILD_TESTS=OFF
+     -DLLAMA_OPENSSL=ON
+     -DLLAMA_USE_SYSTEM_GGML=ON
+     ```
+     Adding `-DGGML_RPC=ON` is a one-line change. The build itself is a few minutes longer.
+   - Likely-friction with upstream: `rpc-server` binds a network port by default (`-H 0.0.0.0`). Homebrew maintainers may push back on "default-on security-sensitive binaries". Counter: same posture as redis, postgres, etc. — formula installs, user runs.
+
+   **Decision for v0.1.0:** parallel path.
+
+   - **a) Submit upstream PR to homebrew-core** adding `-DGGML_RPC=ON`. Low cost to write, high payoff if accepted (every user's `brew install llama.cpp` just works). Acceptance is uncertain; deferral or rejection is possible.
+
+   - **b) Stand up `homebrew-unhosted` tap** as the always-available fallback. One formula file in a new repo:
+     ```
+     brew tap unhosted-ai/unhosted
+     brew install unhosted-ai/unhosted/llama.cpp-rpc
+     ```
+     The formula is essentially the upstream one with `-DGGML_RPC=ON` added. We carry it until upstream lands the change, then archive the tap.
+
+   - **c) `unhosted vram-pool start` performs detection up-front:**
+     - `which rpc-server` → present?
+     - `llama-server --help` includes `--rpc` → yes?
+     If either fails, print the exact `brew tap` + `brew install` from (b), or for non-Homebrew users a link to the build-from-source recipe. No silent fall-through to a broken state. This is the v0.1.0-blocking work: detection is small, the formula in (b) is small, the upstream PR in (a) is small.
+
+   **Linux + Windows note:** `llama.cpp` builds with RPC enabled cleanly on both. Linux distro packages (Ubuntu, Arch, Fedora) tend to also default-disable RPC; same pattern of "user must `apt install / pacman -S` a community build or compile from source." We track the same problem with the same approach: detection in unhosted + a packaging-help page in docs.
 
 ## Why this bet
 
