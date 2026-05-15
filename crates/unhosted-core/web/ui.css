@@ -374,7 +374,19 @@ button:disabled:hover { border-color: var(--line-strong); }
   justify-content: space-between;
   font-size: 12px;
   padding: 4px 0;
-  gap: 6px;
+  gap: 8px;
+}
+/* Wrapper for the two stacked lines (name+badge / address). `min-width:
+   0` is the magic that lets flex children shrink below their intrinsic
+   content width — without it, a long IPv6 link-local address pushes
+   the whole li wider than the sidebar and clips the unpair button
+   off the right edge. */
+.peer-list .peer-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 1px;
 }
 .peer-list .pname {
   color: var(--fg);
@@ -382,8 +394,23 @@ button:disabled:hover { border-color: var(--line-strong); }
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
-.peer-list .paddr { color: var(--mute); font-family: ui-monospace, monospace; font-size: 11.5px; }
+.peer-list .pname-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.peer-list .paddr {
+  color: var(--mute);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}
 
 .peer-badge {
   display: inline-block;
@@ -415,6 +442,9 @@ button:disabled:hover { border-color: var(--line-strong); }
   background: transparent;
   border-color: transparent;
   cursor: pointer;
+  /* Don't shrink to make room for a long peer address — the unpair
+     button must stay visible. */
+  flex-shrink: 0;
 }
 .peer-list .unpair svg { width: 11px; height: 11px; }
 .peer-list .unpair:hover { color: var(--accent); border-color: var(--accent); }
@@ -437,6 +467,8 @@ button:disabled:hover { border-color: var(--line-strong); }
   flex-direction: column;
   gap: 2px;
   overflow: hidden;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 .discovered-list .dname .name {
   font-size: 12.5px;
@@ -450,6 +482,9 @@ button:disabled:hover { border-color: var(--line-strong); }
   font-family: ui-monospace, 'JetBrains Mono', monospace;
   font-size: 11px;
   color: var(--mute);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .discovered-list .pair {
   display: inline-flex;

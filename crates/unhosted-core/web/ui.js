@@ -707,13 +707,21 @@ function renderStatus(s) {
       const li = document.createElement("li");
 
       const left = document.createElement("div");
-      left.style.display = "flex";
-      left.style.flexDirection = "column";
+      // Flex column that can SHRINK below its content width — without
+      // `min-width: 0` (set on `.peer-info` in css) a long IPv6 address
+      // pushes the whole row wider than the sidebar and the `unpair`
+      // button clips off the right edge.
+      left.className = "peer-info";
 
       const nameRow = document.createElement("span");
       nameRow.className = "pname";
       const nameText = document.createElement("span");
+      nameText.className = "pname-text";
       nameText.textContent = peer.name;
+      // Full hostname on hover — when truncated, the user still needs
+      // to be able to read it (especially helpful when two devices
+      // share a prefix).
+      nameText.title = peer.name;
       nameRow.appendChild(nameText);
       // Trust badge: red dot + "trusted" for paired-with-pubkey peers,
       // muted "lan" for unauthenticated LAN peers.
@@ -725,6 +733,9 @@ function renderStatus(s) {
       const addr = document.createElement("span");
       addr.className = "paddr";
       addr.textContent = peer.addr;
+      // IPv6 link-local addresses are long. Truncate visually but
+      // keep the full string available via title for copy/inspection.
+      addr.title = peer.addr;
       left.append(nameRow, addr);
 
       const unpair = document.createElement("button");

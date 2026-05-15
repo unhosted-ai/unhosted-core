@@ -6,6 +6,24 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.23] — 2026-05-15
+
+### Fixed
+- **Peer-list row overflow.** When a paired peer's address was an
+  IPv6 link-local (e.g. `[fe80::18bb:e56:8e3b:d558]:7777` — the
+  common case for mDNS-discovered LAN peers), the address pushed
+  the row wider than the sidebar and clipped the `unpair` button
+  off the right edge. Root cause: the left column was a flex
+  container without `min-width: 0`, so flex children couldn't
+  shrink below their intrinsic content width.
+  Fix: new `.peer-info` class with `min-width: 0` + `flex: 1 1
+  auto`, ellipsis on both `.pname-text` and `.paddr`,
+  `flex-shrink: 0` on `.unpair` so the action stays clickable.
+  Full peer name + address still available on hover via `title`
+  attributes. Same overflow guard applied to the
+  `.discovered-list .dname .addr` line, which had the same shape
+  bug (and the same affected addresses).
+
 ## [0.0.22] — 2026-05-15
 
 ### Added
