@@ -1815,7 +1815,7 @@ fn inject_memory_context(body: bytes::Bytes) -> bytes::Bytes {
             }
         })
         .unwrap_or_default();
-    let hits = memory::keyword_retrieve(&store, &query, MEMORY_TOP_K);
+    let hits = memory::retrieve(&store, &query, MEMORY_TOP_K);
     if hits.is_empty() {
         return body;
     }

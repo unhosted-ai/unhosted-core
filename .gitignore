@@ -46,3 +46,9 @@ crates/unhosted-desktop/gen/
 # Local env
 .env
 .env.local
+
+# fastembed downloads the embedding model to a cache directory at
+# runtime. Default is the working dir on macOS for some reason; we
+# explicitly never want those weights checked in.
+**/.fastembed_cache/
+

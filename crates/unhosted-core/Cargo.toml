@@ -34,3 +34,12 @@ quinn.workspace = true
 rustls.workspace = true
 rustls-pki-types.workspace = true
 rcgen.workspace = true
+# Text embeddings for private-memory phase-3 retrieval. Default-features
+# off to drop the `image-models` bag (pulls the `image` crate; we only
+# embed text). `hf-hub-native-tls` is what fetches the ~33 MB
+# `bge-small-en-v1.5` ONNX model from Hugging Face on first init, cached
+# under `~/.cache/fastembed` so subsequent boots are instant.
+# `ort-download-binaries-native-tls` ships the ONNX Runtime shared lib
+# alongside our binary — important because the user shouldn't have to
+# install onnxruntime by hand to use private memory.
+fastembed = { version = "5", default-features = false, features = ["hf-hub-native-tls", "ort-download-binaries-native-tls"] }

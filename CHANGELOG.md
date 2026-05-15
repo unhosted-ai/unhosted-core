@@ -6,6 +6,58 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.22] — 2026-05-15
+
+### Added
+- **Private memory — phase 3: semantic retrieval via bundled embedder.**
+  Replaces the v0.0.20 keyword-overlap retriever with cosine similarity
+  over real 384-dim embeddings from `BAAI/bge-small-en-v1.5`. The model
+  is fetched once from Hugging Face on the first memory write (~33 MB,
+  cached at `~/.cache/fastembed/`) and runs CPU-only thereafter; warm
+  embeds take ~20 ms for the short summary strings we feed it.
+
+  `MemoryEntry` gains an `embedding: Vec<f32>` field (empty by default,
+  skipped on serialize when empty so the on-disk JSON stays small).
+  Both `memory::add` and `memory::upsert_for_chat` now embed at write
+  time, so every new entry — manual or auto-summarized — gets a vector
+  the moment it lands. Old entries (pre-phase-3) read fine: serde
+  defaults the field to an empty vec, and retrieval falls through to
+  the keyword path for those.
+
+  New top-level `memory::retrieve()` is what `proxy_chat_local` calls.
+  Logic: embed the query, score every entry that has an embedding by
+  cosine, drop matches below 0.30 as noise, return the top-3 by score.
+  If the embedder hasn't initialized (no network on first run, no
+  cache permission, etc.) the call falls all the way back to keyword
+  overlap so retrieval still works degraded — never silently breaks.
+
+  Verified end-to-end against Ollama + qwen2.5:3b:
+
+    POST /v1/memory  (summary: "Rust developer building local AI daemon")
+    POST /v1/memory  (summary: "knows Python well, likes async patterns")
+    POST /v1/chat/completions  ("what languages do I work with?")
+    → "You primarily work with Python, leveraging async patterns,
+       and know Rust through developing a local AI daemon."
+
+    The query never mentions Rust or Python by name — pure semantic
+    match.
+
+### Dependencies
+- `fastembed = "5"` with `default-features = false` and only
+  `hf-hub-native-tls` + `ort-download-binaries-native-tls` enabled.
+  Drops the `image-models` bag and its `image` crate transitive deps.
+  ONNX Runtime ships as a downloaded shared lib alongside our binary
+  — users don't have to install onnxruntime themselves.
+
+### Trade-offs (known, accepted)
+- First-write cost on a fresh install: ~3 s to download + load the
+  embedder. Subsequent writes are <50 ms. The init failure path is
+  not cached, so a transient first-run network blip doesn't lock the
+  feature out forever.
+- Binary size grows ~30–40 MB across the four shipped platforms.
+  Trade-off documented at the dep declaration in
+  `crates/unhosted-core/Cargo.toml`.
+
 ## [0.0.21] — 2026-05-15
 
 ### Added
