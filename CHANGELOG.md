@@ -6,6 +6,53 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.26] — 2026-05-15
+
+### Added
+- **VRAM-pooling — detection foundation (ADR 0009).** First slice
+  of the deep-tech bet that's been on the roadmap since ADR 0003.
+  Orchestration ships in v0.1.0; v0.0.26 lands the detection layer
+  underneath:
+
+  - New module `unhosted-core/src/vram_pool.rs` with
+    `RpcCapability` + `probe()`. Cheap: two PATH lookups and one
+    `llama-server --help` subprocess. Reports whether this machine
+    has `rpc-server` on PATH and `--rpc` in `llama-server --help`
+    — the canonical signals that the local llama.cpp build was
+    compiled with `-DGGML_RPC=ON`.
+
+  - `GET /v1/status` exposes a new optional `vram_pool` field with
+    the probe result, so the UI (and any external observer) can
+    surface "this machine is ready for VRAM-pooling" without
+    re-running the probe themselves.
+
+  - New CLI subcommand tree:
+    ```
+    unhosted vram-pool detect             # works today
+    unhosted vram-pool start --model …    # stub, prints capability + plan
+    unhosted vram-pool stop               # stub
+    unhosted vram-pool status             # reports local capability
+    ```
+    `detect` does the real work. `start` / `stop` / `status` are
+    deliberate stubs that print "not yet implemented in this slice"
+    plus the local capability — the command surface lands now so
+    v0.1.0 fills in the orchestration without reshaping the CLI.
+
+  Verified locally on this Mac (Homebrew `llama.cpp` 9090, NOT
+  built with RPC), `unhosted vram-pool detect` correctly reports:
+
+  ```
+  llama-server        : /opt/homebrew/bin/llama-server
+  llama-server --rpc  : no — build lacks -DGGML_RPC=ON
+  rpc-server          : (not found on PATH)
+  ready for pool      : no
+  ```
+
+  with a targeted install hint pointing at the
+  `unhosted-ai/homebrew-unhosted` tap (also unpublished, draft at
+  `design/0009-vram-pooling.tap-formula-draft.rb`) as the
+  recommended fix.
+
 ## [0.0.25] — 2026-05-15
 
 ### Added

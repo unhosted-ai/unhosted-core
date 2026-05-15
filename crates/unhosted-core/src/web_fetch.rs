@@ -35,7 +35,7 @@
 use std::net::IpAddr;
 use std::time::Duration;
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -136,11 +136,10 @@ pub async fn fetch(
         .ok_or_else(|| WebFetchError::InvalidUrl("missing host".to_string()))?
         .to_string();
     let port = parsed.port_or_known_default().unwrap_or(443);
-    let lookup_results: Vec<std::net::SocketAddr> =
-        tokio::net::lookup_host((host.as_str(), port))
-            .await
-            .map_err(|e| WebFetchError::DnsFailed(e.to_string()))?
-            .collect();
+    let lookup_results: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), port))
+        .await
+        .map_err(|e| WebFetchError::DnsFailed(e.to_string()))?
+        .collect();
     let mut any_safe = false;
     for sockaddr in &lookup_results {
         if is_private(&sockaddr.ip()) {
@@ -151,7 +150,9 @@ pub async fn fetch(
     if !any_safe {
         // No A/AAAA records. Refuse — better to give a clear error
         // than to let reqwest re-resolve and possibly bypass our check.
-        return Err(WebFetchError::DnsFailed("no addresses returned".to_string()));
+        return Err(WebFetchError::DnsFailed(
+            "no addresses returned".to_string(),
+        ));
     }
 
     let cap = req
@@ -162,7 +163,10 @@ pub async fn fetch(
     let resp = client
         .get(parsed.as_str())
         .header(reqwest::header::USER_AGENT, user_agent())
-        .header(reqwest::header::ACCEPT, "text/html,text/plain;q=0.9,*/*;q=0.5")
+        .header(
+            reqwest::header::ACCEPT,
+            "text/html,text/plain;q=0.9,*/*;q=0.5",
+        )
         .timeout(DEFAULT_TIMEOUT)
         .send()
         .await
@@ -279,10 +283,7 @@ fn strip_html(raw: &str) -> String {
                 b"</style"
             };
             if let Some(close) = find_ci(&bytes[i..], needle) {
-                if let Some(gt) = bytes[i + close..]
-                    .iter()
-                    .position(|&b| b == b'>')
-                {
+                if let Some(gt) = bytes[i + close..].iter().position(|&b| b == b'>') {
                     i += close + gt + 1;
                     continue;
                 }
@@ -394,7 +395,7 @@ mod tests {
         assert!(is_private(&"::".parse().unwrap()));
         assert!(is_private(&"fe80::1".parse().unwrap())); // link-local
         assert!(is_private(&"fc00::1".parse().unwrap())); // unique-local
-        // Public addresses pass through.
+                                                          // Public addresses pass through.
         assert!(!is_private(&"2606:4700:4700::1111".parse().unwrap())); // Cloudflare DNS
     }
 

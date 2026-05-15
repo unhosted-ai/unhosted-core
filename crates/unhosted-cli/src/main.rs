@@ -129,6 +129,46 @@ enum Command {
     /// on the default localhost ports and, if nothing is, an
     /// OS-specific install hint.
     Doctor,
+    /// VRAM-pooling (ADR 0009) — distribute one model's layers
+    /// across multiple LAN peers via llama.cpp's RPC mode, so a
+    /// 70B-class model is usable across hardware that no single
+    /// machine could fit. v0.1.0 ships orchestration; this slice
+    /// ships *detection* — every subcommand except `detect`
+    /// reports "not yet implemented" but prints the local
+    /// capability so users can verify their build is ready.
+    #[command(name = "vram-pool")]
+    VramPool {
+        #[command(subcommand)]
+        action: VramPoolAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum VramPoolAction {
+    /// Probe this machine for the binaries + build flags VRAM-pooling
+    /// requires (rpc-server on PATH, --rpc flag on llama-server).
+    /// Prints a status line plus an install hint pinned to the
+    /// actual gap detected. Safe to run with no daemon running.
+    Detect,
+    /// (v0.1.0+ — not yet implemented in this slice.) Start a
+    /// layer-split inference cluster across this machine and the
+    /// specified peers.
+    Start {
+        /// Model name/short-id or full GGUF URL.
+        #[arg(long)]
+        model: Option<String>,
+        /// LAN peers to enlist as layer hosts. Repeat the flag for
+        /// each peer (`--peers thunder --peers homelab`) or use a
+        /// comma-separated list (`--peers thunder,homelab`). By
+        /// default uses paired peers from `~/.config/unhosted/peers.toml`.
+        #[arg(long, value_delimiter = ',', num_args = 1..)]
+        peers: Vec<String>,
+    },
+    /// (v0.1.0+ — not yet implemented.) Stop the cluster.
+    Stop,
+    /// (v0.1.0+ — not yet implemented.) Show cluster topology and
+    /// per-peer VRAM utilization. For now reports local capability.
+    Status,
 }
 
 #[derive(Subcommand, Debug)]
@@ -259,8 +299,90 @@ async fn main() -> Result<()> {
         Command::Doctor => {
             run_doctor().await?;
         }
+        Command::VramPool { action } => {
+            run_vram_pool(action).await?;
+        }
     }
 
+    Ok(())
+}
+
+async fn run_vram_pool(action: VramPoolAction) -> Result<()> {
+    use unhosted_core::vram_pool;
+
+    let cap = vram_pool::probe();
+
+    let print_capability = |c: &vram_pool::RpcCapability| {
+        println!("VRAM-pooling capability on this machine:");
+        println!(
+            "  llama-server        : {}",
+            c.llama_server_path
+                .as_deref()
+                .unwrap_or("(not found on PATH)")
+        );
+        println!(
+            "  llama-server --rpc  : {}",
+            if c.llama_server_has_rpc_flag {
+                "yes"
+            } else {
+                "no — build lacks -DGGML_RPC=ON"
+            }
+        );
+        println!(
+            "  rpc-server          : {}",
+            c.rpc_server_path
+                .as_deref()
+                .unwrap_or("(not found on PATH)")
+        );
+        println!(
+            "  ready for pool      : {}",
+            if c.ready() { "YES" } else { "no" }
+        );
+        println!();
+        println!("hint:");
+        for line in c.install_hint().split('\n') {
+            println!("  {}", line.trim());
+        }
+    };
+
+    match action {
+        VramPoolAction::Detect => {
+            print_capability(&cap);
+        }
+        VramPoolAction::Start { model, peers } => {
+            eprintln!("unhosted vram-pool start is not yet implemented in this slice.");
+            eprintln!("Orchestration ships in v0.1.0 (ADR 0009). For now, here's the");
+            eprintln!("local capability + what you intended to start:");
+            eprintln!();
+            print_capability(&cap);
+            eprintln!();
+            eprintln!(
+                "  requested model     : {}",
+                model
+                    .as_deref()
+                    .unwrap_or("(none — would use cluster default)")
+            );
+            eprintln!(
+                "  requested peers     : {}",
+                if peers.is_empty() {
+                    "(none — would use paired peers from peers.toml)".to_string()
+                } else {
+                    peers.join(", ")
+                }
+            );
+        }
+        VramPoolAction::Stop => {
+            eprintln!("unhosted vram-pool stop is not yet implemented (no pool to stop).");
+        }
+        VramPoolAction::Status => {
+            print_capability(&cap);
+            println!();
+            println!(
+                "(orchestration status — peers, layer counts, tokens/sec — \
+                 ships in v0.1.0)"
+            );
+        }
+    }
     Ok(())
 }
 

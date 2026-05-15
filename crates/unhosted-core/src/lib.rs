@@ -20,6 +20,7 @@ pub mod router;
 pub mod transport;
 pub mod tunnel;
 pub mod upstream;
+pub mod vram_pool;
 mod web;
 pub mod web_fetch;
 
@@ -641,6 +642,14 @@ struct StatusResponse {
     routing: RoutingStatus,
     discovered: Vec<DiscoveredPeer>,
     relay: RelayStatus,
+    /// VRAM-pooling readiness probe (ADR 0009). Tells consumers
+    /// whether this machine has an RPC-capable llama.cpp build,
+    /// and therefore whether it can participate in the cluster as
+    /// orchestrator or layer host. `null` when probing is skipped
+    /// (e.g., daemon started in a mode where llama.cpp isn't
+    /// relevant); a populated value is cheap to compute.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vram_pool: Option<vram_pool::RpcCapability>,
 }
 
 #[derive(Serialize)]
@@ -755,6 +764,7 @@ async fn status_handler(
                         url: None,
                         error: Some("registry lock poisoned".into()),
                     },
+                    vram_pool: None,
                 }));
             }
         };
@@ -864,6 +874,11 @@ async fn status_handler(
         },
         discovered,
         relay,
+        // Cheap probe (~30 ms for the llama-server --help call when
+        // present, less when absent). Run per-request rather than
+        // cached so the user sees changes immediately after a brew
+        // install / tap install without restarting the daemon.
+        vram_pool: Some(vram_pool::probe()),
     }))
 }
 
