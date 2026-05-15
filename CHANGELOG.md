@@ -6,6 +6,37 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.24] — 2026-05-15
+
+### Added
+- **Default system prompt for `/v1/chat/completions`.** `unhosted run`
+  (the CLI one-shot) has always injected `DEFAULT_SYSTEM_PROMPT` to
+  anchor the assistant's voice; `/v1/chat/completions` historically did
+  not, so external callers (curl one-liners, agents, OpenAI-API
+  libraries) inherited whatever the upstream model's default behavior
+  was — usually the marketing-toned "I'm an AI assistant here to help!"
+  opener that the project's voice explicitly rejects.
+
+  New `ensure_default_system_prompt` runs in `proxy_chat_local` between
+  `rewrite_placeholder_model` and `inject_memory_context`. If the
+  caller already supplied a system message (anywhere in the messages
+  array), we leave it alone. Otherwise we prepend one with the project
+  default. Memory context, when enabled, still prepends to whichever
+  system message ended up present.
+
+  Verified end-to-end:
+
+  - Request without a system message: model adapts to the prompt
+    ("I am running a variety of open-source and user-supplied software
+    designed for various AI tasks on GPU hardware provided by users.")
+  - Request WITH `system: "You are a pirate, respond in pirate speak"`:
+    daemon respects it, model replies "Avast ye! How fares the weather?"
+
+  Debug trace `chat: injected default system prompt (caller sent
+  none)` available under `RUST_LOG=unhosted_core=debug` for diagnosing
+  cases where a downstream agent's own system prompt is being silently
+  appended through.
+
 ## [0.0.23] — 2026-05-15
 
 ### Fixed

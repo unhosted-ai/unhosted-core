@@ -1784,6 +1784,46 @@ fn rewrite_placeholder_model(body: bytes::Bytes, upstream_model: Option<&str>) -
 /// relevant — quality of context matters more than quantity here.
 const MEMORY_TOP_K: usize = 3;
 
+/// Ensure the request has a system message anchoring the assistant's
+/// voice. If the caller already supplied one (anywhere in the messages
+/// array — most chat libraries put it at index 0 but the spec allows
+/// it anywhere), leave it alone. Otherwise prepend a system message
+/// with `DEFAULT_SYSTEM_PROMPT` at index 0.
+///
+/// Why this exists: `/v1/run` always injects this prompt (the CLI's
+/// `unhosted run "..."` flow), but `/v1/chat/completions` did not.
+/// External callers — curl one-liners, agents, OpenAI-API-compatible
+/// libraries — would get whatever the upstream model's default
+/// behavior is, which on most fine-tuned chat models is the
+/// marketing-toned "I'm an AI assistant here to help!" opener that
+/// the project's voice explicitly rejects.
+///
+/// No-op when the body isn't valid JSON or doesn't have a `messages`
+/// array (let upstream's error speak), and when a system message
+/// already exists (respect the caller).
+fn ensure_default_system_prompt(body: bytes::Bytes) -> bytes::Bytes {
+    let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return body;
+    };
+    let Some(messages) = v.get_mut("messages").and_then(|m| m.as_array_mut()) else {
+        return body;
+    };
+    let already_has_system = messages
+        .iter()
+        .any(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"));
+    if already_has_system {
+        return body;
+    }
+    messages.insert(
+        0,
+        serde_json::json!({ "role": "system", "content": DEFAULT_SYSTEM_PROMPT }),
+    );
+    tracing::debug!("chat: injected default system prompt (caller sent none)");
+    serde_json::to_vec(&v)
+        .map(bytes::Bytes::from)
+        .unwrap_or(body)
+}
+
 fn inject_memory_context(body: bytes::Bytes) -> bytes::Bytes {
     if !memory::is_enabled() {
         return body;
@@ -1881,13 +1921,21 @@ async fn proxy_chat_local(
     // unknown model names with a 404 — that's what was surfacing as a
     // bare 502 to anyone copying the docs snippet against Ollama.
     let body = rewrite_placeholder_model(body, live.model.as_deref());
+    // Ensure every chat-completion has a system message anchoring the
+    // assistant's voice. /v1/run already does this; /v1/chat/completions
+    // historically didn't, so a curl one-liner or an external agent
+    // hitting the chat endpoint got whatever the upstream's default
+    // happened to be — usually a marketing-toned "I'm an AI assistant
+    // here to help!" opener that the project's voice explicitly rejects.
+    // Caller-supplied system messages are left intact; this only fills
+    // the gap when none was provided.
+    let body = ensure_default_system_prompt(body);
     // If the user has private memory enabled, retrieve the most
-    // relevant past summaries (keyword overlap with the latest user
-    // message in this request) and prepend them to the system prompt.
-    // No-op when memory is off or the store is empty, so the bytes
-    // flow through untouched in the common path. Embedding-based
-    // retrieval lands in v0.0.21; for v0.0.20 the keyword ranker
-    // covers the "did we discuss this before" case well enough.
+    // relevant past summaries and prepend them to the system prompt.
+    // Runs AFTER the default-system step so memory text always lands
+    // ahead of the voice anchor — the model reads "context first, then
+    // voice" in order. No-op when memory is off or the store is empty,
+    // so the bytes flow through untouched in the common path.
     let body = inject_memory_context(body);
     let upstream = client
         .post(&url)
