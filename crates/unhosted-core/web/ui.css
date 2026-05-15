@@ -1472,3 +1472,79 @@ button:focus-visible, input:focus-visible, textarea:focus-visible,
   /* status-cluster in the top header gets crowded; hide the local chip */
   .mode-chip { display: none; }
 }
+
+/* ───── private memory ─────────────────────────────────────────────
+   Sidebar status line uses the same data-state coloring as tunnel
+   (idle/running) so the on/off semantics read consistently. The
+   modal list view is the only new layout — one row per entry with a
+   trailing trash icon, plus a small "+ add note" form at the foot. */
+.memory-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.memory-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  align-items: start;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.memory-summary {
+  grid-column: 1;
+  font-size: 14px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+.memory-meta {
+  grid-column: 1;
+  font-size: 11px;
+  margin-top: 2px;
+}
+.memory-delete {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 6px;
+  cursor: pointer;
+  color: var(--fg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.memory-delete:hover { color: var(--danger, #c33); border-color: var(--danger, #c33); }
+
+.memory-add {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.memory-add-input {
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  resize: vertical;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+.memory-add-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.memory-add-actions { display: flex; justify-content: flex-end; }
+
+.pair-btn-secondary {
+  margin-top: 6px;
+  opacity: 0.85;
+}
+.pair-btn-secondary:hover { opacity: 1; }

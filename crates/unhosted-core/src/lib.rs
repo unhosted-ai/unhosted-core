@@ -12,6 +12,7 @@ pub mod auth;
 pub mod chats;
 pub mod discovery;
 pub mod identity;
+pub mod memory;
 pub mod paths;
 pub mod peer;
 pub mod relay_client;
@@ -383,6 +384,18 @@ pub async fn serve(node: Node) -> Result<()> {
         .route("/v1/tunnel", get(tunnel_status_handler))
         .route("/v1/tunnel/start", post(tunnel_start_handler))
         .route("/v1/tunnel/stop", post(tunnel_stop_handler))
+        // Private memory — RAG over the user's own past chats. Toggleable
+        // from the sidebar; default off. See `memory.rs`.
+        .route(
+            "/v1/memory",
+            get(memory_list_handler).post(memory_add_handler),
+        )
+        .route(
+            "/v1/memory/{id}",
+            axum::routing::delete(memory_delete_handler),
+        )
+        .route("/v1/memory/clear", post(memory_clear_handler))
+        .route("/v1/memory/enable", post(memory_enable_handler))
         .with_state(state);
 
     let app = api
@@ -1743,6 +1756,105 @@ fn rewrite_placeholder_model(body: bytes::Bytes, upstream_model: Option<&str>) -
     }
 }
 
+/// Inject retrieved memory summaries into the chat-completions request's
+/// system message. No-op when:
+///   - memory is disabled (the toggle is off → privacy-preserving default)
+///   - the store is empty (nothing to inject)
+///   - the body isn't valid JSON or doesn't look like a chat request
+///
+/// When applied, picks the top-3 keyword-overlap matches against the
+/// latest user message in the request and either prepends them to the
+/// existing system message or inserts a new one at the head of the
+/// messages array. Caller's other fields (model, max_tokens, etc.)
+/// are untouched.
+///
+/// Three is small enough that even with our 1k-character summary cap
+/// it can't blow past a 4k-token system prompt. If the user grows the
+/// memory store large, the keyword ranker still picks the three most
+/// relevant — quality of context matters more than quantity here.
+const MEMORY_TOP_K: usize = 3;
+
+fn inject_memory_context(body: bytes::Bytes) -> bytes::Bytes {
+    if !memory::is_enabled() {
+        return body;
+    }
+    let store = memory::load();
+    if store.entries.is_empty() {
+        return body;
+    }
+    let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return body;
+    };
+    let Some(messages) = v.get_mut("messages").and_then(|m| m.as_array_mut()) else {
+        return body;
+    };
+    // Extract the latest user message as the retrieval query. Walking
+    // backwards rather than taking the last entry covers the case where
+    // the most recent message is a tool/assistant turn.
+    let query = messages
+        .iter()
+        .rev()
+        .find_map(|m| {
+            let obj = m.as_object()?;
+            if obj.get("role").and_then(|r| r.as_str()) == Some("user") {
+                obj.get("content")
+                    .and_then(|c| c.as_str())
+                    .map(String::from)
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default();
+    let hits = memory::keyword_retrieve(&store, &query, MEMORY_TOP_K);
+    if hits.is_empty() {
+        return body;
+    }
+    let context = build_memory_block(&hits);
+
+    // Prepend to existing system message, or insert a new one at index 0.
+    let existing_system_idx = messages
+        .iter()
+        .position(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"));
+    match existing_system_idx {
+        Some(i) => {
+            let prev_content = messages[i]
+                .get("content")
+                .and_then(|c| c.as_str())
+                .unwrap_or_default()
+                .to_string();
+            messages[i].as_object_mut().map(|o| {
+                o.insert(
+                    "content".into(),
+                    serde_json::Value::String(format!("{context}\n\n{prev_content}")),
+                )
+            });
+        }
+        None => {
+            messages.insert(
+                0,
+                serde_json::json!({ "role": "system", "content": context }),
+            );
+        }
+    }
+    serde_json::to_vec(&v)
+        .map(bytes::Bytes::from)
+        .unwrap_or(body)
+}
+
+fn build_memory_block(hits: &[&memory::MemoryEntry]) -> String {
+    let mut out = String::from(
+        "you have private memory of previous conversations with this user. \
+         use these as background context when they're relevant — do not \
+         repeat them back verbatim or mention you are reading them:\n",
+    );
+    for h in hits {
+        out.push_str("- ");
+        out.push_str(h.summary.trim());
+        out.push('\n');
+    }
+    out
+}
+
 async fn proxy_chat_local(
     node: &Node,
     client: &reqwest::Client,
@@ -1759,6 +1871,14 @@ async fn proxy_chat_local(
     // unknown model names with a 404 — that's what was surfacing as a
     // bare 502 to anyone copying the docs snippet against Ollama.
     let body = rewrite_placeholder_model(body, live.model.as_deref());
+    // If the user has private memory enabled, retrieve the most
+    // relevant past summaries (keyword overlap with the latest user
+    // message in this request) and prepend them to the system prompt.
+    // No-op when memory is off or the store is empty, so the bytes
+    // flow through untouched in the common path. Embedding-based
+    // retrieval lands in v0.0.21; for v0.0.20 the keyword ranker
+    // covers the "did we discuss this before" case well enough.
+    let body = inject_memory_context(body);
     let upstream = client
         .post(&url)
         .header("content-type", "application/json")
@@ -2078,6 +2198,106 @@ async fn tunnel_stop_handler(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
     Ok(axum::Json(s))
+}
+
+// ─── private memory endpoints ─────────────────────────────────────────────
+// Local-user-only. The memory store is the user's own past chat summaries;
+// no peer or unauthenticated caller should be able to read or mutate it.
+// Same auth posture as the /v1/chats CRUD endpoints just above.
+
+#[derive(serde::Serialize)]
+struct MemoryListResponse {
+    enabled: bool,
+    entries: Vec<memory::MemoryEntry>,
+}
+
+async fn memory_list_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<axum::Json<MemoryListResponse>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    let store = memory::load();
+    Ok(axum::Json(MemoryListResponse {
+        enabled: memory::is_enabled(),
+        entries: store.entries,
+    }))
+}
+
+#[derive(serde::Deserialize)]
+struct MemoryAddRequest {
+    summary: String,
+    chat_id: Option<String>,
+}
+
+async fn memory_add_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    axum::Json(req): axum::Json<MemoryAddRequest>,
+) -> Result<axum::Json<memory::MemoryEntry>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    let summary = req.summary.trim();
+    if summary.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    memory::add(summary.to_string(), req.chat_id)
+        .map(axum::Json)
+        .map_err(|e| {
+            tracing::error!(error = %e, "memory: add failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
+
+async fn memory_delete_handler(
+    State(state): State<NodeState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<StatusCode, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    match memory::remove(&id) {
+        Ok(true) => Ok(StatusCode::NO_CONTENT),
+        Ok(false) => Err(StatusCode::NOT_FOUND),
+        Err(e) => {
+            tracing::error!(error = %e, "memory: remove failed");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+async fn memory_clear_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<StatusCode, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    memory::clear().map_err(|e| {
+        tracing::error!(error = %e, "memory: clear failed");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(serde::Deserialize)]
+struct MemoryEnableRequest {
+    enabled: bool,
+}
+
+async fn memory_enable_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    axum::Json(req): axum::Json<MemoryEnableRequest>,
+) -> Result<axum::Json<serde_json::Value>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    memory::set_enabled(req.enabled);
+    Ok(axum::Json(serde_json::json!({ "enabled": req.enabled })))
 }
 
 /// Route an inbound relay request by its `kind` to the right local handler.

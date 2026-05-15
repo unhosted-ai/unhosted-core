@@ -242,6 +242,17 @@ const els = {
   devTunnelUrl: $("#dev-tunnel-url"),
   devSnippetCode: $("#dev-snippet-code"),
   devSnippetCopy: $("#dev-snippet-copy"),
+  memorySection: $("#memory-section"),
+  memoryToggle: $("#memory-toggle"),
+  memoryToggleLabel: $("#memory-toggle-label"),
+  memoryStatus: $("#memory-status-line"),
+  memoryManage: $("#memory-manage"),
+  memoryModal: $("#memory-modal"),
+  memoryModalClose: $("#memory-modal-close"),
+  memoryList: $("#memory-list"),
+  memoryClearAll: $("#memory-clear-all"),
+  memoryAddInput: $("#memory-add-input"),
+  memoryAddSubmit: $("#memory-add-submit"),
 };
 
 let streaming = false;
@@ -1359,6 +1370,217 @@ if (els.tunnelCopy) {
     }
   });
 }
+
+// ---------------------------------------------------------------- private memory
+// Opt-in RAG over past chats. Sidebar toggle persists server-side at
+// `~/.config/unhosted/memory-enabled.txt`; when on, the daemon prepends
+// the top-k most relevant past summaries to the system prompt on each
+// chat completion. v0.0.20 ships storage + manual entry; auto-summarize
+// and the embedding-based retriever land in v0.0.21.
+
+async function fetchMemory() {
+  try {
+    const r = await fetch("/v1/memory", { cache: "no-store" });
+    return r.ok ? await r.json() : null;
+  } catch (e) { return null; }
+}
+
+async function setMemoryEnabled(enabled) {
+  try {
+    const r = await fetch("/v1/memory/enable", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    return r.ok ? await r.json() : null;
+  } catch (e) { return null; }
+}
+
+async function addMemory(summary, chatId) {
+  try {
+    const r = await fetch("/v1/memory", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ summary, chat_id: chatId || null }),
+    });
+    return r.ok ? await r.json() : null;
+  } catch (e) { return null; }
+}
+
+async function deleteMemory(id) {
+  try {
+    const r = await fetch(`/v1/memory/${encodeURIComponent(id)}`, { method: "DELETE" });
+    return r.ok;
+  } catch (e) { return false; }
+}
+
+async function clearAllMemories() {
+  try {
+    const r = await fetch("/v1/memory/clear", { method: "POST" });
+    return r.ok;
+  } catch (e) { return false; }
+}
+
+let lastMemoryEnabled = null;
+
+function renderMemory({ enabled, entries }) {
+  if (!els.memoryToggle) return;
+  lastMemoryEnabled = enabled;
+  els.memoryToggleLabel.textContent = enabled ? "disable" : "enable";
+  if (enabled) {
+    const n = entries ? entries.length : 0;
+    els.memoryStatus.textContent = n === 0
+      ? "on — no memories yet. save a chat to start."
+      : `on — ${n} memor${n === 1 ? "y" : "ies"} stored.`;
+    els.memoryStatus.dataset.state = "running";
+    if (els.memoryManage) els.memoryManage.hidden = false;
+  } else {
+    els.memoryStatus.textContent = "off — chats are not remembered between sessions.";
+    els.memoryStatus.dataset.state = "idle";
+    if (els.memoryManage) els.memoryManage.hidden = true;
+  }
+}
+
+function renderMemoryList(entries) {
+  if (!els.memoryList) return;
+  els.memoryList.innerHTML = "";
+  if (!entries || entries.length === 0) {
+    const li = document.createElement("li");
+    li.className = "muted small";
+    li.textContent =
+      "no memories yet — start a chat with memory on, then save it from the chat header.";
+    els.memoryList.append(li);
+    if (els.memoryClearAll) els.memoryClearAll.hidden = true;
+    return;
+  }
+  // Newest first — matches how a human thinks about "recent memory"
+  // and keeps the most relevant context at the top of a long list.
+  const sorted = [...entries].sort((a, b) => b.created_at - a.created_at);
+  for (const e of sorted) {
+    const li = document.createElement("li");
+    li.className = "memory-item";
+
+    const text = document.createElement("div");
+    text.className = "memory-summary";
+    text.textContent = e.summary;
+
+    const meta = document.createElement("div");
+    meta.className = "memory-meta muted small";
+    const when = new Date((e.created_at || 0) * 1000).toLocaleString();
+    meta.textContent = e.chat_id ? `from chat · ${when}` : `manual · ${when}`;
+
+    const delBtn = document.createElement("button");
+    delBtn.className = "memory-delete";
+    delBtn.title = "delete this memory";
+    delBtn.setAttribute("aria-label", "delete this memory");
+    delBtn.innerHTML =
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h10M6 4V2.5A.5.5 0 0 1 6.5 2h3a.5.5 0 0 1 .5.5V4M5 4l.5 9a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1L11 4"/></svg>';
+    delBtn.addEventListener("click", async () => {
+      const ok = await confirmDialog({
+        title: "delete memory?",
+        message: `delete "${truncate(e.summary, 60)}"? this can't be undone.`,
+        confirmLabel: "delete",
+        danger: true,
+      });
+      if (!ok) return;
+      const removed = await deleteMemory(e.id);
+      if (removed) {
+        notify("memory deleted", { level: "info", duration: 2000 });
+        await refreshMemoryUI();
+      } else {
+        notify("delete failed", { level: "error" });
+      }
+    });
+
+    li.append(text, meta, delBtn);
+    els.memoryList.append(li);
+  }
+  if (els.memoryClearAll) els.memoryClearAll.hidden = false;
+}
+
+async function refreshMemoryUI() {
+  const s = await fetchMemory();
+  if (!s) return;
+  renderMemory(s);
+  renderMemoryList(s.entries);
+}
+
+if (els.memoryToggle) {
+  els.memoryToggle.addEventListener("click", async () => {
+    const next = !lastMemoryEnabled;
+    els.memoryToggle.disabled = true;
+    // Optimistic UI: paint the new state immediately, then reconcile
+    // with the server response. Matches the tunnel toggle pattern.
+    renderMemory({ enabled: next, entries: [] });
+    notify(next ? "memory on — chats can now be remembered" : "memory off", {
+      level: "info",
+      key: "memory",
+      duration: 2500,
+    });
+    const resp = await setMemoryEnabled(next);
+    if (resp === null) {
+      notify("couldn't save memory setting", { level: "error", key: "memory" });
+    }
+    await refreshMemoryUI();
+    els.memoryToggle.disabled = false;
+  });
+}
+
+if (els.memoryManage && els.memoryModal) {
+  const closeMemory = () => { els.memoryModal.hidden = true; };
+  els.memoryManage.addEventListener("click", async () => {
+    els.memoryModal.hidden = false;
+    await refreshMemoryUI();
+  });
+  if (els.memoryModalClose) els.memoryModalClose.addEventListener("click", closeMemory);
+  els.memoryModal.addEventListener("click", (e) => {
+    if (e.target === els.memoryModal) closeMemory();
+  });
+}
+
+if (els.memoryAddSubmit) {
+  els.memoryAddSubmit.addEventListener("click", async () => {
+    if (!els.memoryAddInput) return;
+    const text = els.memoryAddInput.value.trim();
+    if (text.length === 0) {
+      notify("enter a note first", { level: "info", duration: 2000 });
+      return;
+    }
+    els.memoryAddSubmit.disabled = true;
+    const added = await addMemory(text, null);
+    els.memoryAddSubmit.disabled = false;
+    if (added) {
+      els.memoryAddInput.value = "";
+      notify("memory saved", { level: "success", duration: 2000 });
+      await refreshMemoryUI();
+    } else {
+      notify("save failed", { level: "error" });
+    }
+  });
+}
+
+if (els.memoryClearAll) {
+  els.memoryClearAll.addEventListener("click", async () => {
+    const ok = await confirmDialog({
+      title: "clear every memory?",
+      message: "deletes all stored summaries. the toggle stays on so new chats can still be remembered.",
+      confirmLabel: "clear all",
+      danger: true,
+    });
+    if (!ok) return;
+    const cleared = await clearAllMemories();
+    if (cleared) {
+      notify("all memories cleared", { level: "info", duration: 2500 });
+      await refreshMemoryUI();
+    } else {
+      notify("clear failed", { level: "error" });
+    }
+  });
+}
+
+// Initial paint of the memory panel — runs alongside the first status
+// poll so the sidebar reflects the persisted state on every page load.
+refreshMemoryUI();
 
 // ---------------------------------------------------------------- pair modal
 

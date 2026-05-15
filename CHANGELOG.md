@@ -6,6 +6,37 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.20] — 2026-05-15
+
+### Added
+- **Private memory — phase 1 (storage + UI toggle + keyword retrieval).**
+  Opt-in RAG over the user's own past chats. New sidebar section "private
+  memory" with the same toggle pattern as "open to internet": click once,
+  state persists to `~/.config/unhosted/memory-enabled.txt`. When on, the
+  daemon stores user-supplied summaries in
+  `~/.config/unhosted/memories.json` (atomic write, capped at 50 FIFO),
+  and the chat-completions proxy prepends the top-3 keyword-overlap
+  matches to the system prompt before forwarding upstream. Nothing leaves
+  the user's machine — retrieval is in-process, embeddings stay local.
+
+  Five new endpoints, all local-user-only:
+    - `GET    /v1/memory` — list + enabled flag
+    - `POST   /v1/memory` — add `{ summary, chat_id? }`
+    - `DELETE /v1/memory/{id}` — remove one
+    - `POST   /v1/memory/clear` — wipe all
+    - `POST   /v1/memory/enable` — set `{ enabled }`
+
+  UI: sidebar toggle, "manage" button opens a modal listing every entry
+  with delete + a "+ add note" textarea so the v0.0.20 loop is testable
+  end-to-end without auto-summarize. Auto-summarize at chat end + a
+  bundled embedder (`fastembed-rs`) land in v0.0.21 — same surface, the
+  keyword retriever swaps out for cosine similarity.
+
+  Privacy posture: default off. A missing or unreadable enable file
+  reads as "off", so we can never inject memory context into an upstream
+  call without an affirmative user click. Same posture as
+  `tunnel-autostart.txt` in v0.0.19.
+
 ## [0.0.19] — 2026-05-15
 
 ### Added
