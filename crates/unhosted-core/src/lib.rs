@@ -726,8 +726,20 @@ async fn status_handler(
     let outcome = state.classify(&headers, Some(remote.ip()), &[]);
     require_auth(&outcome, false)?;
 
-    let upstream_url = state.node.llama_server_url.clone();
-    let (reachable, model) = probe_upstream(&upstream_url).await;
+    // VRAM-pool takes precedence as the upstream when it's running —
+    // matches the routing decision in `resolve_upstream` so the UI's
+    // "node ready" indicator stays in sync with where chats actually
+    // go. When the pool is anything other than Running, fall back to
+    // the configured-upstream probe.
+    let pool_state = state.vram_pool.status().await;
+    let (upstream_url, reachable, model) =
+        if let vram_pool::PoolState::Running { endpoint, plan, .. } = &pool_state {
+            (endpoint.clone(), true, Some(plan.model.clone()))
+        } else {
+            let url = state.node.llama_server_url.clone();
+            let (r, m) = probe_upstream(&url).await;
+            (url, r, m)
+        };
     // Probe all three known local backends in parallel so the UI can
     // suggest a switch when the configured upstream is down but, say,
     // ollama is running on :11434. Cheap (~750ms timeout each, in
@@ -1750,15 +1762,36 @@ async fn chat_completions_handler(
     };
 
     match target {
-        Target::Local => proxy_chat_local(&state.node, &state.http, body).await,
+        Target::Local => proxy_chat_local(&state.node, &state.http, &state.vram_pool, body).await,
         Target::Peer { ref name, addr } => match proxy_chat_peer(name, addr, &body).await {
             Ok(r) => Ok(r),
             Err(e) => {
                 tracing::warn!(peer = %name, error = %e, "chat: peer unreachable, falling back to local");
-                proxy_chat_local(&state.node, &state.http, body).await
+                proxy_chat_local(&state.node, &state.http, &state.vram_pool, body).await
             }
         },
     }
+}
+
+/// Pick which upstream the chat-completions proxy talks to for this
+/// request. When the VRAM-pool is `Running`, route through it; the
+/// whole point of starting the pool is to use it. Otherwise fall
+/// back to the configured-or-probed backend list. The pool's plan
+/// carries the model path that was passed to `llama-server -m`, so
+/// we surface that as the `model` field for the placeholder-model
+/// substitution downstream.
+async fn resolve_upstream(
+    node: &Node,
+    pool: &vram_pool::PoolManager,
+) -> Option<upstream::LiveUpstream> {
+    if let vram_pool::PoolState::Running { endpoint, plan, .. } = pool.status().await {
+        tracing::debug!(endpoint = %endpoint, model = %plan.model, "chat: routing through vram-pool");
+        return Some(upstream::LiveUpstream {
+            url: endpoint,
+            model: Some(plan.model),
+        });
+    }
+    upstream::select_live(&node.llama_server_url).await
 }
 
 /// If the chat-completions body's `model` field is the documented
@@ -1768,10 +1801,11 @@ async fn chat_completions_handler(
 /// their loaded set — sending the placeholder to those backends 404s.
 ///
 /// Falls through unchanged when:
-///   - the body isn't valid JSON (let upstream's error speak)
-///   - the model field is already a real name (assume user knows)
-///   - we don't know the upstream's model (no probe data — let upstream
-///     error properly so the user sees a real message)
+///
+/// - the body isn't valid JSON (let upstream's error speak)
+/// - the model field is already a real name (assume user knows)
+/// - we don't know the upstream's model (no probe data — let upstream
+///   error properly so the user sees a real message)
 fn rewrite_placeholder_model(body: bytes::Bytes, upstream_model: Option<&str>) -> bytes::Bytes {
     let Some(real_model) = upstream_model else {
         return body;
@@ -1944,9 +1978,10 @@ fn build_memory_block(hits: &[&memory::MemoryEntry]) -> String {
 async fn proxy_chat_local(
     node: &Node,
     client: &reqwest::Client,
+    pool: &vram_pool::PoolManager,
     body: bytes::Bytes,
 ) -> Result<Response, StatusCode> {
-    let Some(live) = upstream::select_live(&node.llama_server_url).await else {
+    let Some(live) = resolve_upstream(node, pool).await else {
         return Ok(upstream_offline_response(&node.llama_server_url));
     };
     let base = live.url;

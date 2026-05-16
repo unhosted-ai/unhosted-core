@@ -483,13 +483,17 @@ struct PoolInner {
     user_stopped: bool,
 }
 
-/// How long to wait for `rpc-server` to bind its port before
-/// proceeding to spawn `llama-server`. The handshake `llama-server`
-/// does on connect is fast, but if it fires before `rpc-server` is
-/// listening it'll error out and we'd need to teardown + retry. A
-/// short sleep is the simplest reliable answer here; future work
-/// can swap in a TCP probe loop.
-const RPC_SERVER_BIND_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
+/// Hard cap on the TCP-probe wait for `rpc-server` to bind its
+/// port. On a Mac with Metal, `rpc-server`'s GPU init can take 2–4
+/// seconds before it accepts connections — `llama-server` firing
+/// before that point fails to dial its `--rpc` backend and exits,
+/// which the supervisor (rightly) reads as "both children dead".
+/// 10 s is generous for the worst cold-start case we've observed.
+const RPC_SERVER_BIND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Tight loop inside the bind wait. Cheap because we're just doing
+/// a TCP connect attempt against localhost.
+const RPC_SERVER_BIND_POLL: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// How often the model-load poller hits `llama-server`'s /v1/models
 /// endpoint to detect when the model is actually ready to serve
@@ -587,8 +591,18 @@ impl PoolManager {
             .arg(rpc_port.to_string())
             .arg("-H")
             .arg("127.0.0.1")
+            // Inherit stderr so the user sees what rpc-server /
+            // llama-server are doing in the daemon's own logs. The
+            // original `Stdio::piped()` setup was a deadlock waiting
+            // to happen — llama-server logs prolifically during
+            // model load (Metal init, layer-by-layer mmap), the
+            // pipe's ~64 KB buffer fills, the child blocks on write,
+            // the supervisor sees the now-frozen child as "dead",
+            // and the whole pool collapses ~10 s after spawn.
+            // Piping correctly would require a stderr-drainer task
+            // per child — for now `inherit` is the right trade.
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::inherit())
             .kill_on_drop(true)
             .spawn()
             .map_err(|e| anyhow::anyhow!("failed to spawn rpc-server: {e}"))?;
@@ -602,7 +616,42 @@ impl PoolManager {
             };
         }
 
-        tokio::time::sleep(RPC_SERVER_BIND_GRACE).await;
+        // Wait until rpc-server is actually accepting connections.
+        // A static sleep undershoots on Metal cold-start (GPU init
+        // takes 2–4 s before the port binds) and overshoots on
+        // Linux CPU-only (port binds in tens of ms). TCP probe is
+        // the right shape.
+        let rpc_addr: std::net::SocketAddr = format!("127.0.0.1:{rpc_port}")
+            .parse()
+            .expect("loopback addr is valid");
+        let bind_start = std::time::Instant::now();
+        loop {
+            if tokio::net::TcpStream::connect(&rpc_addr).await.is_ok() {
+                tracing::info!(
+                    waited_ms = bind_start.elapsed().as_millis() as u64,
+                    "vram-pool: rpc-server bound"
+                );
+                break;
+            }
+            if bind_start.elapsed() > RPC_SERVER_BIND_TIMEOUT {
+                let err = format!(
+                    "rpc-server didn't bind {} within {}s",
+                    rpc_addr,
+                    RPC_SERVER_BIND_TIMEOUT.as_secs()
+                );
+                tracing::warn!(error = %err, "vram-pool: rpc-server failed to come up");
+                let mut inner = self.inner.lock().await;
+                if let Some(mut c) = inner.rpc_child.take() {
+                    let _ = c.start_kill();
+                }
+                inner.state = PoolState::Failed {
+                    error: err.clone(),
+                    plan: Some(plan),
+                };
+                anyhow::bail!(err);
+            }
+            tokio::time::sleep(RPC_SERVER_BIND_POLL).await;
+        }
 
         // Now llama-server with --rpc pointing at the rpc-server we
         // just started. The model argument is plan.model verbatim;
@@ -636,8 +685,18 @@ impl PoolManager {
             .arg(DEFAULT_ORCHESTRATOR_PORT.to_string())
             .arg("--gpu-layers")
             .arg("99")
+            // Inherit stderr so the user sees what rpc-server /
+            // llama-server are doing in the daemon's own logs. The
+            // original `Stdio::piped()` setup was a deadlock waiting
+            // to happen — llama-server logs prolifically during
+            // model load (Metal init, layer-by-layer mmap), the
+            // pipe's ~64 KB buffer fills, the child blocks on write,
+            // the supervisor sees the now-frozen child as "dead",
+            // and the whole pool collapses ~10 s after spawn.
+            // Piping correctly would require a stderr-drainer task
+            // per child — for now `inherit` is the right trade.
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::inherit())
             .kill_on_drop(true)
             .spawn()
             .map_err(|e| anyhow::anyhow!("failed to spawn llama-server: {e}"))?;

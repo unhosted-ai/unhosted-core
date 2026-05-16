@@ -6,6 +6,76 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.32] — 2026-05-16
+
+### Added
+- **Chat proxy auto-routes through the VRAM-pool when Running.**
+  New `resolve_upstream` runs before every chat-completion proxy.
+  When `state.vram_pool.status() == Running`, it returns the
+  pool's `endpoint` + `plan.model` instead of probing the
+  configured-upstream chain. Net effect: starting the pool from
+  the sidebar (or CLI) makes EVERY chat through this daemon hit
+  the pool, including chats over the tunnel and via external
+  agents — no separate routing config.
+- **`/v1/status.upstream` reflects the pool when Running.** The
+  status handler short-circuits to the pool's endpoint + model
+  instead of running its own `probe_upstream` against the user's
+  configured upstream URL. Matches the routing decision exactly,
+  so the UI's "node ready" indicator can't disagree with where
+  chats actually go.
+
+### Fixed
+- **VRAM-pool: rpc-server bind race.** v0.0.30/0.0.31 used a
+  static 1500 ms sleep between spawning `rpc-server` and
+  `llama-server`. Insufficient on macOS Metal — `rpc-server`'s
+  Metal init takes 2–4 s before the TCP port binds. `llama-server`
+  fired during the gap, failed to dial its `--rpc` backend, and
+  exited — supervisor then read both children as dead and
+  collapsed the pool. Replaced the sleep with a TCP probe loop
+  capped at 10 s. Logs the actual wait time so we can tighten
+  later if useful.
+- **VRAM-pool: stderr deadlock.** Children were spawned with
+  `stderr(Stdio::piped())` but the pipe was never drained. After
+  ~64 KB of model-load logs from `llama-server` the pipe filled,
+  the child blocked on write, the supervisor saw the now-frozen
+  child as "dead", and the pool collapsed ~10 s in. Switched to
+  `Stdio::inherit()` so child stderr surfaces in the daemon's
+  own logs — both gives operators visibility and avoids the
+  deadlock. Piping with a proper drainer task is a future
+  improvement.
+
+### Tap (separate repo)
+- `unhosted-ai/homebrew-unhosted/Formula/llama-cpp-rpc.rb` now
+  passes `-DGGML_BLAS=OFF`. Workaround for an upstream llama.cpp
+  b9090 bug: when `rpc-server` receives a graph containing
+  `RMS_NORM` and BLAS is the assigned backend, it aborts with
+  "unsupported op RMS_NORM" and `llama-server` reports the remote
+  RPC crash. Disabling BLAS routes RMS_NORM through CPU/Metal
+  which handle it correctly. Re-enable when upstream catches up.
+  `brew reinstall unhosted-ai/unhosted/llama-cpp-rpc` to pick
+  up the fix.
+
+### Verified end-to-end on this Mac (Apple M1 Max)
+
+      $ unhosted vram-pool start --model ~/.cache/.../Llama-3.2-1B-Instruct-Q4_K_M.gguf
+      [...]
+      [t+5s] state=running
+
+      $ curl http://127.0.0.1:7777/v1/status | jq .upstream
+      {
+        "url": "http://127.0.0.1:8080",
+        "reachable": true,
+        "model": "…/Llama-3.2-1B-Instruct-Q4_K_M.gguf"
+      }
+
+      $ curl -X POST http://127.0.0.1:7777/v1/chat/completions \
+          -d '{"model":"local","messages":[{"role":"user","content":"hi"}], ...}'
+      "I'll control the paddle. You hit"   # served by the pool
+
+Pool start → /v1/status flip → chat round-trip, all in ~5 s on
+a 1B model. Multi-GB models scale with mmap time (~30 s for a
+7B Q4); the model-load poller's 90 s cap covers them.
+
 ## [0.0.31] — 2026-05-16
 
 ### Added
