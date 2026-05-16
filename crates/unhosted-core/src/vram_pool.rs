@@ -77,10 +77,10 @@ impl RpcCapability {
             return "llama.cpp is installed but was NOT built with \
                     -DGGML_RPC=ON, which VRAM-pooling requires. \
                     Homebrew's default formula omits this flag. \
-                    Until upstream Homebrew lands the change, build \
-                    from source with -DGGML_RPC=ON or wait for the \
-                    `unhosted-ai/homebrew-unhosted` tap (see \
-                    design/0009-vram-pooling.md)."
+                    Install the RPC-enabled build from our tap:\n\
+                    \n  brew tap unhosted-ai/unhosted\
+                    \n  brew install unhosted-ai/unhosted/llama-cpp-rpc\n\
+                    \nThen re-run this command."
                 .to_string();
         }
         // Unreachable in practice given the conditions above; kept
@@ -92,23 +92,68 @@ impl RpcCapability {
     }
 }
 
-/// Run the probe. Cheap — two PATH lookups and one `--help`
-/// subprocess call. Safe to call at startup and again on demand
-/// from a request handler.
+/// Run the probe. Cheap — a handful of PATH/well-known-prefix
+/// lookups and at most one `--help` subprocess call. Safe to call
+/// at startup and again on demand from a request handler.
+///
+/// Resolution order, both for `llama-server` and `rpc-server`:
+///
+/// 1. Homebrew opt-prefix at
+///    `/opt/homebrew/opt/llama-cpp-rpc/bin/<name>` (Apple Silicon)
+///    or `/usr/local/opt/llama-cpp-rpc/bin/<name>` (Intel macOS /
+///    older brew layouts). This is the keg-only RPC-enabled build
+///    from the `unhosted-ai/homebrew-unhosted` tap. Checking it
+///    explicitly means the user doesn't need to mess with PATH —
+///    the tap install just works.
+/// 2. `PATH` search for the standard name. Catches users on a
+///    custom-built llama.cpp, or whoever's distro / package
+///    manager defaults RPC on.
+///
+/// If both resolve, the opt-prefix path wins. Subprocess
+/// `--help` is only invoked when the resolved binary isn't from
+/// the opt-prefix (we trust the tap install by construction; the
+/// formula's `test` block proves the --rpc flag is present before
+/// install is allowed to succeed).
 pub fn probe() -> RpcCapability {
-    let llama_server_path = which("llama-server");
-    let rpc_server_path = which("rpc-server");
-    // Only invoke `llama-server --help` if the binary exists. The
-    // subprocess is fast (< 30 ms) but a spawn failure on a missing
-    // binary would surface as a tracing warn — not helpful when
-    // the user just hasn't installed llama.cpp yet.
-    let llama_server_has_rpc_flag = llama_server_path.as_ref().is_some_and(help_includes_rpc);
+    let llama_server_path = resolve_with_tap_priority("llama-server");
+    let rpc_server_path = resolve_with_tap_priority("rpc-server");
+
+    let llama_server_has_rpc_flag = match &llama_server_path {
+        Some(path) => is_tap_install(path) || help_includes_rpc(path),
+        None => false,
+    };
+
     RpcCapability {
         has_rpc_server_bin: rpc_server_path.is_some(),
         llama_server_has_rpc_flag,
         rpc_server_path: rpc_server_path.map(|p| p.to_string_lossy().to_string()),
         llama_server_path: llama_server_path.map(|p| p.to_string_lossy().to_string()),
     }
+}
+
+/// Standard Homebrew opt-prefix paths for the keg-only
+/// `llama-cpp-rpc` formula on macOS. The tap ships only macOS for
+/// now; Linux users have to install RPC-capable llama.cpp via their
+/// own package manager or build from source, and that hits the PATH
+/// search fallback in `resolve_with_tap_priority`.
+const TAP_BIN_PATHS: &[&str] = &[
+    "/opt/homebrew/opt/llama-cpp-rpc/bin",
+    "/usr/local/opt/llama-cpp-rpc/bin",
+];
+
+fn resolve_with_tap_priority(name: &str) -> Option<PathBuf> {
+    for prefix in TAP_BIN_PATHS {
+        let candidate = PathBuf::from(prefix).join(name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    which(name)
+}
+
+fn is_tap_install(path: &std::path::Path) -> bool {
+    let s = path.to_string_lossy();
+    TAP_BIN_PATHS.iter().any(|prefix| s.starts_with(prefix))
 }
 
 /// Find a binary on PATH. Returns `None` when missing, matching

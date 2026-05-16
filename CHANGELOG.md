@@ -6,6 +6,47 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.28] — 2026-05-16
+
+### Added
+- **VRAM-pool probe now finds the `unhosted-ai/homebrew-unhosted`
+  tap install.** The new tap (published today at
+  `https://github.com/unhosted-ai/homebrew-unhosted`) ships an
+  RPC-enabled `llama.cpp` build at the keg-only opt-prefix
+  (`/opt/homebrew/opt/llama-cpp-rpc/bin/`). Unlinked because its
+  `lib/` and `include/` directories collide with the upstream
+  `ggml` and `llama.cpp` formulas every Mac user already has —
+  letting brew force-link would break the standard `llama-server`.
+
+  The probe in `vram_pool::probe` now checks the well-known
+  opt-prefix paths first (`/opt/homebrew/opt/llama-cpp-rpc/bin/`
+  for Apple Silicon, `/usr/local/opt/llama-cpp-rpc/bin/` for
+  Intel macOS), then falls back to `PATH` for users on custom
+  llama.cpp builds. When the resolved binary is from the tap,
+  the `--rpc` capability is trusted without spawning a `--help`
+  subprocess (the formula's `test` block proves the flag is
+  present before install is allowed to succeed).
+
+  The install-hint message now points users at the tap by name
+  and prints the exact `brew tap` + `brew install` commands.
+
+### Verified end-to-end on this Mac
+
+  $ brew tap unhosted-ai/unhosted
+  $ brew install unhosted-ai/unhosted/llama-cpp-rpc
+  $ unhosted vram-pool detect
+  VRAM-pooling capability on this machine:
+    llama-server        : /opt/homebrew/opt/llama-cpp-rpc/bin/llama-server
+    llama-server --rpc  : yes
+    rpc-server          : /opt/homebrew/opt/llama-cpp-rpc/bin/rpc-server
+    ready for pool      : YES
+
+That's the distribution loop closed for macOS Homebrew users —
+two `brew` commands, no PATH changes, no source-builds. Linux /
+Windows users still need their own RPC-capable build until ADR
+0009 §Q4's parallel work lands distribution stories for those
+platforms.
+
 ## [0.0.27] — 2026-05-16
 
 ### Added
