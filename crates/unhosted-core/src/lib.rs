@@ -163,6 +163,13 @@ struct NodeState {
     /// just one. Memory feature is the only consumer today.
     summarize_inflight:
         Arc<std::sync::Mutex<std::collections::HashMap<String, tokio::task::JoinHandle<()>>>>,
+    /// VRAM-pool orchestration manager. Owns the `rpc-server` +
+    /// `llama-server --rpc=…` child processes when a pool is active.
+    /// `None` would be possible if we wanted to gate the feature on
+    /// startup capability, but we instead keep the manager always
+    /// present and let `start()` fail with a clear error when the
+    /// machine isn't RPC-capable.
+    vram_pool: Arc<vram_pool::PoolManager>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -284,6 +291,7 @@ pub async fn serve(node: Node) -> Result<()> {
         tunnel: tunnel_mgr,
         http,
         summarize_inflight: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        vram_pool: Arc::new(vram_pool::PoolManager::new(vram_pool::probe())),
     };
 
     // Eager tunnel: if the operator opted in (--eager-tunnel /
@@ -412,6 +420,14 @@ pub async fn serve(node: Node) -> Result<()> {
         // the LLM itself via a tool-use loop) can pull web pages
         // through the daemon. SSRF-guarded; only HTTPS to public IPs.
         .route("/v1/tools/web_fetch", post(web_fetch_handler))
+        // VRAM-pool orchestration (ADR 0009 phase 2b). Spawns
+        // rpc-server + llama-server --rpc=… subprocesses to make
+        // this machine the orchestrator of a layer-split inference
+        // cluster. Local-user-only — spawning subprocesses on the
+        // user's box is consequential.
+        .route("/v1/vram-pool", get(vram_pool_status_handler))
+        .route("/v1/vram-pool/start", post(vram_pool_start_handler))
+        .route("/v1/vram-pool/stop", post(vram_pool_stop_handler))
         .with_state(state);
 
     let app = api
@@ -2575,6 +2591,78 @@ async fn web_fetch_handler(
                 .expect("valid response"))
         }
     }
+}
+
+// ─── vram-pool orchestration ──────────────────────────────────────────────
+// Local-user-only — spawning subprocesses on the user's machine is
+// exactly the kind of action that needs the auth classifier on it.
+// Same posture as /v1/tunnel.
+
+async fn vram_pool_status_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<axum::Json<vram_pool::PoolState>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    Ok(axum::Json(state.vram_pool.status().await))
+}
+
+#[derive(serde::Deserialize)]
+struct VramPoolStartRequest {
+    /// Pre-computed plan (built by the CLI from local capability +
+    /// `--peers` + `--model`). Passing the whole plan from the
+    /// caller keeps the daemon decision-free; the planner lives in
+    /// pure Rust and a future client (UI, agent) can build plans
+    /// without going through the CLI.
+    plan: vram_pool::Plan,
+}
+
+async fn vram_pool_start_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    axum::Json(req): axum::Json<VramPoolStartRequest>,
+) -> Result<axum::Json<vram_pool::PoolState>, axum::http::Response<axum::body::Body>> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    if let Err(status) = require_auth(&outcome, true) {
+        let body = serde_json::json!({ "error": "unauthorized" });
+        return Err(axum::http::Response::builder()
+            .status(status)
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body.to_string()))
+            .expect("valid response"));
+    }
+    match state.vram_pool.clone().start(req.plan).await {
+        Ok(s) => Ok(axum::Json(s)),
+        Err(e) => {
+            tracing::warn!(error = %e, "vram-pool: start failed");
+            let body = serde_json::json!({ "error": e.to_string() });
+            Err(axum::http::Response::builder()
+                .status(StatusCode::BAD_GATEWAY)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(body.to_string()))
+                .expect("valid response"))
+        }
+    }
+}
+
+async fn vram_pool_stop_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<axum::Json<vram_pool::PoolState>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    state
+        .vram_pool
+        .stop()
+        .await
+        .map(axum::Json)
+        .map_err(|e| {
+            tracing::error!(error = %e, "vram-pool: stop failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
 }
 
 /// Route an inbound relay request by its `kind` to the right local handler.

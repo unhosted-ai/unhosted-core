@@ -6,6 +6,70 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.30] — 2026-05-16
+
+### Added
+- **VRAM-pool spawn supervisor (ADR 0009 phase 2b).** The piece
+  that turns the v0.0.29 plan into actual running subprocesses.
+  Self-loopback only for this slice — multi-peer needs peer-side
+  `rpc-server` orchestration that we don't have yet.
+
+  - New `vram_pool::PoolManager` (modeled on `TunnelManager`)
+    owns the `rpc-server` + `llama-server --rpc=…` child processes.
+    State machine: `Idle → Starting{spawning_rpc, waiting_rpc,
+    spawning_orch, waiting_orch} → Running{plan, endpoint}`. A
+    background supervisor task watches both children and
+    transitions to `Failed{error, plan}` if either exits
+    unexpectedly. Stricter than `tunnel::TunnelManager`'s
+    auto-restart posture: a dying child cancels the pool rather
+    than reviving — in-flight inferences don't gracefully recover
+    from a backend swap.
+
+  - Three new HTTP endpoints, local-user-only:
+    - `GET    /v1/vram-pool`       → current `PoolState` JSON
+    - `POST   /v1/vram-pool/start` → body `{ plan: Plan }`
+    - `POST   /v1/vram-pool/stop`  → returns `Idle`
+
+  - `unhosted vram-pool start --model <path>` now builds the plan,
+    POSTs to the daemon, and reports the daemon's response.
+    `unhosted vram-pool stop` POSTs the stop. `unhosted vram-pool
+    status` GETs.
+
+  Verified end-to-end on this Mac (tap install from v0.0.28):
+
+      $ unhosted vram-pool start --model ~/.cache/unhosted/models/Llama-3.2-1B-Instruct-Q4_K_M.gguf
+      VRAM-pool plan:
+        orchestrator       : local
+        layer hosts        :
+          - local        @ 127.0.0.1:50052
+      posting to local daemon at http://127.0.0.1:7777/v1/vram-pool/start …
+      daemon accepted. current state:
+      { "state": "running", "endpoint": "http://127.0.0.1:8080", ... }
+
+  Daemon log captured the spawn sequence:
+
+      vram-pool: spawning rpc-server   bin=/opt/homebrew/opt/llama-cpp-rpc/bin/rpc-server port=50052
+      vram-pool: spawning llama-server bin=…/llama-server port=8080 rpc=127.0.0.1:50052 model=…
+      vram-pool: stop requested  (after `unhosted vram-pool stop`)
+
+### Known limitations / scope notes
+- Self-loopback only. Pooling across multiple peers requires the
+  orchestrator daemon to ask each peer's daemon to spawn its own
+  `rpc-server` — that coordination protocol lands in the next
+  slice. Right now `unhosted vram-pool start --peers a,b` will
+  build the plan but the supervisor rejects with "multi-peer not
+  yet implemented".
+- Optimistic `Running` transition. We sleep
+  `LLAMA_SERVER_BIND_GRACE` (800 ms) after spawning `llama-server`
+  and call it `Running` — the actual model `mmap` can take 5–30 s
+  for a multi-GB model. The pool reports `Running` before
+  `llama-server` is actually answering on `:8080`. The watchdog
+  catches a child that crashes during that window. A future
+  improvement polls `llama-server`'s `/v1/models` to confirm the
+  model loaded before declaring `Running`.
+- No persistence. A daemon restart while a pool is active drops
+  the pool. ADR 0009 §Q3 is "ephemeral for v0.1.0"; that holds.
+
 ## [0.0.29] — 2026-05-16
 
 ### Added

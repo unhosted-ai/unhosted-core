@@ -382,66 +382,100 @@ async fn run_vram_pool(action: VramPoolAction) -> Result<()> {
             print_capability(&cap);
         }
         VramPoolAction::Start { model, peers } => {
-            // Plan generator runs today; spawn supervisor is the next
-            // slice. So `start` builds and prints a real plan — useful
-            // for "is the cluster shape I expect what unhosted would
-            // actually pass to llama-server?" verification before any
-            // subprocess launches.
+            // 1. Build the plan locally so a bad request fails before
+            //    any HTTP round-trip.
             let candidates = resolve_peer_candidates(&peers);
             let local_capable = cap.ready();
-            match vram_pool::plan(local_capable, &candidates, &peers, model) {
-                Ok(p) => {
-                    println!("VRAM-pool plan (preview — actual spawn lands in the next slice):");
-                    println!();
-                    println!("  orchestrator       : {}", p.orchestrator);
-                    println!("  model              : {}", p.model);
-                    println!("  layer hosts        :");
-                    for h in &p.layer_hosts {
-                        println!("    - {:<12} @ {}", h.name, h.addr);
-                    }
-                    println!();
-                    println!("  llama-server cmd   :");
-                    println!(
-                        "    {} -m {} --rpc {} --gpu-layers 99",
-                        cap.llama_server_path
-                            .as_deref()
-                            .unwrap_or("<llama-server>"),
-                        p.model,
-                        p.rpc_arg()
-                    );
-                    println!();
-                    println!("  rpc-server cmd     :");
-                    let rpc_bin = cap.rpc_server_path.as_deref().unwrap_or("<rpc-server>");
-                    for h in &p.layer_hosts {
-                        if h.name == "local" {
-                            println!("    {rpc_bin} -p {}", h.addr.port());
-                        } else {
-                            println!(
-                                "    (on peer `{}`)  {rpc_bin} -p {} -H 0.0.0.0",
-                                h.name,
-                                h.addr.port()
-                            );
-                        }
-                    }
-                }
+            let plan = match vram_pool::plan(local_capable, &candidates, &peers, model) {
+                Ok(p) => p,
                 Err(e) => {
                     eprintln!("vram-pool: cannot build a plan: {e}");
                     eprintln!();
                     print_capability(&cap);
                     std::process::exit(1);
                 }
+            };
+            // 2. Show the user what we're about to do (same preview
+            //    block as before), then POST to the daemon to actually
+            //    spawn the children.
+            println!("VRAM-pool plan:");
+            println!();
+            println!("  orchestrator       : {}", plan.orchestrator);
+            println!("  model              : {}", plan.model);
+            println!("  layer hosts        :");
+            for h in &plan.layer_hosts {
+                println!("    - {:<12} @ {}", h.name, h.addr);
+            }
+            println!();
+            println!("posting to local daemon at http://{DEFAULT_NODE_ADDR}/v1/vram-pool/start …");
+            let body = serde_json::json!({ "plan": plan });
+            let client = reqwest::Client::new();
+            let resp = client
+                .post(format!("http://{DEFAULT_NODE_ADDR}/v1/vram-pool/start"))
+                .json(&body)
+                .send()
+                .await;
+            match resp {
+                Ok(r) if r.status().is_success() => {
+                    let s: serde_json::Value = r.json().await.unwrap_or_default();
+                    println!("daemon accepted. current state:");
+                    println!("{}", serde_json::to_string_pretty(&s).unwrap_or_default());
+                }
+                Ok(r) => {
+                    let status = r.status();
+                    let body = r.text().await.unwrap_or_default();
+                    eprintln!("daemon rejected (HTTP {status}):");
+                    eprintln!("{body}");
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("could not reach the local daemon at http://{DEFAULT_NODE_ADDR}: {e}");
+                    eprintln!("is `unhosted serve` running, or is the .app open?");
+                    std::process::exit(1);
+                }
             }
         }
         VramPoolAction::Stop => {
-            eprintln!("unhosted vram-pool stop is not yet implemented (no pool to stop).");
+            let client = reqwest::Client::new();
+            match client
+                .post(format!("http://{DEFAULT_NODE_ADDR}/v1/vram-pool/stop"))
+                .send()
+                .await
+            {
+                Ok(r) if r.status().is_success() => {
+                    println!("vram-pool stopped.");
+                }
+                Ok(r) => {
+                    eprintln!("daemon returned HTTP {}", r.status());
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("could not reach the local daemon: {e}");
+                    std::process::exit(1);
+                }
+            }
         }
         VramPoolAction::Status => {
             print_capability(&cap);
             println!();
-            println!(
-                "(orchestration status — peers, layer counts, tokens/sec — \
-                 ships in v0.1.0)"
-            );
+            let client = reqwest::Client::new();
+            match client
+                .get(format!("http://{DEFAULT_NODE_ADDR}/v1/vram-pool"))
+                .send()
+                .await
+            {
+                Ok(r) if r.status().is_success() => {
+                    let s: serde_json::Value = r.json().await.unwrap_or_default();
+                    println!("pool state:");
+                    println!("{}", serde_json::to_string_pretty(&s).unwrap_or_default());
+                }
+                Ok(_) | Err(_) => {
+                    println!(
+                        "(orchestration status unavailable — daemon not reachable at http://{DEFAULT_NODE_ADDR})"
+                    );
+                }
+            }
+            return Ok(());
         }
     }
     Ok(())
