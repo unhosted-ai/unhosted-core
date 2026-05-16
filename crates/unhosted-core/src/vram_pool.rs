@@ -977,9 +977,12 @@ fn spawn_layer_host_supervisor(inner: Arc<Mutex<PoolInner>>) {
             if guard.user_stopped {
                 return;
             }
+            // Same "None = not dead" convention as the
+            // orchestrator-side supervisor. For a layer host with no
+            // rpc_child we just exit (there's nothing to supervise).
             let dead = match guard.rpc_child.as_mut() {
                 Some(c) => c.try_wait().ok().flatten().is_some(),
-                None => true,
+                None => return,
             };
             if dead {
                 tracing::warn!("vram-pool: hosting rpc-server exited unexpectedly");
@@ -1012,13 +1015,19 @@ fn spawn_pool_supervisor(inner: Arc<Mutex<PoolInner>>) {
             // Check llama-server first; it's the user-facing endpoint
             // and is more likely to be the one that fails (model
             // mmap, port collision, etc).
+            //
+            // `None` means "we never spawned this child" — which is
+            // legitimate for a multi-peer orchestrator (no local
+            // rpc-server when every layer host is remote). Don't
+            // treat absence as death; otherwise the supervisor
+            // false-positives the failure path within 2 s of start.
             let llama_dead = match guard.llama_child.as_mut() {
                 Some(c) => c.try_wait().ok().flatten().is_some(),
-                None => true,
+                None => false,
             };
             let rpc_dead = match guard.rpc_child.as_mut() {
                 Some(c) => c.try_wait().ok().flatten().is_some(),
-                None => true,
+                None => false,
             };
             if llama_dead || rpc_dead {
                 let plan = if let PoolState::Running { plan, .. } = &guard.state {

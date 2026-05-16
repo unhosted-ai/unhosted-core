@@ -6,6 +6,46 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.35] — 2026-05-16
+
+### Milestone
+- **VRAM-pool multi-peer end-to-end VERIFIED.** The full path from
+  `unhosted vram-pool start --peers <name>` on the orchestrator
+  through to `pong` returning from a chat completion routed across
+  two daemons works. ADR 0009's deep-tech bet is functionally
+  proven.
+
+  Verified by running two unhosted daemons on this Mac (different
+  config dirs via `XDG_CONFIG_HOME`, bound to `127.0.0.1:7777`
+  and `:7778`), pairing them via manually-written `peers.toml`,
+  and observing the orchestration dance live in the logs:
+
+      A: vram-pool: asking peer to host    peer=daemonB
+                       ↓ X-Unhosted-Auth signed request
+      B: vram-pool: spawning rpc-server as layer host
+      B: vram-pool: hosting layers         port=50052 orchestrator=<A_pubkey>
+      A: vram-pool: spawning llama-server  rpc=127.0.0.1:50052
+      A: vram-pool: orchestrator answering /v1/models — transitioning to Running
+      $ curl /v1/chat/completions { … "say pong" … } → "pong"
+      $ unhosted vram-pool stop          (A propagates stop to B)
+      A: idle  B: idle  (zero leaked rpc-server / llama-server processes)
+
+  The single-Mac simulation uses one GPU under both roles so there's
+  no actual VRAM pooling, but the protocol — signed peer request,
+  layer-host child supervision, orchestrator transition, chat
+  routing, coordinated shutdown — is exactly the same code path
+  that runs on two physical machines.
+
+### Fixed
+- **Pure-orchestrator (no local layer host) collapsed instantly on
+  start.** The spawn supervisor treated `rpc_child.is_none()` as
+  "child is dead" and transitioned to `Failed` within 2 s of
+  `Starting`. Multi-peer plans where the local box is orchestrator-
+  only (every layer host is remote) hit this on the first poll.
+  Fixed by changing the supervisor's `None` arm to "nothing to
+  watch" rather than "dead", and having the layer-host supervisor
+  exit cleanly when its tracked child is absent.
+
 ## [0.0.34] — 2026-05-16
 
 ### Added
