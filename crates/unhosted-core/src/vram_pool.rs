@@ -571,44 +571,40 @@ impl PoolManager {
             };
         }
 
-        // First-slice constraint: self-loopback only at the
-        // PoolManager level. Multi-peer plans require the route
-        // handler to coordinate remote layer hosts via signed peer
-        // requests BEFORE calling start() — that's the v0.0.34
-        // wiring, separate from this module. When that lands,
-        // PoolManager.start() will only see "all remote rpc-servers
-        // are already up; spawn my local pieces and llama-server".
-        let local_only = plan.layer_hosts.iter().all(|h| h.name == "local");
-        if !local_only {
-            let err = "multi-peer VRAM-pooling requires peer-side coordination that the orchestrator route handler hasn't wired yet (see ADR 0009 phase 2c); for now use self-loopback or wait for v0.0.34";
-            let mut inner = self.inner.lock().await;
-            inner.state = PoolState::Failed {
-                error: err.into(),
-                plan: Some(plan),
-            };
-            anyhow::bail!(err);
-        }
+        // PoolManager itself is local-machine only: it doesn't talk
+        // to peers. The route handler is responsible for ensuring
+        // every non-local layer host in the plan is ALREADY running
+        // an rpc-server via signed `/v1/vram-pool/layer-host/start`
+        // requests before calling this method. By the time we get
+        // here, every entry in `plan.layer_hosts` is expected to be
+        // reachable at its `addr` — local ones via the rpc-server
+        // we're about to spawn below, remote ones because the peer
+        // daemons have already brought theirs up.
+        let has_local_layer_host = plan.layer_hosts.iter().any(|h| h.name == "local");
 
-        let rpc_bin = self
-            .cap
-            .rpc_server_path
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("rpc-server binary not found — install the unhosted-ai/homebrew-unhosted tap"))?;
         let llama_bin = self
             .cap
             .llama_server_path
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("llama-server binary not found"))?;
 
-        let rpc_port = plan
-            .layer_hosts
-            .first()
-            .map(|h| h.addr.port())
-            .unwrap_or(DEFAULT_RPC_PORT);
-
-        // Spawn rpc-server first; llama-server connects to it on
-        // boot, so the order matters.
-        {
+        // Only spawn an rpc-server locally if the plan lists this
+        // machine as a layer host. Pure-orchestrator (no local
+        // layer host) configs skip this block entirely; their
+        // llama-server connects only to remote rpc-servers via
+        // --rpc.
+        if has_local_layer_host {
+            let rpc_bin = self
+                .cap
+                .rpc_server_path
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("rpc-server binary not found — install the unhosted-ai/homebrew-unhosted tap"))?;
+            let rpc_port = plan
+                .layer_hosts
+                .iter()
+                .find(|h| h.name == "local")
+                .map(|h| h.addr.port())
+                .unwrap_or(DEFAULT_RPC_PORT);
             tracing::info!(bin = %rpc_bin, port = rpc_port, "vram-pool: spawning rpc-server");
             let rpc_child = AsyncCommand::new(rpc_bin)
                 .arg("-p")

@@ -6,6 +6,50 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.34] — 2026-05-16
+
+### Added
+- **VRAM-pool: orchestrator side of multi-peer (phase 2c, half 2).**
+  Completes ADR 0009 phase 2c. v0.0.33 shipped the layer-host
+  endpoint; v0.0.34 wires the orchestrator to call it. When the
+  start request includes peer layer hosts:
+
+  1. For each non-local layer host in the plan, the orchestrator
+     looks the peer up in its registry, signs a JSON body
+     `{ port, orchestrator: <our_pubkey> }` with its own identity,
+     and POSTs to `<peer>/v1/vram-pool/layer-host/start` with an
+     `X-Unhosted-Auth` header.
+  2. The peer's daemon validates the signature against its own
+     peer registry (this orchestrator must be paired with the
+     peer), then spawns `rpc-server` and returns when the bind
+     probe succeeds.
+  3. The orchestrator only calls `PoolManager.start()` (which
+     spawns local `rpc-server` + `llama-server --rpc=…`) AFTER
+     every remote peer confirms `Hosting`.
+  4. On any peer rejection mid-loop, the orchestrator sends
+     `layer-host/stop` to peers that did succeed before bailing —
+     so a partial failure doesn't leak `rpc-server` processes on
+     other boxes.
+  5. `vram_pool_stop_handler` snapshots remote layer hosts from
+     the current plan, stops locally, then sends `layer-host/stop`
+     to each. Best-effort: an unreachable peer doesn't block
+     local stop.
+
+  `PoolManager` itself stays local-machine-only. Peer coordination
+  lives in the route handler so PoolManager doesn't need NodeState
+  access (identity, registry, http client). Clean separation —
+  PoolManager is "what this box does", the handler is "how the
+  cluster coordinates".
+
+### Verified
+- Self-loopback still works end-to-end after the refactor:
+  `vram-pool start` → `running` in ~8 s, chat routes through
+  pool, `stop` cleans up, no leaked processes. The multi-peer
+  path is not testable on this machine without a second box
+  (a stretch goal would simulate by running two daemons on the
+  same Mac at different ports + pairing them — not in this
+  release).
+
 ## [0.0.33] — 2026-05-16
 
 ### Added

@@ -2675,9 +2675,52 @@ async fn vram_pool_start_handler(
             .body(axum::body::Body::from(body.to_string()))
             .expect("valid response"));
     }
+
+    // Phase 2c: for every non-local layer host in the plan, sign +
+    // POST `/v1/vram-pool/layer-host/start` to its daemon BEFORE
+    // we ask PoolManager to spawn local llama-server. PoolManager
+    // is intentionally local-only; cluster coordination lives here
+    // in the route handler so it can use NodeState's identity +
+    // registry + http client without polluting the pool module.
+    let remote_hosts: Vec<vram_pool::LayerHost> = req
+        .plan
+        .layer_hosts
+        .iter()
+        .filter(|h| h.name != "local")
+        .cloned()
+        .collect();
+
+    // We accumulate successfully-started peers so a mid-loop
+    // failure can tell those peers to stop hosting rather than
+    // leak rpc-server processes on their boxes.
+    let mut started: Vec<vram_pool::LayerHost> = Vec::new();
+    for host in &remote_hosts {
+        if let Err(e) =
+            ask_peer_to_host(&state, &host.name, host.addr.port()).await
+        {
+            for prior in &started {
+                let _ = ask_peer_to_stop_hosting(&state, &prior.name).await;
+            }
+            let body = serde_json::json!({
+                "error": format!("peer `{}` rejected layer-host request: {e}", host.name)
+            });
+            return Err(axum::http::Response::builder()
+                .status(StatusCode::BAD_GATEWAY)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(body.to_string()))
+                .expect("valid response"));
+        }
+        started.push(host.clone());
+    }
+
     match state.vram_pool.clone().start(req.plan).await {
         Ok(s) => Ok(axum::Json(s)),
         Err(e) => {
+            // PoolManager rejected. Roll back the peers we asked to
+            // host so they don't leak processes either.
+            for prior in &started {
+                let _ = ask_peer_to_stop_hosting(&state, &prior.name).await;
+            }
             tracing::warn!(error = %e, "vram-pool: start failed");
             let body = serde_json::json!({ "error": e.to_string() });
             Err(axum::http::Response::builder()
@@ -2689,6 +2732,73 @@ async fn vram_pool_start_handler(
     }
 }
 
+/// Send a signed `/v1/vram-pool/layer-host/start` to a paired peer.
+/// Looks up the peer's daemon address from the registry, signs the
+/// JSON body with this node's identity, and waits for the peer's
+/// `PoolState::Hosting` response. The peer's daemon will TCP-probe
+/// its rpc-server bind before replying, so a 200 means the peer is
+/// actually accepting RPC connections.
+async fn ask_peer_to_host(
+    state: &NodeState,
+    peer_name: &str,
+    rpc_port: u16,
+) -> anyhow::Result<()> {
+    let peer_addr = peer_daemon_addr(state, peer_name)
+        .ok_or_else(|| anyhow::anyhow!("peer `{peer_name}` not in registry"))?;
+    let body = serde_json::json!({
+        "port": rpc_port,
+        "orchestrator": state.identity.public_b64(),
+    });
+    let body_bytes = serde_json::to_vec(&body)?;
+    let auth = state.identity.sign_request(&body_bytes);
+    let url = format!("http://{peer_addr}/v1/vram-pool/layer-host/start");
+    tracing::info!(peer = peer_name, %url, "vram-pool: asking peer to host");
+    let resp = state
+        .http
+        .post(&url)
+        .header("content-type", "application/json")
+        .header("X-Unhosted-Auth", auth)
+        .body(body_bytes)
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("peer returned HTTP {status}: {text}");
+    }
+    Ok(())
+}
+
+/// Reverse of `ask_peer_to_host`. Best-effort — if the peer is
+/// unreachable we log and move on; the orphan rpc-server on the
+/// peer will be cleaned up by its own supervisor if/when the
+/// orchestrator restarts.
+async fn ask_peer_to_stop_hosting(state: &NodeState, peer_name: &str) -> anyhow::Result<()> {
+    let peer_addr = peer_daemon_addr(state, peer_name)
+        .ok_or_else(|| anyhow::anyhow!("peer `{peer_name}` not in registry"))?;
+    let body_bytes: Vec<u8> = b"{}".to_vec();
+    let auth = state.identity.sign_request(&body_bytes);
+    let url = format!("http://{peer_addr}/v1/vram-pool/layer-host/stop");
+    let _ = state
+        .http
+        .post(&url)
+        .header("content-type", "application/json")
+        .header("X-Unhosted-Auth", auth)
+        .body(body_bytes)
+        .send()
+        .await;
+    Ok(())
+}
+
+fn peer_daemon_addr(state: &NodeState, peer_name: &str) -> Option<SocketAddr> {
+    let registry = state.registry.lock().ok()?;
+    registry
+        .peers
+        .iter()
+        .find(|p| p.name == peer_name)
+        .map(|p| p.addr)
+}
+
 async fn vram_pool_stop_handler(
     State(state): State<NodeState>,
     axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
@@ -2696,15 +2806,39 @@ async fn vram_pool_stop_handler(
 ) -> Result<axum::Json<vram_pool::PoolState>, StatusCode> {
     let outcome = state.classify(&headers, Some(remote.ip()), &[]);
     require_auth(&outcome, true)?;
-    state
-        .vram_pool
-        .stop()
-        .await
-        .map(axum::Json)
-        .map_err(|e| {
-            tracing::error!(error = %e, "vram-pool: stop failed");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })
+
+    // Snapshot the current plan BEFORE stopping locally — once
+    // stop() flips state to Idle we lose the layer-host list.
+    let remote_hosts: Vec<vram_pool::LayerHost> = match state.vram_pool.status().await {
+        vram_pool::PoolState::Running { plan, .. }
+        | vram_pool::PoolState::Starting { plan, .. } => plan
+            .layer_hosts
+            .into_iter()
+            .filter(|h| h.name != "local")
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    let result = state.vram_pool.stop().await.map_err(|e| {
+        tracing::error!(error = %e, "vram-pool: stop failed");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    // Tell each remote layer host to stop hosting. Best-effort — a
+    // peer that's already off / unreachable doesn't block local
+    // stop from succeeding. Sequential rather than parallel: the
+    // peer count is small and serial is easier to log.
+    for host in &remote_hosts {
+        if let Err(e) = ask_peer_to_stop_hosting(&state, &host.name).await {
+            tracing::warn!(
+                peer = %host.name,
+                error = %e,
+                "vram-pool: failed to tell peer to stop hosting (may leak its rpc-server)"
+            );
+        }
+    }
+
+    Ok(axum::Json(result))
 }
 
 #[derive(serde::Deserialize)]
