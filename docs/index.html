@@ -567,9 +567,9 @@ your prompt
           </tr>
           <tr>
             <td>vram-pooling (layer splitting)</td>
-            <td><span class="pill mid">building</span></td>
-            <td>v0.0.4+</td>
-            <td>needs llama.cpp built with <code>-DGGML_RPC=ON</code>.</td>
+            <td><span class="pill on">shipped</span></td>
+            <td>v0.0.35</td>
+            <td>one-command multi-machine layer-split inference. <code>brew tap unhosted-ai/unhosted &amp;&amp; brew install unhosted-ai/unhosted/llama-cpp-rpc</code>, then <code>unhosted vram-pool start --peers a,b --model …</code>. each paired peer spawns its own <code>rpc-server</code> on a signed request; the orchestrator runs <code>llama-server --rpc=…</code> and chats route through automatically.</td>
           </tr>
           <tr>
             <td>trusted-peer pairing (wireguard-style)</td>
@@ -586,7 +586,7 @@ your prompt
           <tr>
             <td>open to internet (cloudflare tunnel)</td>
             <td><span class="pill on">shipped</span></td>
-            <td>v0.0.19</td>
+            <td>v0.0.35</td>
             <td>one-click public url + live qr for your phone. enabled state persists across .app restarts.</td>
           </tr>
           <tr>
@@ -702,7 +702,7 @@ your prompt
       <h3>download</h3>
       <a class="view-all" href="https://github.com/unhosted-ai/unhosted-core/releases">all releases</a>
     </div>
-    <p class="sub">two ways to install: <strong>double-click</strong> the bundle for your os, or <strong>paste one line</strong> into a terminal. both fetch the same v0.0.19 binaries. you'll also need a local model runtime — <a href="docs.html#install">llama.cpp, ollama, or lm studio</a> — the daemon auto-detects whichever is running.</p>
+    <p class="sub">two ways to install: <strong>double-click</strong> the bundle for your os, or <strong>paste one line</strong> into a terminal. both fetch the same v0.0.35 binaries. you'll also need a local model runtime — <a href="docs.html#install">llama.cpp, ollama, or lm studio</a> — the daemon auto-detects whichever is running.</p>
 
     <!-- easy install: auto-detects the visitor's OS and shows the right
          primary CTA (double-click installer) + the copy-paste one-liner. -->
@@ -756,7 +756,7 @@ your prompt
         </div>
       </div>
 
-      <p class="ei-foot">all installers fetch the latest <code>v0.0.19</code> tarball from <a href="https://github.com/unhosted-ai/unhosted-core/releases/latest">github releases</a>. nothing leaves your machine after install — see <a href="#network">network &amp; security</a>.</p>
+      <p class="ei-foot">all installers fetch the latest <code>v0.0.35</code> tarball from <a href="https://github.com/unhosted-ai/unhosted-core/releases/latest">github releases</a>. nothing leaves your machine after install — see <a href="#network">network &amp; security</a>.</p>
     </div>
 
     <!-- phone install: PWA from the daemon's web UI. Two buttons that
@@ -1068,15 +1068,31 @@ quantum tunneling is the phenomenon where a particle...</code></pre>
         <div class="meta">
 <span class="label">v0.0.2</span>
         </div>
-        <p>two-node lan cluster. designed, not started. one mac plus one tower, one model split across both.</p>
+        <p>two-node lan cluster. one mac plus one tower, request-routing between them. throughput parallelizes; layer-splitting comes later.</p>
         <div class="image">
-          <pre><code>$ unhosted node add 192.168.1.42
-+ paired: thunder.local (rtx 4090, 24gb)
-$ unhosted run llama3.1:70b "..."
-[layers 0..40 on macbook]
-[layers 41..79 on thunder]</code></pre>
+          <pre><code>$ unhosted peer add thunder 192.168.1.42:7777
++ paired: thunder (rtx 4090, 24gb)
+$ unhosted run llama3.1:8b "..."
+[request 1 -> macbook][request 2 -> thunder]</code></pre>
         </div>
         <a href="https://github.com/unhosted-ai/unhosted-core/blob/main/README.md#roadmap" class="more">read design</a>
+      </article>
+
+      <article class="story">
+        <div class="meta">
+<span class="label">v0.0.35</span>
+        </div>
+        <p>vram-pool — layer-split inference across paired peers. one command on the orchestrator spawns <code>rpc-server</code> on every layer host via signed peer requests, then runs <code>llama-server --rpc=…</code> locally. models bigger than any single machine's GPU now actually run.</p>
+        <div class="image">
+          <pre><code>$ brew tap unhosted-ai/unhosted
+$ brew install unhosted-ai/unhosted/llama-cpp-rpc
+$ unhosted vram-pool start --peers thunder --model llama3.1:70b
+orchestrator       : local
+layer hosts        :
+  - thunder      @ 192.168.1.42:50052
+state              : running</code></pre>
+        </div>
+        <a href="https://github.com/unhosted-ai/unhosted-core/blob/main/design/0009-vram-pooling.md" class="more">read adr</a>
       </article>
 
     </div>
@@ -1179,7 +1195,7 @@ $ unhosted run llama3.1:70b "..."
         <p><a href="https://github.com/unhosted-ai/unhosted-core/blob/main/LICENSE">agpl-3.0</a>. read it, fork it, audit it. <a href="https://github.com/unhosted-ai/unhosted-core/blob/main/SECURITY.md">security</a>.</p>
         <p class="badges">
           <span class="badge">pre-alpha</span>
-          <span class="badge">v0.0.19</span>
+          <span class="badge">v0.0.35</span>
         </p>
       </div>
 
