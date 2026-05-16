@@ -431,13 +431,27 @@ pub const DEFAULT_ORCHESTRATOR_PORT: u16 = 8080;
 
 /// State of the active pool (or lack thereof). Exposed verbatim via
 /// `GET /v1/vram-pool` so the UI can render it without translation.
+///
+/// `PoolManager` covers both roles a machine can play in a VRAM-pool:
+/// - **Orchestrator** — runs `llama-server --rpc=…`, exposes the
+///   OpenAI-compatible endpoint, holds the plan. States:
+///   `Idle → Starting{...} → Running → Failed`.
+/// - **Layer host** — runs only `rpc-server`, on behalf of a remote
+///   orchestrator. States: `Idle → Hosting{orchestrator, port}`.
+///
+/// One machine can be both, but not simultaneously through the same
+/// state: a machine acting as its own layer host (self-loopback)
+/// stays in the orchestrator state and spawns `rpc-server` as part
+/// of its own boot sequence. `Hosting` is reserved for the
+/// "remote orchestrator asked me to be a layer host" case.
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum PoolState {
-    /// No pool running.
+    /// No pool running, in either role.
     Idle,
-    /// Children being spawned. `stage` advances as each child reports
-    /// ready; the UI shows it as a progress indicator.
+    /// Children being spawned (orchestrator role). `stage` advances
+    /// as each child reports ready; the UI shows it as a progress
+    /// indicator.
     Starting { stage: PoolStartingStage, plan: Plan },
     /// Both children up; `llama-server` answering on `endpoint`. The
     /// daemon's chat-completions proxy can now route through this
@@ -449,6 +463,14 @@ pub enum PoolState {
     /// (useful for the UI to display "tried to start X, failed because
     /// Y, click here to retry").
     Failed { error: String, plan: Option<Plan> },
+    /// This machine is acting as a layer host for a remote
+    /// orchestrator. Runs `rpc-server` on `port`; the orchestrator's
+    /// llama-server dials in via `--rpc <our-ip>:<port>`. No
+    /// llama-server runs here in this state. The `orchestrator`
+    /// field is the human-readable identifier of the peer that
+    /// asked us to host (e.g., peer name or `ip:port`) so the UI
+    /// can show "hosting layers for <peer>".
+    Hosting { orchestrator: String, port: u16 },
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -549,15 +571,16 @@ impl PoolManager {
             };
         }
 
-        // First-slice constraint: self-loopback only. A multi-peer
-        // plan needs peer-side rpc-server orchestration that we
-        // don't have yet.
-        let local_only = plan
-            .layer_hosts
-            .iter()
-            .all(|h| h.name == "local");
+        // First-slice constraint: self-loopback only at the
+        // PoolManager level. Multi-peer plans require the route
+        // handler to coordinate remote layer hosts via signed peer
+        // requests BEFORE calling start() — that's the v0.0.34
+        // wiring, separate from this module. When that lands,
+        // PoolManager.start() will only see "all remote rpc-servers
+        // are already up; spawn my local pieces and llama-server".
+        let local_only = plan.layer_hosts.iter().all(|h| h.name == "local");
         if !local_only {
-            let err = "multi-peer VRAM-pooling is not yet implemented (phase 2b ships self-loopback only — single machine acting as both orchestrator and layer host)";
+            let err = "multi-peer VRAM-pooling requires peer-side coordination that the orchestrator route handler hasn't wired yet (see ADR 0009 phase 2c); for now use self-loopback or wait for v0.0.34";
             let mut inner = self.inner.lock().await;
             inner.state = PoolState::Failed {
                 error: err.into(),
@@ -585,73 +608,67 @@ impl PoolManager {
 
         // Spawn rpc-server first; llama-server connects to it on
         // boot, so the order matters.
-        tracing::info!(bin = %rpc_bin, port = rpc_port, "vram-pool: spawning rpc-server");
-        let rpc_child = AsyncCommand::new(rpc_bin)
-            .arg("-p")
-            .arg(rpc_port.to_string())
-            .arg("-H")
-            .arg("127.0.0.1")
-            // Inherit stderr so the user sees what rpc-server /
-            // llama-server are doing in the daemon's own logs. The
-            // original `Stdio::piped()` setup was a deadlock waiting
-            // to happen — llama-server logs prolifically during
-            // model load (Metal init, layer-by-layer mmap), the
-            // pipe's ~64 KB buffer fills, the child blocks on write,
-            // the supervisor sees the now-frozen child as "dead",
-            // and the whole pool collapses ~10 s after spawn.
-            // Piping correctly would require a stderr-drainer task
-            // per child — for now `inherit` is the right trade.
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::inherit())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|e| anyhow::anyhow!("failed to spawn rpc-server: {e}"))?;
-
         {
-            let mut inner = self.inner.lock().await;
-            inner.rpc_child = Some(rpc_child);
-            inner.state = PoolState::Starting {
-                stage: PoolStartingStage::WaitingForLocalRpc,
-                plan: plan.clone(),
-            };
+            tracing::info!(bin = %rpc_bin, port = rpc_port, "vram-pool: spawning rpc-server");
+            let rpc_child = AsyncCommand::new(rpc_bin)
+                .arg("-p")
+                .arg(rpc_port.to_string())
+                .arg("-H")
+                .arg("127.0.0.1")
+                // Inherit stderr — see PoolManager::start_as_layer_host
+                // for the rationale (the alternative is a piped-without-
+                // drainer deadlock once llama-server's logs fill the
+                // ~64 KB OS pipe buffer).
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::inherit())
+                .kill_on_drop(true)
+                .spawn()
+                .map_err(|e| anyhow::anyhow!("failed to spawn rpc-server: {e}"))?;
+
+            {
+                let mut inner = self.inner.lock().await;
+                inner.rpc_child = Some(rpc_child);
+                inner.state = PoolState::Starting {
+                    stage: PoolStartingStage::WaitingForLocalRpc,
+                    plan: plan.clone(),
+                };
+            }
+
+            // TCP-probe for the bind — Metal init means the port
+            // isn't ready for 2–4 s on macOS.
+            let rpc_addr: std::net::SocketAddr = format!("127.0.0.1:{rpc_port}")
+                .parse()
+                .expect("loopback addr is valid");
+            let bind_start = std::time::Instant::now();
+            loop {
+                if tokio::net::TcpStream::connect(&rpc_addr).await.is_ok() {
+                    tracing::info!(
+                        waited_ms = bind_start.elapsed().as_millis() as u64,
+                        "vram-pool: local rpc-server bound"
+                    );
+                    break;
+                }
+                if bind_start.elapsed() > RPC_SERVER_BIND_TIMEOUT {
+                    let err = format!(
+                        "rpc-server didn't bind {} within {}s",
+                        rpc_addr,
+                        RPC_SERVER_BIND_TIMEOUT.as_secs()
+                    );
+                    tracing::warn!(error = %err, "vram-pool: local rpc-server failed to come up");
+                    let mut inner = self.inner.lock().await;
+                    if let Some(mut c) = inner.rpc_child.take() {
+                        let _ = c.start_kill();
+                    }
+                    inner.state = PoolState::Failed {
+                        error: err.clone(),
+                        plan: Some(plan),
+                    };
+                    anyhow::bail!(err);
+                }
+                tokio::time::sleep(RPC_SERVER_BIND_POLL).await;
+            }
         }
 
-        // Wait until rpc-server is actually accepting connections.
-        // A static sleep undershoots on Metal cold-start (GPU init
-        // takes 2–4 s before the port binds) and overshoots on
-        // Linux CPU-only (port binds in tens of ms). TCP probe is
-        // the right shape.
-        let rpc_addr: std::net::SocketAddr = format!("127.0.0.1:{rpc_port}")
-            .parse()
-            .expect("loopback addr is valid");
-        let bind_start = std::time::Instant::now();
-        loop {
-            if tokio::net::TcpStream::connect(&rpc_addr).await.is_ok() {
-                tracing::info!(
-                    waited_ms = bind_start.elapsed().as_millis() as u64,
-                    "vram-pool: rpc-server bound"
-                );
-                break;
-            }
-            if bind_start.elapsed() > RPC_SERVER_BIND_TIMEOUT {
-                let err = format!(
-                    "rpc-server didn't bind {} within {}s",
-                    rpc_addr,
-                    RPC_SERVER_BIND_TIMEOUT.as_secs()
-                );
-                tracing::warn!(error = %err, "vram-pool: rpc-server failed to come up");
-                let mut inner = self.inner.lock().await;
-                if let Some(mut c) = inner.rpc_child.take() {
-                    let _ = c.start_kill();
-                }
-                inner.state = PoolState::Failed {
-                    error: err.clone(),
-                    plan: Some(plan),
-                };
-                anyhow::bail!(err);
-            }
-            tokio::time::sleep(RPC_SERVER_BIND_POLL).await;
-        }
 
         // Now llama-server with --rpc pointing at the rpc-server we
         // just started. The model argument is plan.model verbatim;
@@ -742,6 +759,108 @@ impl PoolManager {
         inner.state = PoolState::Idle;
         inner.user_stopped = true;
         Ok(PoolState::Idle)
+    }
+
+    /// Enter the layer-host role: spawn a local `rpc-server` on
+    /// `port` and report `Hosting { orchestrator, port }` until
+    /// stopped. The orchestrator (a remote daemon that paired with
+    /// us) connects to `<our-ip>:port` via `llama-server --rpc=…`.
+    ///
+    /// Refuses to start if any other pool state is active —
+    /// orchestrator and layer-host roles can't coexist on one
+    /// machine through the same PoolManager. A user who wants
+    /// their box to be a layer host for someone else must
+    /// `vram-pool stop` their own orchestrator first.
+    pub async fn start_as_layer_host(
+        self: Arc<Self>,
+        port: u16,
+        orchestrator: String,
+    ) -> anyhow::Result<PoolState> {
+        {
+            let inner = self.inner.lock().await;
+            if !matches!(inner.state, PoolState::Idle | PoolState::Failed { .. }) {
+                anyhow::bail!(
+                    "cannot start as layer host: another vram-pool operation is in progress ({:?})",
+                    inner.state
+                );
+            }
+        }
+
+        let rpc_bin = self
+            .cap
+            .rpc_server_path
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("rpc-server binary not found — install the unhosted-ai/homebrew-unhosted tap"))?;
+
+        tracing::info!(
+            bin = %rpc_bin,
+            port,
+            orchestrator = %orchestrator,
+            "vram-pool: spawning rpc-server as layer host"
+        );
+        let rpc_child = AsyncCommand::new(rpc_bin)
+            .arg("-p")
+            .arg(port.to_string())
+            // Bind 0.0.0.0 so the remote orchestrator can reach us;
+            // pure-loopback wouldn't help in the multi-machine case.
+            // LAN access is gated upstream by the paired-peer
+            // requirement on /v1/vram-pool/layer-host/start.
+            .arg("-H")
+            .arg("0.0.0.0")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::inherit())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|e| anyhow::anyhow!("failed to spawn rpc-server: {e}"))?;
+
+        {
+            let mut inner = self.inner.lock().await;
+            inner.rpc_child = Some(rpc_child);
+            inner.user_stopped = false;
+        }
+
+        // TCP probe so we don't return success before rpc-server is
+        // actually accepting connections. Same logic as the
+        // orchestrator's bind wait — Metal init time on macOS makes
+        // this matter.
+        let local_addr: std::net::SocketAddr = format!("127.0.0.1:{port}")
+            .parse()
+            .expect("loopback addr is valid");
+        let bind_start = std::time::Instant::now();
+        loop {
+            if tokio::net::TcpStream::connect(&local_addr).await.is_ok() {
+                break;
+            }
+            if bind_start.elapsed() > RPC_SERVER_BIND_TIMEOUT {
+                let mut inner = self.inner.lock().await;
+                if let Some(mut c) = inner.rpc_child.take() {
+                    let _ = c.start_kill();
+                }
+                anyhow::bail!(
+                    "rpc-server didn't bind 0.0.0.0:{port} within {}s",
+                    RPC_SERVER_BIND_TIMEOUT.as_secs()
+                );
+            }
+            tokio::time::sleep(RPC_SERVER_BIND_POLL).await;
+        }
+
+        let new_state = PoolState::Hosting {
+            orchestrator: orchestrator.clone(),
+            port,
+        };
+        {
+            let mut inner = self.inner.lock().await;
+            inner.state = new_state.clone();
+        }
+
+        // Lightweight child-death watcher (Hosting role variant of
+        // the orchestrator-role supervisor). If rpc-server exits
+        // unexpectedly, transition to Failed so the orchestrator's
+        // next health check sees it and can re-plan.
+        spawn_layer_host_supervisor(self.inner.clone());
+
+        tracing::info!(port, orchestrator = %orchestrator, "vram-pool: hosting layers");
+        Ok(new_state)
     }
 }
 
@@ -843,6 +962,40 @@ fn spawn_model_load_poller(inner: Arc<Mutex<PoolInner>>, endpoint: String) {
                 }
             }
             tokio::time::sleep(MODEL_LOAD_POLL_INTERVAL).await;
+        }
+    });
+}
+
+/// Layer-host variant of the supervisor. Only watches `rpc_child`
+/// (a hosting node has no llama-server) and transitions to Failed
+/// rather than Idle so the orchestrator's status probes catch the
+/// dead state and can either restart us or re-plan around us.
+fn spawn_layer_host_supervisor(inner: Arc<Mutex<PoolInner>>) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            let mut guard = inner.lock().await;
+            if !matches!(guard.state, PoolState::Hosting { .. }) {
+                return;
+            }
+            if guard.user_stopped {
+                return;
+            }
+            let dead = match guard.rpc_child.as_mut() {
+                Some(c) => c.try_wait().ok().flatten().is_some(),
+                None => true,
+            };
+            if dead {
+                tracing::warn!("vram-pool: hosting rpc-server exited unexpectedly");
+                guard.state = PoolState::Failed {
+                    error: "rpc-server exited unexpectedly while hosting".into(),
+                    plan: None,
+                };
+                if let Some(mut c) = guard.rpc_child.take() {
+                    let _ = c.start_kill();
+                }
+                return;
+            }
         }
     });
 }

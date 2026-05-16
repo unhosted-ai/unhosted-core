@@ -6,6 +6,46 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.33] — 2026-05-16
+
+### Added
+- **VRAM-pool: layer-host role (ADR 0009 phase 2c, half 1 of 2).**
+  Until now, `PoolManager` knew only the orchestrator role — it
+  could spawn `rpc-server` + `llama-server --rpc=…` locally, but
+  there was no way to ask a *remote* peer to spawn an `rpc-server`
+  on the orchestrator's behalf. This release ships the other side
+  of that protocol: any daemon can now host layers for a paired
+  peer's pool.
+
+  - New `PoolState::Hosting { orchestrator, port }` variant.
+  - New `PoolManager::start_as_layer_host(port, orchestrator)`.
+    Spawns `rpc-server -p <port> -H 0.0.0.0`, TCP-probes for the
+    bind, transitions state to `Hosting`. A `spawn_layer_host_supervisor`
+    task watches the child and transitions to `Failed` if it dies
+    unexpectedly so the remote orchestrator's status probe can
+    pick that up and re-plan.
+  - Two new HTTP endpoints, **paired-peer auth required** (not
+    loopback or bearer like the orchestrator-side endpoints — the
+    point is that a remote daemon is calling in):
+    - `POST /v1/vram-pool/layer-host/start` body `{ port, orchestrator }`
+    - `POST /v1/vram-pool/layer-host/stop`
+
+  Verified the auth gate on this Mac: loopback-without-signature
+  call to `/v1/vram-pool/layer-host/start` returns `403 layer-host
+  operations require a paired-peer signed request`. The signed-
+  request path (orchestrator daemon → layer-host daemon) lands in
+  the next release.
+
+### Pending for v0.0.34
+- Orchestrator side: when `PoolManager::start` sees remote layer
+  hosts in the plan, signs and sends `/v1/vram-pool/layer-host/start`
+  to each peer before spawning local `llama-server --rpc=…`. On
+  stop, sends the matching layer-host/stop. PoolManager-internal
+  vs. route-handler-internal split for the peer calls is a design
+  question to resolve before that ships — currently leaning toward
+  putting the peer dance in the route handler so PoolManager
+  stays subprocess-only.
+
 ## [0.0.32] — 2026-05-16
 
 ### Added

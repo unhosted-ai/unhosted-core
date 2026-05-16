@@ -428,6 +428,13 @@ pub async fn serve(node: Node) -> Result<()> {
         .route("/v1/vram-pool", get(vram_pool_status_handler))
         .route("/v1/vram-pool/start", post(vram_pool_start_handler))
         .route("/v1/vram-pool/stop", post(vram_pool_stop_handler))
+        // Layer-host endpoints (ADR 0009 phase 2c). Called by a
+        // remote paired orchestrator to ask this machine to spawn
+        // an rpc-server as a layer host. Auth: signed peer request
+        // (not loopback or bearer-token like the orchestrator-side
+        // endpoints — the caller is by definition a peer).
+        .route("/v1/vram-pool/layer-host/start", post(vram_pool_layer_host_start_handler))
+        .route("/v1/vram-pool/layer-host/stop", post(vram_pool_layer_host_stop_handler))
         .with_state(state);
 
     let app = api
@@ -2696,6 +2703,84 @@ async fn vram_pool_stop_handler(
         .map(axum::Json)
         .map_err(|e| {
             tracing::error!(error = %e, "vram-pool: stop failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
+
+#[derive(serde::Deserialize)]
+struct VramPoolLayerHostStartRequest {
+    /// Port the orchestrator wants this machine's rpc-server to
+    /// listen on. The orchestrator will dial `<our-ip>:port` via
+    /// `llama-server --rpc=…`.
+    port: u16,
+    /// Human-readable identifier of the orchestrator (peer name
+    /// or address). Surfaced verbatim in `PoolState::Hosting` so
+    /// the UI can show "hosting layers for <peer>".
+    orchestrator: String,
+}
+
+async fn vram_pool_layer_host_start_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Result<axum::Json<vram_pool::PoolState>, axum::http::Response<axum::body::Body>> {
+    // Auth posture: must be a paired peer's signed request. NOT
+    // loopback/bearer like the orchestrator-side endpoints — the
+    // whole point is that a remote daemon is calling in to host
+    // layers for it. We're effectively letting a paired peer run
+    // a subprocess on this machine, so the pairing requirement is
+    // load-bearing.
+    let outcome = state.classify(&headers, Some(remote.ip()), &body);
+    let req: VramPoolLayerHostStartRequest = match serde_json::from_slice(&body) {
+        Ok(r) => r,
+        Err(e) => {
+            return Err(axum::http::Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(axum::body::Body::from(format!("bad json: {e}")))
+                .expect("valid response"));
+        }
+    };
+    if !matches!(outcome, auth::AuthOutcome::Peer(_)) {
+        return Err(axum::http::Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .body(axum::body::Body::from(
+                "layer-host operations require a paired-peer signed request",
+            ))
+            .expect("valid response"));
+    }
+    match state
+        .vram_pool
+        .clone()
+        .start_as_layer_host(req.port, req.orchestrator)
+        .await
+    {
+        Ok(s) => Ok(axum::Json(s)),
+        Err(e) => Err(axum::http::Response::builder()
+            .status(StatusCode::BAD_GATEWAY)
+            .body(axum::body::Body::from(e.to_string()))
+            .expect("valid response")),
+    }
+}
+
+async fn vram_pool_layer_host_stop_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Result<axum::Json<vram_pool::PoolState>, StatusCode> {
+    // Same pairing-required posture as start.
+    let outcome = state.classify(&headers, Some(remote.ip()), &body);
+    if !matches!(outcome, auth::AuthOutcome::Peer(_)) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    state
+        .vram_pool
+        .stop()
+        .await
+        .map(axum::Json)
+        .map_err(|e| {
+            tracing::error!(error = %e, "vram-pool: layer-host stop failed");
             StatusCode::INTERNAL_SERVER_ERROR
         })
 }
