@@ -6,6 +6,53 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.29] — 2026-05-16
+
+### Added
+- **VRAM-pool plan generator (ADR 0009 phase 2a).** `vram_pool::plan`
+  is a pure function over (local capability, candidate peers, requested
+  peers, model) → `Plan { orchestrator, layer_hosts, model }`. The
+  spawn supervisor (phase 2b) consumes the plan to actually spawn
+  `rpc-server` + `llama-server --rpc=…` processes; getting the
+  decision logic isolated first keeps spawn work clean and lets the
+  CLI surface a useful "what would run" preview today.
+
+  Two topologies in scope:
+  - **Self-loopback** — no peers requested, local machine runs both
+    `llama-server` and a local `rpc-server` on `127.0.0.1:50052`.
+    Useful for testing the supervisor on a single box without
+    actually pooling any VRAM (the model still fits on one GPU; the
+    `--rpc` round-trip just exercises the wiring).
+  - **LAN cluster** — orchestrator is local, layer hosts are named
+    peers from `--peers a,b`. Refuses on unknown peer names rather
+    than silently dropping; refuses if none of the requested peers
+    are RPC-capable.
+
+  Error type `PlanError` covers four failure modes with messages
+  that name the gap: `NotReady`, `UnknownPeer(name)`,
+  `ModelMissing`, `NoRpcCapablePeers`.
+
+  `unhosted vram-pool start --model llama3.1:70b` now builds the
+  plan and prints the exact `llama-server` + `rpc-server` commands
+  it would invoke. End-to-end on this Mac with the tap installed:
+
+      VRAM-pool plan (preview — actual spawn lands in the next slice):
+        orchestrator       : local
+        model              : llama3.1:70b
+        layer hosts        :
+          - local        @ 127.0.0.1:50052
+        llama-server cmd   :
+          /opt/homebrew/opt/llama-cpp-rpc/bin/llama-server \
+            -m llama3.1:70b --rpc 127.0.0.1:50052 --gpu-layers 99
+        rpc-server cmd     :
+          /opt/homebrew/opt/llama-cpp-rpc/bin/rpc-server -p 50052
+
+  7 new unit tests cover the planner's branches: self-loopback when
+  capable, error when local-incapable + no peers, error without
+  model, cluster plan with mixed-capable peers, silent skip of
+  non-capable peers, error when all requested peers incapable,
+  error on unknown peer name.
+
 ## [0.0.28] — 2026-05-16
 
 ### Added

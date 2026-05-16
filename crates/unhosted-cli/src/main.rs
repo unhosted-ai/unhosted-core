@@ -307,6 +307,38 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// Build `PeerCandidate` entries from the peer registry for the
+/// names the user listed in `--peers`. Marks every resolved peer as
+/// `rpc_capable: true` optimistically — the planner refuses with
+/// `UnknownPeer` if a name doesn't exist in the registry, but it
+/// trusts the user's assertion that the named peers have an
+/// RPC-capable llama.cpp. The spawn supervisor (next slice) will
+/// probe each peer's `/v1/status` before actually starting, which
+/// is where we'll catch a peer that the user *thought* had RPC but
+/// doesn't. For now, the plan output's `rpc-server cmd` block tells
+/// the user exactly what each peer would need to run, so a
+/// pre-flight check is at least possible by reading the printed
+/// plan.
+fn resolve_peer_candidates(requested: &[String]) -> Vec<unhosted_core::vram_pool::PeerCandidate> {
+    use unhosted_core::vram_pool::PeerCandidate;
+    let Ok(registry) = PeerRegistry::load() else {
+        return Vec::new();
+    };
+    let mut out = Vec::with_capacity(requested.len());
+    for name in requested {
+        if let Some(p) = registry.peers.iter().find(|p| &p.name == name) {
+            out.push(PeerCandidate {
+                name: p.name.clone(),
+                addr: p.addr,
+                rpc_capable: true,
+            });
+        }
+        // Names not in the registry are left out — the planner will
+        // surface `UnknownPeer(name)` and the CLI exits 1.
+    }
+    out
+}
+
 async fn run_vram_pool(action: VramPoolAction) -> Result<()> {
     use unhosted_core::vram_pool;
 
@@ -350,26 +382,55 @@ async fn run_vram_pool(action: VramPoolAction) -> Result<()> {
             print_capability(&cap);
         }
         VramPoolAction::Start { model, peers } => {
-            eprintln!("unhosted vram-pool start is not yet implemented in this slice.");
-            eprintln!("Orchestration ships in v0.1.0 (ADR 0009). For now, here's the");
-            eprintln!("local capability + what you intended to start:");
-            eprintln!();
-            print_capability(&cap);
-            eprintln!();
-            eprintln!(
-                "  requested model     : {}",
-                model
-                    .as_deref()
-                    .unwrap_or("(none — would use cluster default)")
-            );
-            eprintln!(
-                "  requested peers     : {}",
-                if peers.is_empty() {
-                    "(none — would use paired peers from peers.toml)".to_string()
-                } else {
-                    peers.join(", ")
+            // Plan generator runs today; spawn supervisor is the next
+            // slice. So `start` builds and prints a real plan — useful
+            // for "is the cluster shape I expect what unhosted would
+            // actually pass to llama-server?" verification before any
+            // subprocess launches.
+            let candidates = resolve_peer_candidates(&peers);
+            let local_capable = cap.ready();
+            match vram_pool::plan(local_capable, &candidates, &peers, model) {
+                Ok(p) => {
+                    println!("VRAM-pool plan (preview — actual spawn lands in the next slice):");
+                    println!();
+                    println!("  orchestrator       : {}", p.orchestrator);
+                    println!("  model              : {}", p.model);
+                    println!("  layer hosts        :");
+                    for h in &p.layer_hosts {
+                        println!("    - {:<12} @ {}", h.name, h.addr);
+                    }
+                    println!();
+                    println!("  llama-server cmd   :");
+                    println!(
+                        "    {} -m {} --rpc {} --gpu-layers 99",
+                        cap.llama_server_path
+                            .as_deref()
+                            .unwrap_or("<llama-server>"),
+                        p.model,
+                        p.rpc_arg()
+                    );
+                    println!();
+                    println!("  rpc-server cmd     :");
+                    let rpc_bin = cap.rpc_server_path.as_deref().unwrap_or("<rpc-server>");
+                    for h in &p.layer_hosts {
+                        if h.name == "local" {
+                            println!("    {rpc_bin} -p {}", h.addr.port());
+                        } else {
+                            println!(
+                                "    (on peer `{}`)  {rpc_bin} -p {} -H 0.0.0.0",
+                                h.name,
+                                h.addr.port()
+                            );
+                        }
+                    }
                 }
-            );
+                Err(e) => {
+                    eprintln!("vram-pool: cannot build a plan: {e}");
+                    eprintln!();
+                    print_capability(&cap);
+                    std::process::exit(1);
+                }
+            }
         }
         VramPoolAction::Stop => {
             eprintln!("unhosted vram-pool stop is not yet implemented (no pool to stop).");
