@@ -6,6 +6,36 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.36] — 2026-05-16
+
+### Fixed
+- **mDNS auto-restore was rewriting peer addrs to broken
+  IPv6 link-locals.** `status_handler` had an auto-restore step
+  that updated a paired peer's stored address whenever mDNS
+  reported a different one for the matching pubkey. The
+  intended use case (router reboot ⇒ peer's IP rotated) worked
+  fine, but on macOS mDNS frequently broadcasts an IPv6
+  link-local (`fe80::*`) for peers on the same interface. Those
+  addresses need a zone identifier (`%en0`) to connect, which
+  `SocketAddr` doesn't carry — so every peer-to-peer call after
+  the first `/v1/status` poll started failing with
+  "Connection refused". The bug was harmless before v0.0.34
+  because no in-daemon code paths actually made peer HTTP
+  calls; v0.0.34's vram-pool orchestrator started doing so and
+  the bug surfaced.
+
+  Fixed with a `discovered_is_better` heuristic: only swap the
+  stored address when the new one is at least as reachable as
+  the old. Loopback > LAN-private (RFC1918 / IPv6 unique-local)
+  > public > link-local. A paired peer at `192.168.1.42:7777`
+  no longer gets stomped by `fe80::*` broadcasts; mDNS for the
+  rotated-LAN-IP case still works because both addresses are
+  rank "LAN-private" so the swap is accepted.
+
+  5 unit tests cover the heuristic, including the exact
+  two-daemon-same-Mac scenario that surfaced the bug. Total
+  daemon tests now 45 passing.
+
 ## [0.0.35] — 2026-05-16
 
 ### Milestone

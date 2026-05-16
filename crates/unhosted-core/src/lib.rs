@@ -725,6 +725,48 @@ struct RoutingStatus {
     mode: &'static str,
 }
 
+/// Decide whether a newly-discovered peer address is worth
+/// overwriting the one we already have on file.
+///
+/// Auto-restore is supposed to handle the "peer's IP changed
+/// after a router reboot" case. It is **not** supposed to swap
+/// a working address for a broken one — which is exactly what
+/// happened when mDNS on macOS advertised an IPv6 link-local
+/// (`fe80::*`) for a peer that was already reachable at, say,
+/// `192.168.1.42:7777`. Link-locals require a zone identifier
+/// (`%en0`) which `SocketAddr` doesn't carry, so any connect
+/// against `[fe80::*]:port` from outside the discovery path
+/// returns "Connection refused".
+///
+/// Heuristic: only accept the swap if the new address is at
+/// least as "good" as the current one by this rank:
+///
+///   loopback (127.0.0.1, ::1)         best  (already-running test setup)
+///   private IPv4 (10.*, 192.168.*)    good  (LAN reachable)
+///   global IPv6                       good
+///   non-private IPv4                  ok    (public, may NAT)
+///   link-local IPv4 (169.254.*)       avoid
+///   link-local IPv6 (fe80::*)         avoid (needs zone id)
+///
+/// Returns true only when `new` is strictly better than or equal
+/// to `old`; otherwise we keep `old`.
+fn discovered_is_better(old: &SocketAddr, new: &SocketAddr) -> bool {
+    fn rank(addr: &SocketAddr) -> u8 {
+        use std::net::IpAddr;
+        match addr.ip() {
+            IpAddr::V4(v4) if v4.is_loopback() => 5,
+            IpAddr::V6(v6) if v6.is_loopback() => 5,
+            IpAddr::V4(v4) if v4.is_private() => 4,
+            IpAddr::V6(v6) if (v6.segments()[0] & 0xfe00) == 0xfc00 => 4, // unique-local
+            IpAddr::V4(v4) if v4.is_link_local() => 1,
+            IpAddr::V6(v6) if (v6.segments()[0] & 0xffc0) == 0xfe80 => 1, // link-local
+            IpAddr::V4(_) => 3,
+            IpAddr::V6(_) => 3,
+        }
+    }
+    rank(new) >= rank(old)
+}
+
 async fn status_handler(
     State(state): State<NodeState>,
     axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
@@ -813,7 +855,20 @@ async fn status_handler(
                 .iter_mut()
                 .find(|p| p.pubkey.as_deref() == Some(dpk))
             {
-                if p.addr != d.addr {
+                // Don't overwrite a reachable address with an
+                // unreachable one. mDNS on macOS frequently
+                // advertises an IPv6 link-local (`fe80::*`) for
+                // peers on the local interface, and on this
+                // platform a link-local address without a zone
+                // identifier (`%en0`) isn't routable from a fresh
+                // `connect()` call. Previously this code blindly
+                // replaced the registry's `127.0.0.1:7778`
+                // (perfectly reachable) with the link-local
+                // (broken), and every peer-to-peer call after the
+                // first status poll failed with "Connection
+                // refused". Skip the swap when the discovered
+                // address looks worse than what we already have.
+                if p.addr != d.addr && discovered_is_better(&p.addr, &d.addr) {
                     tracing::info!(
                         peer = %p.name,
                         old = %p.addr,
@@ -3647,4 +3702,62 @@ async fn forward_event(
         }
     }
     true
+}
+
+#[cfg(test)]
+mod lib_tests {
+    use super::*;
+    use std::net::SocketAddr;
+
+    fn sa(s: &str) -> SocketAddr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn keep_reachable_addr_over_link_local() {
+        // The bug this fix targets: a LAN-private addr should NOT
+        // be replaced by an IPv6 link-local mDNS broadcast.
+        let lan = sa("192.168.1.42:7777");
+        let link_local = sa("[fe80::1]:7777");
+        assert!(!discovered_is_better(&lan, &link_local));
+    }
+
+    #[test]
+    fn keep_loopback_over_link_local() {
+        // The synthetic two-daemon test setup hits this exact
+        // case: 127.0.0.1:7778 should not be swapped for fe80:*.
+        let loop_back = sa("127.0.0.1:7778");
+        let link_local = sa("[fe80::abcd]:7778");
+        assert!(!discovered_is_better(&loop_back, &link_local));
+    }
+
+    #[test]
+    fn keep_lan_over_public_v4() {
+        // A peer paired by LAN IP should keep that addr even if
+        // mDNS somehow advertises a public IPv4.
+        let lan = sa("192.168.1.42:7777");
+        let public_v4 = sa("8.8.8.8:7777");
+        assert!(!discovered_is_better(&lan, &public_v4));
+    }
+
+    #[test]
+    fn swap_link_local_for_lan() {
+        // The other direction: if the registry already has a
+        // broken link-local (from a prior mDNS-only discovery)
+        // and the peer comes back at a proper LAN address, we
+        // should restore.
+        let link_local = sa("[fe80::1]:7777");
+        let lan = sa("192.168.1.42:7777");
+        assert!(discovered_is_better(&link_local, &lan));
+    }
+
+    #[test]
+    fn swap_for_same_rank_different_addr() {
+        // Two LAN-private addrs of the same rank — the IP rotated
+        // (router reboot, e.g.). Accept the swap. This is the
+        // case the original auto-restore was written for.
+        let a = sa("192.168.1.42:7777");
+        let b = sa("192.168.1.99:7777");
+        assert!(discovered_is_better(&a, &b));
+    }
 }
