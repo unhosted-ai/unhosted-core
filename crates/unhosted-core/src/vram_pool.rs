@@ -491,12 +491,21 @@ struct PoolInner {
 /// can swap in a TCP probe loop.
 const RPC_SERVER_BIND_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
 
-/// Likewise for `llama-server` — it loads the model file before
-/// answering HTTP, which can take seconds for a multi-GB model.
-/// We don't block for the full duration; the supervisor records
-/// `Running` once it sees the `--rpc` argument was accepted, and
-/// the UI shows the boot progress separately.
-const LLAMA_SERVER_BIND_GRACE: std::time::Duration = std::time::Duration::from_millis(800);
+/// How often the model-load poller hits `llama-server`'s /v1/models
+/// endpoint to detect when the model is actually ready to serve
+/// requests. Tighter than the supervisor's 2 s loop because the
+/// transition from "process is up" → "answering requests" is what
+/// the UI is most impatient to see.
+const MODEL_LOAD_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(800);
+
+/// Hard cap on how long we wait for the model to finish loading
+/// before transitioning to Failed. A multi-GB model on a cold mmap
+/// can take 30+ s on a Mac with SSD, more on Linux without
+/// page-cache pre-warm. 90 s is generous for the models a
+/// single-machine self-loopback can hold; multi-peer slices won't
+/// load larger models any faster (RPC adds latency, not throughput
+/// to disk).
+const MODEL_LOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
 
 impl PoolManager {
     pub fn new(cap: RpcCapability) -> Self {
@@ -642,29 +651,24 @@ impl PoolManager {
             };
         }
 
-        tokio::time::sleep(LLAMA_SERVER_BIND_GRACE).await;
-
-        // Optimistic transition to Running. A proper implementation
-        // would poll the llama-server's /v1/models endpoint to confirm
-        // the model loaded, but: (1) llama-server can take 10+ seconds
-        // to mmap a multi-GB model, (2) failing to do so blocks the
-        // start() call for that whole time, (3) the supervisor task
-        // we kick off below will downgrade to Failed if the child
-        // dies. So we report Running now and rely on `/v1/vram-pool`
-        // polling for the actual model-loaded signal.
-        {
-            let mut inner = self.inner.lock().await;
-            inner.state = PoolState::Running {
-                plan: plan.clone(),
-                endpoint: endpoint.clone(),
-            };
-        }
+        // Keep state at Starting{WaitingForOrchestrator}. Don't lie
+        // about Running until /v1/models actually answers — a chat
+        // UI that gates on `state == "running"` would otherwise let
+        // the user fire a prompt against a half-loaded llama-server
+        // and get a 503. The dedicated poller below flips state.
+        // start() returns the Starting state immediately so the
+        // HTTP handler doesn't block for the multi-GB-mmap window.
+        spawn_model_load_poller(self.inner.clone(), endpoint.clone());
 
         // Background supervisor: watch both children, transition to
-        // Failed if either dies unexpectedly.
+        // Failed if either dies unexpectedly (during loading OR after
+        // running).
         spawn_pool_supervisor(self.inner.clone());
 
-        Ok(PoolState::Running { plan, endpoint })
+        Ok(PoolState::Starting {
+            stage: PoolStartingStage::WaitingForOrchestrator,
+            plan,
+        })
     }
 
     pub async fn stop(&self) -> anyhow::Result<PoolState> {
@@ -680,6 +684,108 @@ impl PoolManager {
         inner.user_stopped = true;
         Ok(PoolState::Idle)
     }
+}
+
+/// Poll `llama-server`'s /v1/models until it answers (model is
+/// loaded and the server is serving) or the timeout fires. On
+/// success, flip state to Running. On timeout, kill the children
+/// and flip to Failed with a message the UI can actually surface.
+///
+/// Separate from the child-death supervisor below because the
+/// concerns are different: this task only matters during the
+/// Starting → Running transition window, the supervisor watches
+/// children for their entire lifetime including the long Running
+/// tail.
+fn spawn_model_load_poller(inner: Arc<Mutex<PoolInner>>, endpoint: String) {
+    let url = format!("{endpoint}/v1/models");
+    tokio::spawn(async move {
+        let client = match reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(800))
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = %e, "vram-pool: poller client build failed");
+                return;
+            }
+        };
+        let start = std::time::Instant::now();
+        loop {
+            // Bail if the user pulled the plug or the supervisor
+            // already marked us Failed.
+            {
+                let g = inner.lock().await;
+                if matches!(g.state, PoolState::Idle | PoolState::Failed { .. } | PoolState::Running { .. })
+                {
+                    return;
+                }
+                if g.user_stopped {
+                    return;
+                }
+            }
+
+            if start.elapsed() > MODEL_LOAD_TIMEOUT {
+                let plan = {
+                    let g = inner.lock().await;
+                    if let PoolState::Starting { plan, .. } = &g.state {
+                        Some(plan.clone())
+                    } else {
+                        None
+                    }
+                };
+                tracing::warn!(
+                    elapsed_ms = start.elapsed().as_millis() as u64,
+                    "vram-pool: model didn't finish loading within timeout"
+                );
+                let mut g = inner.lock().await;
+                if let Some(mut c) = g.llama_child.take() {
+                    let _ = c.start_kill();
+                }
+                if let Some(mut c) = g.rpc_child.take() {
+                    let _ = c.start_kill();
+                }
+                g.state = PoolState::Failed {
+                    error: format!(
+                        "model didn't finish loading within {}s — check the .gguf path and free VRAM",
+                        MODEL_LOAD_TIMEOUT.as_secs()
+                    ),
+                    plan,
+                };
+                return;
+            }
+
+            match client.get(&url).send().await {
+                Ok(r) if r.status().is_success() => {
+                    let plan = {
+                        let g = inner.lock().await;
+                        if let PoolState::Starting { plan, .. } = &g.state {
+                            plan.clone()
+                        } else {
+                            return; // raced; supervisor already moved us
+                        }
+                    };
+                    tracing::info!(
+                        elapsed_ms = start.elapsed().as_millis() as u64,
+                        url = %url,
+                        "vram-pool: orchestrator answering /v1/models — transitioning to Running"
+                    );
+                    let mut g = inner.lock().await;
+                    g.state = PoolState::Running {
+                        plan,
+                        endpoint: endpoint.clone(),
+                    };
+                    return;
+                }
+                _ => {
+                    // Not ready yet (connection refused, 503, etc).
+                    // Sleep and retry. The supervisor below catches
+                    // child-death separately, so we don't have to
+                    // check try_wait here.
+                }
+            }
+            tokio::time::sleep(MODEL_LOAD_POLL_INTERVAL).await;
+        }
+    });
 }
 
 /// Background watcher. Polls both child handles for exit; if either

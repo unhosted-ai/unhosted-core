@@ -263,6 +263,12 @@ const els = {
   vramRpcPath: $("#vram-rpc-path"),
   vramReady: $("#vram-ready"),
   vramHint: $("#vram-hint"),
+  vramControls: $("#vram-pool-controls"),
+  vramModelInput: $("#vram-pool-model-input"),
+  vramStart: $("#vram-pool-start"),
+  vramStop: $("#vram-pool-stop"),
+  vramEndpointRow: $("#vram-pool-endpoint-row"),
+  vramEndpoint: $("#vram-pool-endpoint"),
 };
 
 let streaming = false;
@@ -1616,29 +1622,178 @@ refreshMemoryUI();
 // orchestration commands will live on the same surface once they
 // ship — the panel grows actions then, today it's read-only.
 
+// Two pieces of state drive the panel: (1) the local-machine
+// CAPABILITY probe (whether the binaries are present at all),
+// from /v1/status.vram_pool, and (2) the actual POOL STATE
+// (whether a pool is running, starting, etc.), from
+// /v1/vram-pool. Status poll provides (1) on every tick;
+// `pollVramPoolStatus` provides (2) on its own tighter cadence
+// while we're in a transition. The panel re-renders from both.
+let lastVramCap = null;
+let lastVramPool = null;
+let vramPoolPollTimer = null;
+
 function renderVramPool(cap) {
+  lastVramCap = cap || null;
   if (!els.vramStatus) return;
-  // No vram_pool field in the response (older daemon, or proxy
-  // stripped it) — hide the section rather than show stale data.
   if (!cap) {
     if (els.vramSection) els.vramSection.hidden = true;
     return;
   }
   if (els.vramSection) els.vramSection.hidden = false;
+  if (els.vramDetails) els.vramDetails.hidden = false;
+  renderVramCombined();
+  // Kick off a /v1/vram-pool fetch in the background to populate
+  // pool state (which the status poll doesn't carry). We'll only
+  // refetch on a faster cadence if the pool is transitioning.
+  refreshVramPoolStateNow();
+}
 
-  const ready = cap.has_rpc_server_bin && cap.llama_server_has_rpc_flag;
-  if (ready) {
-    els.vramStatus.textContent = "ready — this machine can join a layer-split cluster";
+function renderVramCombined() {
+  if (!els.vramStatus) return;
+  const cap = lastVramCap;
+  const pool = lastVramPool;
+  const ready = cap && cap.has_rpc_server_bin && cap.llama_server_has_rpc_flag;
+
+  // Pool state takes precedence when something's actively
+  // happening. Otherwise fall back to "capability ready / not ready".
+  if (pool && pool.state === "starting") {
+    const stage = (pool.stage || "spawning_local_rpc").replace(/_/g, " ");
+    els.vramStatus.textContent = `starting — ${stage}…`;
+    els.vramStatus.dataset.state = "starting";
+    if (els.vramControls) els.vramControls.hidden = false;
+    if (els.vramStart) {
+      els.vramStart.hidden = true;
+    }
+    if (els.vramStop) els.vramStop.hidden = false;
+    if (els.vramModelInput) els.vramModelInput.disabled = true;
+    if (els.vramEndpointRow) els.vramEndpointRow.hidden = true;
+  } else if (pool && pool.state === "running") {
+    const model = (pool.plan && pool.plan.model) || "(unknown model)";
+    const lh = (pool.plan && pool.plan.layer_hosts) || [];
+    els.vramStatus.textContent = `running ${model} across ${lh.length} layer host${lh.length === 1 ? "" : "s"}`;
     els.vramStatus.dataset.state = "running";
-  } else if (!cap.llama_server_path) {
+    if (els.vramControls) els.vramControls.hidden = false;
+    if (els.vramStart) els.vramStart.hidden = true;
+    if (els.vramStop) els.vramStop.hidden = false;
+    if (els.vramModelInput) els.vramModelInput.disabled = true;
+    if (els.vramEndpointRow) els.vramEndpointRow.hidden = false;
+    if (els.vramEndpoint) els.vramEndpoint.textContent = pool.endpoint || "—";
+  } else if (pool && pool.state === "failed") {
+    els.vramStatus.textContent = `failed — ${pool.error || "unknown error"}`;
+    els.vramStatus.dataset.state = "failed";
+    if (els.vramControls) els.vramControls.hidden = !ready;
+    if (els.vramStart) els.vramStart.hidden = !ready;
+    if (els.vramStop) els.vramStop.hidden = true;
+    if (els.vramModelInput) els.vramModelInput.disabled = false;
+    if (els.vramEndpointRow) els.vramEndpointRow.hidden = true;
+  } else if (ready) {
+    // Idle + ready
+    els.vramStatus.textContent = "ready — pick a model and click start";
+    els.vramStatus.dataset.state = "idle";
+    if (els.vramControls) els.vramControls.hidden = false;
+    if (els.vramStart) els.vramStart.hidden = false;
+    if (els.vramStop) els.vramStop.hidden = true;
+    if (els.vramModelInput) els.vramModelInput.disabled = false;
+    if (els.vramEndpointRow) els.vramEndpointRow.hidden = true;
+  } else if (cap && !cap.llama_server_path) {
     els.vramStatus.textContent = "no llama-server found — install llama.cpp to enable";
     els.vramStatus.dataset.state = "idle";
+    if (els.vramControls) els.vramControls.hidden = true;
+    if (els.vramEndpointRow) els.vramEndpointRow.hidden = true;
   } else {
     els.vramStatus.textContent =
       "llama.cpp installed, but built without -DGGML_RPC=ON — click details";
     els.vramStatus.dataset.state = "idle";
+    if (els.vramControls) els.vramControls.hidden = true;
+    if (els.vramEndpointRow) els.vramEndpointRow.hidden = true;
   }
-  if (els.vramDetails) els.vramDetails.hidden = false;
+}
+
+async function refreshVramPoolStateNow() {
+  try {
+    const r = await fetch("/v1/vram-pool", { cache: "no-store" });
+    if (!r.ok) return;
+    const pool = await r.json();
+    lastVramPool = pool;
+    renderVramCombined();
+    // Tight polling while transitioning, slow polling otherwise.
+    if (pool.state === "starting") {
+      if (!vramPoolPollTimer) {
+        vramPoolPollTimer = setInterval(refreshVramPoolStateNow, 1500);
+      }
+    } else if (vramPoolPollTimer) {
+      clearInterval(vramPoolPollTimer);
+      vramPoolPollTimer = null;
+    }
+  } catch (e) {
+    /* daemon transient — try again on next status tick */
+  }
+}
+
+async function startVramPool() {
+  if (!els.vramModelInput) return;
+  const model = els.vramModelInput.value.trim();
+  if (!model) {
+    notify("paste a path to a .gguf model first", { level: "info", duration: 3000 });
+    return;
+  }
+  // The CLI's planner is server-side here too: we POST a minimal
+  // plan (self-loopback) since the UI doesn't yet expose peer
+  // selection. Multi-peer in the UI lands with phase 2c.
+  const plan = {
+    orchestrator: "local",
+    layer_hosts: [{ name: "local", addr: "127.0.0.1:50052" }],
+    model,
+  };
+  els.vramStart.disabled = true;
+  notify("starting vram-pool — this can take 30 s for a large model", {
+    level: "info",
+    duration: 4000,
+  });
+  try {
+    const r = await fetch("/v1/vram-pool/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan }),
+    });
+    if (!r.ok) {
+      const body = await r.text();
+      notify(`start failed: ${body.slice(0, 140)}`, { level: "error", duration: 6000 });
+    }
+    await refreshVramPoolStateNow();
+  } catch (e) {
+    notify(`start failed: ${e}`, { level: "error" });
+  } finally {
+    els.vramStart.disabled = false;
+  }
+}
+
+async function stopVramPool() {
+  const ok = await confirmDialog({
+    title: "stop the pool?",
+    message: "this will kill the rpc-server and llama-server processes. any in-flight chat against the pool's endpoint will fail.",
+    confirmLabel: "stop",
+    danger: true,
+  });
+  if (!ok) return;
+  els.vramStop.disabled = true;
+  try {
+    const r = await fetch("/v1/vram-pool/stop", { method: "POST" });
+    if (r.ok) notify("pool stopped", { level: "info", duration: 2000 });
+  } catch (e) {
+    notify(`stop failed: ${e}`, { level: "error" });
+  } finally {
+    els.vramStop.disabled = false;
+    await refreshVramPoolStateNow();
+  }
+}
+
+if (els.vramStart) {
+  els.vramStart.addEventListener("click", startVramPool);
+}
+if (els.vramStop) {
+  els.vramStop.addEventListener("click", stopVramPool);
 }
 
 function fillVramPoolModal() {

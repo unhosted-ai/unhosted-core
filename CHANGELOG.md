@@ -6,6 +6,60 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.31] — 2026-05-16
+
+### Added
+- **VRAM-pool: real model-load detection (phase 2d).** v0.0.30
+  spawned children, slept 800 ms, declared `Running`. A chat against
+  `:8080` during the model's multi-GB mmap window would 503 even
+  though the daemon reported `Running`. Now: spawn → state stays
+  at `Starting{stage: waiting_for_orchestrator}` → background
+  poller hits `/v1/models` every 800 ms → flip to `Running` the
+  moment the orchestrator answers. Hard cap of 90 s; on timeout we
+  kill the children and surface a `Failed` state with a useful
+  message ("model didn't finish loading within 90s — check the
+  .gguf path and free VRAM").
+
+  Consumers gating on `state === "running"` now see the truth, not
+  an optimistic guess. The `unhosted vram-pool start` HTTP handler
+  still returns immediately with the `Starting` state — clients
+  poll `/v1/vram-pool` for the transition.
+
+- **VRAM-pool: sidebar controls in the web UI.** The capability
+  panel from v0.0.27 grows a model-path input + start/stop buttons
+  + an endpoint readout. Layout:
+
+  ```
+  cluster (vram-pool)
+  ready — pick a model and click start
+  [ path to .gguf                       ]
+  [ ▶ start pool ]
+  ```
+
+  After start:
+  ```
+  starting — waiting for orchestrator…
+  [ ./model.gguf (disabled) ]
+  [ ■ stop pool ]
+  ```
+
+  After Running:
+  ```
+  running ./model.gguf across 1 layer host
+  [ ./model.gguf (disabled) ]
+  [ ■ stop pool ]
+  http://127.0.0.1:8080
+  ```
+
+  Pool state polling cadence: every 1.5 s while transitioning,
+  on the normal /v1/status tick otherwise. Stop pops the in-app
+  confirm dialog so an accidental click doesn't kill an
+  in-flight pool.
+
+  Multi-peer not in this UI slice — start button currently fires
+  a self-loopback plan only, matching what the supervisor knows
+  how to run (phase 2c remains gated on multi-peer orchestration).
+
 ## [0.0.30] — 2026-05-16
 
 ### Added

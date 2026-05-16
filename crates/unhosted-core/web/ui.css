@@ -1603,3 +1603,60 @@ button:focus-visible, input:focus-visible, textarea:focus-visible,
   font-size: 12px;
   padding: 1px 4px;
 }
+
+/* VRAM-pool controls (sidebar). The input + buttons row appears
+   under the status line when the local machine is ready or a pool
+   is active. */
+.vram-pool-controls {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.vram-pool-model-input {
+  width: 100%;
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 8px;
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.vram-pool-model-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.vram-pool-model-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.vram-pool-actions {
+  display: flex;
+  gap: 6px;
+}
+.vram-pool-actions .pair-btn {
+  flex: 1;
+  justify-content: center;
+}
+.pair-btn-danger {
+  color: var(--danger, #c33);
+}
+.pair-btn-danger:hover {
+  border-color: var(--danger, #c33);
+  color: var(--danger, #c33);
+}
+.vram-pool-endpoint {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
