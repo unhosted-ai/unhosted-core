@@ -198,6 +198,31 @@
         </button>
       </div>
 
+      <!-- VRAM-pool cluster status. Reports whether this machine has
+           an RPC-capable llama.cpp build (the gate to participating
+           in layer-split inference per ADR 0009). Static once the
+           daemon comes up; clicking the header re-probes. -->
+      <div class="sidebar-section" id="vram-pool-section">
+        <h4>
+          <svg class="h4-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="1.5" y="3" width="13" height="4" rx="1"/>
+            <rect x="1.5" y="9" width="13" height="4" rx="1"/>
+            <circle cx="4" cy="5" r="0.6" fill="currentColor"/>
+            <circle cx="4" cy="11" r="0.6" fill="currentColor"/>
+          </svg>
+          cluster (vram-pool)
+        </h4>
+        <div class="tunnel-status" id="vram-pool-status-line">checking…</div>
+        <button class="pair-btn pair-btn-secondary" id="vram-pool-details" hidden>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="8" cy="8" r="6"/>
+            <line x1="8" y1="6" x2="8" y2="11"/>
+            <circle cx="8" cy="4.5" r="0.5" fill="currentColor"/>
+          </svg>
+          <span>details</span>
+        </button>
+      </div>
+
       <div class="sidebar-section" id="developer-section">
         <h4>
           <svg class="h4-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -555,6 +580,45 @@
             </div>
           </div>
           <button class="btn-danger" id="memory-clear-all" hidden>clear all memories</button>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- VRAM-pool details modal. Opens from the cluster section in the
+       sidebar; shows resolved binary paths + the targeted install
+       hint when capability is missing. Populated from /v1/status's
+       vram_pool field on open. -->
+  <div class="modal-backdrop" id="vram-pool-modal" hidden>
+    <div class="modal modal-developer">
+      <header class="modal-head">
+        <h2>vram-pool capability</h2>
+        <button class="modal-close" id="vram-pool-modal-close" aria-label="close">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+            <line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/>
+          </svg>
+        </button>
+      </header>
+      <div class="modal-body">
+        <section class="dev-section">
+          <p class="muted small">VRAM-pooling shards one model's layers across multiple LAN peers via <code>llama.cpp</code>'s RPC mode, so a 70B-class model becomes usable across hardware no single machine could fit. This panel reports what this machine currently has installed. Orchestration commands ship in v0.1.0 — until then, <code>unhosted vram-pool detect</code> is the CLI equivalent.</p>
+          <div class="kv">
+            <label>llama-server</label>
+            <code id="vram-llama-path" class="vram-kv-code">—</code>
+          </div>
+          <div class="kv">
+            <label>llama-server <code>--rpc</code> flag</label>
+            <code id="vram-rpc-flag" class="vram-kv-code">—</code>
+          </div>
+          <div class="kv">
+            <label>rpc-server</label>
+            <code id="vram-rpc-path" class="vram-kv-code">—</code>
+          </div>
+          <div class="kv">
+            <label>ready for pool</label>
+            <code id="vram-ready" class="vram-kv-code">—</code>
+          </div>
+          <p class="muted small vram-hint" id="vram-hint"></p>
         </section>
       </div>
     </div>

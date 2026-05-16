@@ -1583,3 +1583,23 @@ button:focus-visible, input:focus-visible, textarea:focus-visible,
   opacity: 0.85;
 }
 .pair-btn-secondary:hover { opacity: 1; }
+
+/* VRAM-pool details modal: same kv layout as the developer panel.
+   `.vram-kv-code` keeps long paths from breaking the modal width
+   on small windows. */
+.vram-kv-code {
+  word-break: break-all;
+  display: inline-block;
+  font-size: 12.5px;
+  max-width: 100%;
+}
+.vram-hint {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  line-height: 1.5;
+}
+.vram-hint code {
+  font-size: 12px;
+  padding: 1px 4px;
+}

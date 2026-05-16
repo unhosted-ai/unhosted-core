@@ -253,6 +253,16 @@ const els = {
   memoryClearAll: $("#memory-clear-all"),
   memoryAddInput: $("#memory-add-input"),
   memoryAddSubmit: $("#memory-add-submit"),
+  vramSection: $("#vram-pool-section"),
+  vramStatus: $("#vram-pool-status-line"),
+  vramDetails: $("#vram-pool-details"),
+  vramModal: $("#vram-pool-modal"),
+  vramModalClose: $("#vram-pool-modal-close"),
+  vramLlamaPath: $("#vram-llama-path"),
+  vramRpcFlag: $("#vram-rpc-flag"),
+  vramRpcPath: $("#vram-rpc-path"),
+  vramReady: $("#vram-ready"),
+  vramHint: $("#vram-hint"),
 };
 
 let streaming = false;
@@ -750,6 +760,13 @@ function renderStatus(s) {
     }
   } else {
     els.peersBlock.hidden = true;
+  }
+
+  // VRAM-pool capability — populated from /v1/status.vram_pool every poll
+  // so the user sees a `brew install`-induced capability flip without
+  // restarting the daemon.
+  if (els.vramStatus) {
+    renderVramPool(s.vram_pool);
   }
 
   // discovered (unpaired) peers
@@ -1592,6 +1609,92 @@ if (els.memoryClearAll) {
 // Initial paint of the memory panel — runs alongside the first status
 // poll so the sidebar reflects the persisted state on every page load.
 refreshMemoryUI();
+
+// ---------------------------------------------------------------- vram-pool
+// Surface for the v0.0.26 detection foundation (ADR 0009). Reports
+// whether this machine has an RPC-capable llama.cpp build. v0.1.0
+// orchestration commands will live on the same surface once they
+// ship — the panel grows actions then, today it's read-only.
+
+function renderVramPool(cap) {
+  if (!els.vramStatus) return;
+  // No vram_pool field in the response (older daemon, or proxy
+  // stripped it) — hide the section rather than show stale data.
+  if (!cap) {
+    if (els.vramSection) els.vramSection.hidden = true;
+    return;
+  }
+  if (els.vramSection) els.vramSection.hidden = false;
+
+  const ready = cap.has_rpc_server_bin && cap.llama_server_has_rpc_flag;
+  if (ready) {
+    els.vramStatus.textContent = "ready — this machine can join a layer-split cluster";
+    els.vramStatus.dataset.state = "running";
+  } else if (!cap.llama_server_path) {
+    els.vramStatus.textContent = "no llama-server found — install llama.cpp to enable";
+    els.vramStatus.dataset.state = "idle";
+  } else {
+    els.vramStatus.textContent =
+      "llama.cpp installed, but built without -DGGML_RPC=ON — click details";
+    els.vramStatus.dataset.state = "idle";
+  }
+  if (els.vramDetails) els.vramDetails.hidden = false;
+}
+
+function fillVramPoolModal() {
+  // Snapshot from the latest status poll. We could refetch /v1/status
+  // here for fresher data, but the sidebar already polls every 8 s,
+  // and the values are cheap to refresh by reopening the modal.
+  fetch("/v1/status", { cache: "no-store" })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((s) => {
+      if (!s || !s.vram_pool) return;
+      const cap = s.vram_pool;
+      if (els.vramLlamaPath)
+        els.vramLlamaPath.textContent =
+          cap.llama_server_path || "(not found on PATH)";
+      if (els.vramRpcFlag)
+        els.vramRpcFlag.textContent = cap.llama_server_has_rpc_flag
+          ? "yes"
+          : "no — build lacks -DGGML_RPC=ON";
+      if (els.vramRpcPath)
+        els.vramRpcPath.textContent =
+          cap.rpc_server_path || "(not found on PATH)";
+      const ready =
+        cap.has_rpc_server_bin && cap.llama_server_has_rpc_flag;
+      if (els.vramReady) els.vramReady.textContent = ready ? "YES" : "no";
+      if (els.vramHint) {
+        if (ready) {
+          els.vramHint.textContent =
+            "this machine can act as both orchestrator and layer host. orchestration commands ship in v0.1.0.";
+        } else if (!cap.llama_server_path) {
+          els.vramHint.textContent =
+            "llama-server not found on PATH. install llama.cpp via your package manager.";
+        } else {
+          els.vramHint.innerHTML =
+            'llama.cpp is installed but was NOT built with <code>-DGGML_RPC=ON</code>. ' +
+            "until upstream Homebrew lands the change, build from source with that flag, " +
+            'or watch the <code>unhosted-ai/homebrew-unhosted</code> tap announcement.';
+        }
+      }
+    })
+    .catch(() => {});
+}
+
+if (els.vramDetails && els.vramModal) {
+  const closeVram = () => {
+    els.vramModal.hidden = true;
+  };
+  els.vramDetails.addEventListener("click", () => {
+    els.vramModal.hidden = false;
+    fillVramPoolModal();
+  });
+  if (els.vramModalClose)
+    els.vramModalClose.addEventListener("click", closeVram);
+  els.vramModal.addEventListener("click", (e) => {
+    if (e.target === els.vramModal) closeVram();
+  });
+}
 
 // ---------------------------------------------------------------- pair modal
 

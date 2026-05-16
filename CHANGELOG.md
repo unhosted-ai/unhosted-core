@@ -6,6 +6,24 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.27] — 2026-05-16
+
+### Added
+- **VRAM-pool sidebar panel (UI view #3).** v0.0.26 shipped two
+  ways to view cluster capability — `unhosted vram-pool detect`
+  on the CLI and the `vram_pool` field on `GET /v1/status`. This
+  release adds the third: a "cluster (vram-pool)" section in the
+  sidebar between "send to my phone" and "for developers". One
+  short status line (`ready — this machine can join…` /
+  `built without -DGGML_RPC=ON — click details` / `no llama-server
+  found`), a `details` button that opens a modal with the resolved
+  binary paths plus the targeted install hint, and live updates
+  on every `/v1/status` poll so a `brew install` flip shows up
+  without a daemon restart.
+
+  The orchestration commands (`unhosted vram-pool start/stop/status`)
+  still ship in v0.1.0; this is purely the visibility layer.
+
 ## [0.0.26] — 2026-05-15
 
 ### Added
