@@ -269,7 +269,31 @@ const els = {
   vramStop: $("#vram-pool-stop"),
   vramEndpointRow: $("#vram-pool-endpoint-row"),
   vramEndpoint: $("#vram-pool-endpoint"),
+  vramPeersBlock: $("#vram-pool-peers"),
+  vramPeersList: $("#vram-pool-peers-list"),
 };
+
+// Track which paired peers the user has selected as layer hosts
+// for the next `start pool` click. Mutated by checkbox events;
+// read by `startVramPool`. Persisted in localStorage so the
+// selection survives reloads but not daemon restarts (which
+// would invalidate the peer names anyway).
+const VRAM_POOL_PEER_SELECTION_KEY = "unhosted-vram-pool-selected-peers";
+function loadSelectedPeers() {
+  try {
+    const raw = localStorage.getItem(VRAM_POOL_PEER_SELECTION_KEY);
+    if (!raw) return new Set();
+    return new Set(JSON.parse(raw));
+  } catch (e) {
+    return new Set();
+  }
+}
+function saveSelectedPeers(set) {
+  try {
+    localStorage.setItem(VRAM_POOL_PEER_SELECTION_KEY, JSON.stringify([...set]));
+  } catch (e) { /* full disk / private mode — fine, just don't persist */ }
+}
+let vramSelectedPeers = loadSelectedPeers();
 
 let streaming = false;
 let currentAbort = null;
@@ -773,6 +797,7 @@ function renderStatus(s) {
   // restarting the daemon.
   if (els.vramStatus) {
     renderVramPool(s.vram_pool);
+    renderVramPoolPeers(s.peers || []);
   }
 
   // discovered (unpaired) peers
@@ -1710,6 +1735,66 @@ function renderVramCombined() {
   }
 }
 
+// Build the layer-host picker. Each paired peer becomes a
+// checkbox; the user-selected set drives `startVramPool`'s
+// `--peers` list. Hidden when no paired peers exist (single-
+// machine user — self-loopback is the only option).
+//
+// Hidden also while the pool is starting/running/hosting:
+// changing the layer-host set mid-flight would require killing
+// and re-planning, which is what the stop+restart flow already
+// handles cleanly.
+function renderVramPoolPeers(peers) {
+  if (!els.vramPeersBlock || !els.vramPeersList) return;
+  if (peers.length === 0 || (lastVramPool && lastVramPool.state !== "idle")) {
+    els.vramPeersBlock.hidden = true;
+    return;
+  }
+  els.vramPeersBlock.hidden = false;
+
+  // Prune the selection set of peers that are no longer paired
+  // (peer-unpaired between renders).
+  const known = new Set(peers.map((p) => p.name));
+  let pruned = false;
+  for (const sel of vramSelectedPeers) {
+    if (!known.has(sel)) {
+      vramSelectedPeers.delete(sel);
+      pruned = true;
+    }
+  }
+  if (pruned) saveSelectedPeers(vramSelectedPeers);
+
+  els.vramPeersList.innerHTML = "";
+  for (const peer of peers) {
+    const li = document.createElement("li");
+    li.className = "vram-pool-peer-item";
+    const label = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.dataset.peerName = peer.name;
+    cb.checked = vramSelectedPeers.has(peer.name);
+    cb.addEventListener("change", () => {
+      if (cb.checked) {
+        vramSelectedPeers.add(peer.name);
+      } else {
+        vramSelectedPeers.delete(peer.name);
+      }
+      saveSelectedPeers(vramSelectedPeers);
+    });
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "vram-pool-peer-name";
+    nameSpan.textContent = peer.name;
+    const trustSpan = document.createElement("span");
+    trustSpan.className = peer.trusted
+      ? "vram-pool-peer-badge trusted"
+      : "vram-pool-peer-badge lan";
+    trustSpan.textContent = peer.trusted ? "trusted" : "lan";
+    label.append(cb, nameSpan, trustSpan);
+    li.append(label);
+    els.vramPeersList.append(li);
+  }
+}
+
 async function refreshVramPoolStateNow() {
   try {
     const r = await fetch("/v1/vram-pool", { cache: "no-store" });
@@ -1738,16 +1823,45 @@ async function startVramPool() {
     notify("paste a path to a .gguf model first", { level: "info", duration: 3000 });
     return;
   }
-  // The CLI's planner is server-side here too: we POST a minimal
-  // plan (self-loopback) since the UI doesn't yet expose peer
-  // selection. Multi-peer in the UI lands with phase 2c.
+
+  // Look up addresses for selected peers from the latest status
+  // snapshot. We need their daemon addr to build the LayerHost.addr
+  // (peer_ip:50052) the orchestrator expects.
+  const status = await fetch("/v1/status", { cache: "no-store" })
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null);
+  const peers = (status && status.peers) || [];
+
+  const layer_hosts = [];
+  for (const sel of vramSelectedPeers) {
+    const peer = peers.find((p) => p.name === sel);
+    if (!peer) {
+      notify(`selected peer "${sel}" not found in registry`, { level: "error", duration: 4000 });
+      return;
+    }
+    // peer.addr is "host:port" (the daemon's HTTP addr). Strip
+    // the port and append 50052 for the rpc-server.
+    const colon = peer.addr.lastIndexOf(":");
+    const host = peer.addr.slice(0, colon);
+    layer_hosts.push({ name: peer.name, addr: `${host}:50052` });
+  }
+  // No peers selected → self-loopback (local machine is the only
+  // layer host). This matches the planner's default behavior.
+  if (layer_hosts.length === 0) {
+    layer_hosts.push({ name: "local", addr: "127.0.0.1:50052" });
+  }
+
   const plan = {
     orchestrator: "local",
-    layer_hosts: [{ name: "local", addr: "127.0.0.1:50052" }],
+    layer_hosts,
     model,
   };
   els.vramStart.disabled = true;
-  notify("starting vram-pool — this can take 30 s for a large model", {
+  const layerSummary =
+    layer_hosts.length === 1 && layer_hosts[0].name === "local"
+      ? "self-loopback"
+      : `across ${layer_hosts.length} peer${layer_hosts.length === 1 ? "" : "s"}`;
+  notify(`starting vram-pool ${layerSummary} — this can take 30 s for a large model`, {
     level: "info",
     duration: 4000,
   });

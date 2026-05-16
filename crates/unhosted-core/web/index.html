@@ -227,6 +227,16 @@
             autocapitalize="off"
             autocomplete="off"
           >
+          <!-- Peer picker. Auto-populated from /v1/status.peers
+               on every status tick. Each checkbox toggles whether
+               that peer is enlisted as a layer host in the
+               next start. Hidden until at least one paired peer
+               is in the registry — self-loopback is the only
+               option for a single-machine user. -->
+          <div class="vram-pool-peers" id="vram-pool-peers" hidden>
+            <div class="vram-pool-peers-head">layer hosts</div>
+            <ul class="vram-pool-peers-list" id="vram-pool-peers-list"></ul>
+          </div>
           <div class="vram-pool-actions">
             <button class="pair-btn" id="vram-pool-start">
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

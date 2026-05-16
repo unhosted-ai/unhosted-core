@@ -6,6 +6,43 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.37] — 2026-05-16
+
+### Added
+- **VRAM-pool sidebar UI now exposes multi-peer.** Until now the
+  "start pool" button in the sidebar fired a hardcoded
+  self-loopback plan (one layer host: `local @ 127.0.0.1:50052`).
+  v0.0.35 made the multi-peer wire path functional, but the UI
+  was stuck on the single-machine plan. v0.0.37 adds a
+  layer-host picker below the model input:
+
+  ```
+  cluster (vram-pool)
+  ready — pick a model and click start
+  [ path to .gguf                       ]
+  layer hosts
+    □ thunder         [TRUSTED]
+    □ homelab         [TRUSTED]
+  [ ▶ start pool ]
+  ```
+
+  The picker is rebuilt from `/v1/status.peers` on every poll, so
+  newly-paired peers show up without a reload. Checkbox state is
+  persisted to `localStorage` (key
+  `unhosted-vram-pool-selected-peers`) so a reload doesn't drop
+  the selection. Unpaired peers are pruned from the saved set
+  automatically. Hidden when no peers are paired (self-loopback
+  is the only sensible option) and hidden during
+  `Starting/Running/Hosting/Failed` states (mid-flight topology
+  changes aren't supported; stop + restart with a new selection
+  is the path).
+
+  When a peer is selected, the click builds a plan with
+  `LayerHost { name, addr: <peer-host>:50052 }` for each chosen
+  peer. With no peers selected, the plan stays as the
+  self-loopback default — matching the planner's behavior so
+  pre-v0.0.37 users see no regression.
+
 ## [0.0.36] — 2026-05-16
 
 ### Fixed
