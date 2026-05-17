@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/unhosted-core", "crates/unhosted-cli", "crates/unhosted-desktop", "crates/unhosted-relay"]
 
 [workspace.package]
-version = "0.0.38"
+version = "0.0.39"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/unhosted-ai/unhosted"
@@ -50,6 +50,11 @@ quinn = { version = "0.11", default-features = false, features = ["runtime-tokio
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 rustls-pki-types = "1"
 rcgen = { version = "0.13", default-features = false, features = ["pem", "ring"] }
+# Settlement primitives for public-mode (PeerPaymentPolicy, signed
+# receipts). Pinned to a commit on `main` so the build is reproducible
+# without crates.io publishing; bump intentionally when a new policy
+# shape lands. See `unhosted-payments` repo for the ADR.
+unhosted-payments-core = { git = "https://github.com/unhosted-ai/unhosted-payments.git", rev = "1f3e42cafc99570d31a9a81c4b8a0a2717d13713" }
 
 [profile.release]
 opt-level = 3

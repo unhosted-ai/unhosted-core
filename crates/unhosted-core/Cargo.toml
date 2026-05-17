@@ -43,3 +43,4 @@ rcgen.workspace = true
 # alongside our binary — important because the user shouldn't have to
 # install onnxruntime by hand to use private memory.
 fastembed = { version = "5", default-features = false, features = ["hf-hub-native-tls", "ort-download-binaries-native-tls"] }
+unhosted-payments-core.workspace = true

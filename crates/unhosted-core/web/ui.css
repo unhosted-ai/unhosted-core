@@ -1604,6 +1604,72 @@ button:focus-visible, input:focus-visible, textarea:focus-visible,
   padding: 1px 4px;
 }
 
+/* Public-mode policy controls (sidebar). Compact rail-checkbox list,
+   KYC tier select, and a free-form country block-list. ADR-0010
+   slice 2 — read-only here is just "what is this node currently
+   advertising"; quoting comes later. */
+.public-mode-controls {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.public-mode-rails-label,
+.public-mode-kyc-label,
+.public-mode-blocked-label {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--mute);
+  text-transform: lowercase;
+  letter-spacing: 0.06em;
+  display: block;
+}
+.public-mode-rails-list {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 0 0;
+}
+.public-mode-rails-list li {
+  padding: 1px 0;
+}
+.public-mode-rails-list label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.public-mode-kyc-label select,
+.public-mode-blocked-label input {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 8px;
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+.public-mode-blocked-label input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.public-mode-kyc-label select:focus,
+.public-mode-blocked-label input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.public-mode-actions {
+  display: flex;
+  gap: 6px;
+}
+.public-mode-actions .pair-btn {
+  flex: 1;
+  justify-content: center;
+}
+
 /* VRAM-pool controls (sidebar). The input + buttons row appears
    under the status line when the local machine is ready or a pool
    is active. */

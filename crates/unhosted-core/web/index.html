@@ -272,6 +272,52 @@
         </button>
       </details>
 
+      <details class="sidebar-section sidebar-collapsible" id="public-mode-section">
+        <summary>
+          <svg class="h4-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="8" cy="8" r="6"/>
+            <path d="M2.5 8h11"/>
+            <path d="M8 2.5c2 2 2 9 0 11"/>
+            <path d="M8 2.5c-2 2-2 9 0 11"/>
+          </svg>
+          public mode
+        </summary>
+        <div class="tunnel-status" id="public-mode-status-line">closed (accepts nothing)</div>
+        <div class="public-mode-controls">
+          <label class="public-mode-rails-label">accepted rails</label>
+          <ul class="public-mode-rails-list" id="public-mode-rails-list">
+            <li><label><input type="checkbox" data-rail="lightning"> lightning</label></li>
+            <li><label><input type="checkbox" data-rail="usdc_base"> usdc (base)</label></li>
+            <li><label><input type="checkbox" data-rail="usdc_solana"> usdc (solana)</label></li>
+            <li><label><input type="checkbox" data-rail="stripe_connect"> stripe connect</label></li>
+            <li><label><input type="checkbox" data-rail="apple_pay"> apple pay</label></li>
+            <li><label><input type="checkbox" data-rail="manual"> manual</label></li>
+          </ul>
+          <label class="public-mode-kyc-label">
+            minimum kyc
+            <select id="public-mode-kyc">
+              <option value="none">none</option>
+              <option value="email">email</option>
+              <option value="id_verified">id-verified</option>
+            </select>
+          </label>
+          <label class="public-mode-blocked-label">
+            blocked countries (comma-separated ISO codes)
+            <input type="text" id="public-mode-blocked" placeholder="KP, IR" spellcheck="false" autocapitalize="characters" autocomplete="off">
+          </label>
+          <div class="public-mode-actions">
+            <button class="pair-btn" id="public-mode-save">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 3h8l2 2v8H3z"/>
+                <path d="M5 3v4h6V3"/>
+                <rect x="5" y="9" width="6" height="3"/>
+              </svg>
+              <span>save policy</span>
+            </button>
+          </div>
+        </div>
+      </details>
+
       <details class="sidebar-section sidebar-collapsible" id="developer-section">
         <summary>
           <svg class="h4-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

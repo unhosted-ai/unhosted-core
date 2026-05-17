@@ -5520,7 +5520,7 @@ checksum = "40ce102ab67701b8526c123c1bab5cbe42d7040ccfd0f64af1a385808d2f43de"
 
 [[package]]
 name = "unhosted-cli"
-version = "0.0.37"
+version = "0.0.39"
 dependencies = [
  "anyhow",
  "clap",
@@ -5535,7 +5535,7 @@ dependencies = [
 
 [[package]]
 name = "unhosted-core"
-version = "0.0.37"
+version = "0.0.39"
 dependencies = [
  "anyhow",
  "axum",
@@ -5562,12 +5562,13 @@ dependencies = [
  "toml 0.8.2",
  "tower-http",
  "tracing",
+ "unhosted-payments-core",
  "url",
 ]
 
 [[package]]
 name = "unhosted-desktop"
-version = "0.0.37"
+version = "0.0.39"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -5581,8 +5582,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "unhosted-payments-core"
+version = "0.0.1"
+source = "git+https://github.com/unhosted-ai/unhosted-payments.git?rev=1f3e42cafc99570d31a9a81c4b8a0a2717d13713#1f3e42cafc99570d31a9a81c4b8a0a2717d13713"
+dependencies = [
+ "base64 0.22.1",
+ "ed25519-dalek",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "unhosted-relay"
-version = "0.0.37"
+version = "0.0.39"
 dependencies = [
  "anyhow",
  "axum",

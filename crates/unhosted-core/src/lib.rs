@@ -15,6 +15,7 @@ pub mod identity;
 pub mod memory;
 pub mod paths;
 pub mod peer;
+pub mod public_mode;
 pub mod relay_client;
 pub mod router;
 pub mod transport;
@@ -435,6 +436,15 @@ pub async fn serve(node: Node) -> Result<()> {
         // endpoints — the caller is by definition a peer).
         .route("/v1/vram-pool/layer-host/start", post(vram_pool_layer_host_start_handler))
         .route("/v1/vram-pool/layer-host/stop", post(vram_pool_layer_host_stop_handler))
+        // Public-mode policy (ADR-0010 slice 2). GET reads the
+        // currently advertised PeerPaymentPolicy; PUT replaces it.
+        // Both are local-user-only — only the daemon owner decides
+        // which rails / KYC tiers / countries the node accepts.
+        // Quoting (slice 3) will land alongside the rail adapters.
+        .route(
+            "/v1/public-mode/policy",
+            get(public_mode_policy_get_handler).put(public_mode_policy_put_handler),
+        )
         .with_state(state);
 
     let app = api
@@ -2688,6 +2698,43 @@ async fn web_fetch_handler(
                 .expect("valid response"))
         }
     }
+}
+
+// ─── public-mode policy ───────────────────────────────────────────────────
+// ADR-0010 slice 2. Read/replace the on-disk PeerPaymentPolicy that
+// this node will advertise to peers asking for a quote. Both routes
+// are local-user-only: the policy is part of the node's identity, and
+// only the local user should decide what their machine accepts.
+
+async fn public_mode_policy_get_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<axum::Json<public_mode::PeerPaymentPolicy>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    match public_mode::load() {
+        Ok(policy) => Ok(axum::Json(policy)),
+        Err(e) => {
+            tracing::error!(error = %e, "public_mode: load failed");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+async fn public_mode_policy_put_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    axum::Json(policy): axum::Json<public_mode::PeerPaymentPolicy>,
+) -> Result<axum::Json<public_mode::PeerPaymentPolicy>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    if let Err(e) = public_mode::save(&policy) {
+        tracing::error!(error = %e, "public_mode: save failed");
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+    Ok(axum::Json(policy))
 }
 
 // ─── vram-pool orchestration ──────────────────────────────────────────────

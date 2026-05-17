@@ -2425,6 +2425,96 @@ if (els.devSnippetCopy) {
   });
 }
 
+// --------------------------------------------------------- public-mode
+// ADR-0010 slice 2. Read/write the PeerPaymentPolicy that this node
+// advertises. The policy is rail-gating only — nothing here moves
+// money. The quote endpoint (slice 3) is what actually consults it.
+
+const ALL_RAILS = [
+  "lightning",
+  "usdc_base",
+  "usdc_solana",
+  "stripe_connect",
+  "apple_pay",
+  "manual",
+];
+
+async function fetchPublicModePolicy() {
+  try {
+    const r = await fetch("/v1/public-mode/policy");
+    if (!r.ok) return null;
+    return await r.json();
+  } catch (_) {
+    return null;
+  }
+}
+
+async function savePublicModePolicy(policy) {
+  const r = await fetch("/v1/public-mode/policy", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(policy),
+  });
+  if (!r.ok) throw new Error(`save failed: ${r.status}`);
+  return await r.json();
+}
+
+function renderPublicModePolicy(policy) {
+  const statusLine = document.getElementById("public-mode-status-line");
+  if (!policy) {
+    if (statusLine) statusLine.textContent = "could not load";
+    return;
+  }
+  const rails = new Set(policy.accepted_rails || []);
+  for (const cb of document.querySelectorAll('#public-mode-rails-list input[type="checkbox"]')) {
+    cb.checked = rails.has(cb.dataset.rail);
+  }
+  const kyc = document.getElementById("public-mode-kyc");
+  if (kyc) kyc.value = policy.min_kyc || "none";
+  const blocked = document.getElementById("public-mode-blocked");
+  if (blocked) blocked.value = (policy.blocked_countries || []).join(", ");
+  if (statusLine) {
+    if (rails.size === 0) {
+      statusLine.textContent = "closed (accepts nothing)";
+    } else {
+      const n = rails.size;
+      statusLine.textContent = `open: ${n} rail${n === 1 ? "" : "s"}, min kyc ${policy.min_kyc || "none"}`;
+    }
+  }
+}
+
+function readPublicModePolicyFromUI() {
+  const accepted_rails = [];
+  for (const cb of document.querySelectorAll('#public-mode-rails-list input[type="checkbox"]')) {
+    if (cb.checked && ALL_RAILS.includes(cb.dataset.rail)) {
+      accepted_rails.push(cb.dataset.rail);
+    }
+  }
+  const min_kyc = document.getElementById("public-mode-kyc").value || "none";
+  const blockedRaw = document.getElementById("public-mode-blocked").value || "";
+  const blocked_countries = blockedRaw
+    .split(/[\s,]+/)
+    .map((c) => c.trim().toUpperCase())
+    .filter((c) => /^[A-Z]{2}$/.test(c));
+  return { accepted_rails, min_kyc, blocked_countries };
+}
+
+const publicModeSave = document.getElementById("public-mode-save");
+if (publicModeSave) {
+  publicModeSave.addEventListener("click", async () => {
+    try {
+      const policy = readPublicModePolicyFromUI();
+      const saved = await savePublicModePolicy(policy);
+      renderPublicModePolicy(saved);
+      notify("public-mode policy saved", { level: "success", duration: 2000 });
+    } catch (e) {
+      notify(`save failed: ${e.message || e}`, { level: "error" });
+    }
+  });
+}
+
+fetchPublicModePolicy().then(renderPublicModePolicy);
+
 // ---------------------------------------------------------------- boot
 
 // Render synchronously first (empty list, while the daemon answers)
