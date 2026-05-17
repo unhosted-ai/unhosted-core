@@ -54,7 +54,7 @@ rcgen = { version = "0.13", default-features = false, features = ["pem", "ring"]
 # receipts). Pinned to a commit on `main` so the build is reproducible
 # without crates.io publishing; bump intentionally when a new policy
 # shape lands. See `unhosted-payments` repo for the ADR.
-unhosted-payments-core = { git = "https://github.com/unhosted-ai/unhosted-payments.git", rev = "1f3e42cafc99570d31a9a81c4b8a0a2717d13713" }
+unhosted-payments-core = { git = "https://github.com/unhosted-ai/unhosted-payments.git", rev = "31e95be9aa340642cde61b5fa90b77c9b63cd79d" }
 
 [profile.release]
 opt-level = 3

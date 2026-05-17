@@ -5583,8 +5583,8 @@ dependencies = [
 
 [[package]]
 name = "unhosted-payments-core"
-version = "0.0.1"
-source = "git+https://github.com/unhosted-ai/unhosted-payments.git?rev=1f3e42cafc99570d31a9a81c4b8a0a2717d13713#1f3e42cafc99570d31a9a81c4b8a0a2717d13713"
+version = "0.0.2"
+source = "git+https://github.com/unhosted-ai/unhosted-payments.git?rev=31e95be9aa340642cde61b5fa90b77c9b63cd79d#31e95be9aa340642cde61b5fa90b77c9b63cd79d"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",

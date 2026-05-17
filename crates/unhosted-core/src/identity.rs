@@ -90,6 +90,14 @@ impl Identity {
         self.signing.to_bytes()
     }
 
+    /// Borrow the inner SigningKey. Used by code that needs to feed
+    /// the key into an ed25519-dalek-compatible helper (e.g.
+    /// `unhosted_payments_core::sign_receipt`) without going through
+    /// our own `sign()` wrapper.
+    pub fn signing_key(&self) -> &SigningKey {
+        &self.signing
+    }
+
     pub fn sign(&self, message: &[u8]) -> String {
         let sig: Signature = self.signing.sign(message);
         B64.encode(sig.to_bytes())

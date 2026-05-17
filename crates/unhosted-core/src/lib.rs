@@ -450,6 +450,11 @@ pub async fn serve(node: Node) -> Result<()> {
         // ask "would this peer accept a US payer paying via
         // lightning?" before any real quote/job exists. Local-only.
         .route("/v1/public-mode/policy/inspect", post(public_mode_policy_inspect_handler))
+        // Sign a UsageReport with this daemon's Ed25519 identity.
+        // Local-only. The caller supplies everything except the
+        // host_pubkey; we fill it from the daemon's identity so the
+        // claimed signer can't disagree with the actual signer.
+        .route("/v1/public-mode/receipt/sign", post(public_mode_receipt_sign_handler))
         .with_state(state);
 
     let app = api
@@ -2748,6 +2753,44 @@ struct PolicyInspectResponse {
     /// Human-readable rejection reason. `None` when accepted.
     /// Stable enough to render in the UI without parsing.
     reason: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct ReceiptSignRequest {
+    job_id: String,
+    payer_pubkey: String,
+    rail: public_mode::PaymentRail,
+    units: u64,
+    unit_price_micros: u64,
+}
+
+async fn public_mode_receipt_sign_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    axum::Json(req): axum::Json<ReceiptSignRequest>,
+) -> Result<axum::Json<unhosted_payments_core::SignedReceipt>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    let report = unhosted_payments_core::UsageReport {
+        job_id: req.job_id,
+        host_pubkey: state.identity.public_b64(),
+        payer_pubkey: req.payer_pubkey,
+        rail: req.rail,
+        units: req.units,
+        unit_price_micros: req.unit_price_micros,
+        issued_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    };
+    match unhosted_payments_core::sign_receipt(report, state.identity.signing_key()) {
+        Ok(receipt) => Ok(axum::Json(receipt)),
+        Err(e) => {
+            tracing::error!(error = %e, "public_mode: sign_receipt failed");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
 }
 
 async fn public_mode_policy_inspect_handler(
