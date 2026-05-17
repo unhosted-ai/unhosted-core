@@ -455,6 +455,11 @@ pub async fn serve(node: Node) -> Result<()> {
         // host_pubkey; we fill it from the daemon's identity so the
         // claimed signer can't disagree with the actual signer.
         .route("/v1/public-mode/receipt/sign", post(public_mode_receipt_sign_handler))
+        // Quote: a stranger asks "what would this cost?" with a
+        // signed body proving they hold the payer pubkey they claim.
+        // NOT loopback-gated — payers are by definition external.
+        // The ed25519 sig over the canonical body *is* the auth.
+        .route("/v1/public-mode/quote", post(public_mode_quote_handler))
         .with_state(state);
 
     let app = api
@@ -2786,6 +2791,110 @@ struct PolicyInspectResponse {
     /// Human-readable rejection reason. `None` when accepted.
     /// Stable enough to render in the UI without parsing.
     reason: Option<String>,
+}
+
+// ─── public-mode quote ────────────────────────────────────────────────────
+// Slice 2b: the actual "tell me what this would cost" call. A payer
+// signs a canonical body with their Ed25519 key, the daemon verifies
+// the sig, runs policy.accepts(), and returns a Quote on success or
+// a structured rejection on failure. Pricing is a fixed default for
+// now (10 micros per unit) — slice 3 will plumb in real rail-side
+// quotes. The point of shipping the endpoint shape early is so the
+// payer-side helpers (wallet-js, slice 4) can be written against a
+// stable wire format.
+
+#[derive(serde::Deserialize, serde::Serialize, Clone)]
+struct QuoteRequestBody {
+    payer: public_mode::PayerContext,
+    payer_pubkey: String,
+    requested_units: u64,
+}
+
+#[derive(serde::Deserialize)]
+struct QuoteRequest {
+    body: QuoteRequestBody,
+    /// Base64 (no-pad) Ed25519 sig over canonical_json(body), produced
+    /// with the secret matching payer_pubkey. The sig is the auth —
+    /// no bearer / loopback / paired-peer check applies.
+    sig: String,
+}
+
+#[derive(serde::Serialize)]
+struct Quote {
+    job_id: String,
+    host_pubkey: String,
+    unit_price_micros: u64,
+    quoted_units: u64,
+    /// Unix seconds. Quote is valid until this timestamp; after that
+    /// the payer must re-quote. Short window (5 min) — quotes that
+    /// linger are a footgun for sudden policy changes.
+    expires_at: u64,
+}
+
+#[derive(serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum QuoteResponse {
+    Quote(Quote),
+    Rejected { reason: String },
+}
+
+/// Fixed-price placeholder until rail-aware pricing lands in slice 3.
+/// 10 micros = $0.00001 — small enough that a quote against the
+/// stub never looks like a real number to a UI tester.
+const STUB_UNIT_PRICE_MICROS: u64 = 10;
+const QUOTE_TTL_SECONDS: u64 = 300;
+
+async fn public_mode_quote_handler(
+    State(state): State<NodeState>,
+    bytes: axum::body::Bytes,
+) -> Result<axum::Json<QuoteResponse>, StatusCode> {
+    // Parse the whole envelope first so we can fail-fast on
+    // malformed JSON before touching the policy file.
+    let req: QuoteRequest = match serde_json::from_slice(&bytes) {
+        Ok(r) => r,
+        Err(_) => return Err(StatusCode::BAD_REQUEST),
+    };
+    // Verify the sig is over canonical_json(body) signed by the
+    // claimed payer pubkey. We reject hard here — a stranger can't
+    // even *attempt* a quote without proving they hold the key
+    // they claim.
+    let body_bytes = match unhosted_payments_core::receipt::canonical_json(&req.body) {
+        Ok(b) => b,
+        Err(_) => return Err(StatusCode::BAD_REQUEST),
+    };
+    let key = match unhosted_payments_core::parse_pubkey(&req.body.payer_pubkey) {
+        Ok(k) => k,
+        Err(_) => return Err(StatusCode::UNAUTHORIZED),
+    };
+    if unhosted_payments_core::verify_sig(&key, &body_bytes, &req.sig).is_err() {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let policy = match public_mode::load() {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!(error = %e, "public_mode: load failed (quote)");
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+    match policy.accepts(&req.body.payer) {
+        Ok(()) => {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            Ok(axum::Json(QuoteResponse::Quote(Quote {
+                job_id: format!("job_{now:x}"),
+                host_pubkey: state.identity.public_b64(),
+                unit_price_micros: STUB_UNIT_PRICE_MICROS,
+                quoted_units: req.body.requested_units,
+                expires_at: now + QUOTE_TTL_SECONDS,
+            })))
+        }
+        Err(err) => Ok(axum::Json(QuoteResponse::Rejected {
+            reason: err.to_string(),
+        })),
+    }
 }
 
 #[derive(serde::Deserialize)]
