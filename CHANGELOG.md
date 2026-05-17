@@ -6,6 +6,34 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.38] — 2026-05-16
+
+### Changed
+- **Left-nav sidebar tightened.** Four releases of feature work
+  (memory panel v0.0.20, vram-pool capability v0.0.27, vram-pool
+  controls v0.0.31, vram-pool peer picker v0.0.37) grew the
+  sidebar into a 10-section wall of dense settings. Most users
+  don't touch the bottom three sections day-to-day. Wrapped the
+  three settings-y sections — `private memory`, `cluster
+  (vram-pool)`, `for developers` — in native `<details>`
+  collapsibles, closed by default. The default sidebar is now
+  much shorter; anything is one click to expand.
+
+  - Open state persists per-section to localStorage (key
+    `unhosted-sidebar-open:<section-id>`), so a section the user
+    expanded stays expanded across reloads and daemon restarts.
+  - Replaced default disclosure marker with a small "›" that
+    rotates to "v" when open; matches the existing sidebar
+    typography (lowercase, 11px mute color).
+  - All JS wiring inside the collapsibles still works because
+    `querySelector` resolves nested elements regardless of
+    `<details>` open state. No JS changes needed inside the
+    sections.
+
+  Same six remaining always-visible sections cover the day-to-
+  day path (chats, pair device, peers, tunnel, phone QR,
+  connection status).
+
 ## [0.0.37] — 2026-05-16
 
 ### Added

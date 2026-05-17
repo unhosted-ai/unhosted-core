@@ -1720,3 +1720,55 @@ button:focus-visible, input:focus-visible, textarea:focus-visible,
   color: var(--accent);
   border-color: var(--accent);
 }
+
+/* Collapsible sidebar sections. Wraps memory, vram-pool, and
+   developer sections as native <details> elements so the default
+   sidebar isn't a wall of settings. Each section's open state
+   persists per-section to localStorage. */
+.sidebar-collapsible {
+  margin-bottom: 12px;
+}
+.sidebar-collapsible > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--mute);
+  text-transform: lowercase;
+  letter-spacing: 0.06em;
+  margin: 0 4px;
+  padding: 4px 0;
+  list-style: none;       /* hide default disclosure marker */
+  cursor: pointer;
+  user-select: none;
+}
+.sidebar-collapsible > summary::-webkit-details-marker { display: none; }
+.sidebar-collapsible > summary::after {
+  content: "›";
+  margin-left: auto;
+  color: var(--mute);
+  font-size: 14px;
+  line-height: 1;
+  transition: transform 160ms ease;
+  flex-shrink: 0;
+}
+.sidebar-collapsible[open] > summary::after {
+  transform: rotate(90deg);
+}
+.sidebar-collapsible > summary:hover {
+  color: var(--fg);
+}
+.sidebar-collapsible > summary:hover::after {
+  color: var(--fg);
+}
+.sidebar-collapsible > summary .h4-icon {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+}
+/* Add a small top margin to children so the first one isn't
+   flush against the summary line when open. */
+.sidebar-collapsible[open] > :not(summary):first-of-type {
+  margin-top: 6px;
+}

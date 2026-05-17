@@ -1641,6 +1641,28 @@ if (els.memoryClearAll) {
 // poll so the sidebar reflects the persisted state on every page load.
 refreshMemoryUI();
 
+// ---------------------------------------------------------------- sidebar collapsibles
+// Sidebar sections wrapped in <details class="sidebar-collapsible">
+// remember their open/closed state per-element in localStorage so
+// reloads don't reset whatever the user expanded. Keyed by element
+// id so adding new collapsibles doesn't conflict.
+
+const SIDEBAR_COLLAPSE_KEY_PREFIX = "unhosted-sidebar-open:";
+for (const det of document.querySelectorAll(".sidebar-collapsible")) {
+  if (!det.id) continue;
+  const key = SIDEBAR_COLLAPSE_KEY_PREFIX + det.id;
+  // Hydrate from storage. Default is closed (matches the HTML).
+  try {
+    if (localStorage.getItem(key) === "1") det.open = true;
+  } catch (e) { /* private mode etc — fine */ }
+  det.addEventListener("toggle", () => {
+    try {
+      if (det.open) localStorage.setItem(key, "1");
+      else localStorage.removeItem(key);
+    } catch (e) { /* ignore */ }
+  });
+}
+
 // ---------------------------------------------------------------- vram-pool
 // Surface for the v0.0.26 detection foundation (ADR 0009). Reports
 // whether this machine has an RPC-capable llama.cpp build. v0.1.0
