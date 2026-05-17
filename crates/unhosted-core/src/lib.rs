@@ -693,6 +693,22 @@ struct StatusResponse {
     /// relevant); a populated value is cheap to compute.
     #[serde(skip_serializing_if = "Option::is_none")]
     vram_pool: Option<vram_pool::RpcCapability>,
+    /// Public-mode posture (ADR-0010 slice 2). A peer can read this
+    /// once and know whether to even attempt a quote against this
+    /// node, without an extra round-trip to /v1/public-mode/policy.
+    /// Always populated — the "closed" policy is a valid answer.
+    public_mode: PublicModeStatus,
+}
+
+#[derive(Serialize, Clone)]
+struct PublicModeStatus {
+    /// True iff at least one rail is accepted. The fast "do you
+    /// even take customers" signal — UIs and routing logic can
+    /// short-circuit on this without parsing the full policy.
+    open: bool,
+    /// The full advertised policy. Cheap to ship (under 200 bytes)
+    /// and lets a peer pre-filter quote attempts locally.
+    policy: public_mode::PeerPaymentPolicy,
 }
 
 #[derive(Serialize)]
@@ -824,6 +840,21 @@ async fn status_handler(
         })
         .collect();
 
+    // Public-mode posture. Cheap: if the policy file is missing
+    // (the common case for a peer that hasn't opted in) we return
+    // PeerPaymentPolicy::closed() without touching disk. A parse
+    // error on a present-but-corrupt file degrades to "closed" too,
+    // because every status caller deserves *some* answer and the
+    // safe answer is "we accept nothing".
+    let public_mode_status = {
+        let policy = public_mode::load().unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "public_mode: load failed in status, returning closed");
+            public_mode::PeerPaymentPolicy::closed()
+        });
+        let open = !policy.accepted_rails.is_empty();
+        PublicModeStatus { open, policy }
+    };
+
     let mut discovered = state
         .discovery
         .as_ref()
@@ -862,6 +893,7 @@ async fn status_handler(
                         error: Some("registry lock poisoned".into()),
                     },
                     vram_pool: None,
+                    public_mode: public_mode_status.clone(),
                 }));
             }
         };
@@ -989,6 +1021,7 @@ async fn status_handler(
         // cached so the user sees changes immediately after a brew
         // install / tap install without restarting the daemon.
         vram_pool: Some(vram_pool::probe()),
+        public_mode: public_mode_status,
     }))
 }
 
