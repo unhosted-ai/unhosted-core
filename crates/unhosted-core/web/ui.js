@@ -2515,6 +2515,44 @@ if (publicModeSave) {
 
 fetchPublicModePolicy().then(renderPublicModePolicy);
 
+async function inspectPublicModePolicy(payer) {
+  const r = await fetch("/v1/public-mode/policy/inspect", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payer),
+  });
+  if (!r.ok) throw new Error(`inspect failed: ${r.status}`);
+  return await r.json();
+}
+
+const publicModeInspectBtn = document.getElementById("public-mode-inspect-btn");
+if (publicModeInspectBtn) {
+  publicModeInspectBtn.addEventListener("click", async () => {
+    const resultEl = document.getElementById("public-mode-inspect-result");
+    try {
+      const rail = document.getElementById("public-mode-inspect-rail").value;
+      const kyc = document.getElementById("public-mode-inspect-kyc").value;
+      let country = (document.getElementById("public-mode-inspect-country").value || "").trim().toUpperCase();
+      if (!/^[A-Z]{2}$/.test(country)) {
+        resultEl.textContent = "country must be a two-letter ISO code";
+        resultEl.dataset.state = "error";
+        return;
+      }
+      const out = await inspectPublicModePolicy({ rail, kyc, country });
+      if (out.accepted) {
+        resultEl.textContent = "✓ accepted";
+        resultEl.dataset.state = "ok";
+      } else {
+        resultEl.textContent = `✗ ${out.reason || "rejected"}`;
+        resultEl.dataset.state = "error";
+      }
+    } catch (e) {
+      resultEl.textContent = `error: ${e.message || e}`;
+      resultEl.dataset.state = "error";
+    }
+  });
+}
+
 // ---------------------------------------------------------------- boot
 
 // Render synchronously first (empty list, while the daemon answers)

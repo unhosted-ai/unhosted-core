@@ -445,6 +445,11 @@ pub async fn serve(node: Node) -> Result<()> {
             "/v1/public-mode/policy",
             get(public_mode_policy_get_handler).put(public_mode_policy_put_handler),
         )
+        // Inspect: given a hypothetical PayerContext, return the
+        // policy decision without quoting. Lets the UI (and tests)
+        // ask "would this peer accept a US payer paying via
+        // lightning?" before any real quote/job exists. Local-only.
+        .route("/v1/public-mode/policy/inspect", post(public_mode_policy_inspect_handler))
         .with_state(state);
 
     let app = api
@@ -2735,6 +2740,39 @@ async fn public_mode_policy_put_handler(
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
     Ok(axum::Json(policy))
+}
+
+#[derive(serde::Serialize)]
+struct PolicyInspectResponse {
+    accepted: bool,
+    /// Human-readable rejection reason. `None` when accepted.
+    /// Stable enough to render in the UI without parsing.
+    reason: Option<String>,
+}
+
+async fn public_mode_policy_inspect_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    axum::Json(payer): axum::Json<public_mode::PayerContext>,
+) -> Result<axum::Json<PolicyInspectResponse>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    let policy = match public_mode::load() {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!(error = %e, "public_mode: load failed (inspect)");
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+    let resp = match policy.accepts(&payer) {
+        Ok(()) => PolicyInspectResponse { accepted: true, reason: None },
+        Err(err) => PolicyInspectResponse {
+            accepted: false,
+            reason: Some(err.to_string()),
+        },
+    };
+    Ok(axum::Json(resp))
 }
 
 // ─── vram-pool orchestration ──────────────────────────────────────────────

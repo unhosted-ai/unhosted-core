@@ -315,6 +315,30 @@
               <span>save policy</span>
             </button>
           </div>
+          <!-- Inspect row: ask the daemon "would you accept this
+               hypothetical payer?" without quoting. Useful for
+               sanity-checking the policy before any rail is live. -->
+          <div class="public-mode-inspect">
+            <label class="public-mode-inspect-label">test against a payer</label>
+            <div class="public-mode-inspect-row">
+              <select id="public-mode-inspect-rail">
+                <option value="lightning">lightning</option>
+                <option value="usdc_base">usdc (base)</option>
+                <option value="usdc_solana">usdc (solana)</option>
+                <option value="stripe_connect">stripe connect</option>
+                <option value="apple_pay">apple pay</option>
+                <option value="manual">manual</option>
+              </select>
+              <select id="public-mode-inspect-kyc">
+                <option value="none">none</option>
+                <option value="email" selected>email</option>
+                <option value="id_verified">id-verified</option>
+              </select>
+              <input type="text" id="public-mode-inspect-country" placeholder="US" maxlength="2" spellcheck="false" autocapitalize="characters" autocomplete="off">
+              <button class="pair-btn pair-btn-secondary" id="public-mode-inspect-btn">test</button>
+            </div>
+            <div class="public-mode-inspect-result" id="public-mode-inspect-result"></div>
+          </div>
         </div>
       </details>
 
