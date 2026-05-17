@@ -2461,8 +2461,13 @@ async function savePublicModePolicy(policy) {
 
 function renderPublicModePolicy(policy) {
   const statusLine = document.getElementById("public-mode-status-line");
+  const badge = document.getElementById("public-mode-badge");
   if (!policy) {
     if (statusLine) statusLine.textContent = "could not load";
+    if (badge) {
+      badge.textContent = "?";
+      badge.dataset.state = "closed";
+    }
     return;
   }
   const rails = new Set(policy.accepted_rails || []);
@@ -2473,12 +2478,14 @@ function renderPublicModePolicy(policy) {
   if (kyc) kyc.value = policy.min_kyc || "none";
   const blocked = document.getElementById("public-mode-blocked");
   if (blocked) blocked.value = (policy.blocked_countries || []).join(", ");
-  if (statusLine) {
-    if (rails.size === 0) {
-      statusLine.textContent = "closed (accepts nothing)";
-    } else {
+  if (rails.size === 0) {
+    if (badge) { badge.textContent = "closed"; badge.dataset.state = "closed"; }
+    if (statusLine) statusLine.textContent = "accepts nothing";
+  } else {
+    if (badge) { badge.textContent = "open"; badge.dataset.state = "open"; }
+    if (statusLine) {
       const n = rails.size;
-      statusLine.textContent = `open: ${n} rail${n === 1 ? "" : "s"}, min kyc ${policy.min_kyc || "none"}`;
+      statusLine.textContent = `${n} rail${n === 1 ? "" : "s"} · min kyc ${policy.min_kyc || "none"}`;
     }
   }
 }

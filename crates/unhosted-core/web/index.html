@@ -282,7 +282,16 @@
           </svg>
           public mode
         </summary>
-        <div class="tunnel-status" id="public-mode-status-line">closed (accepts nothing)</div>
+        <div class="public-mode-status-row">
+          <span class="public-mode-badge" id="public-mode-badge" data-state="closed">closed</span>
+          <span class="public-mode-status-detail" id="public-mode-status-line">accepts nothing</span>
+        </div>
+        <p class="public-mode-blurb">
+          let strangers rent your idle compute. set which payment rails
+          you'll accept, the minimum kyc tier, and any countries to block.
+          nothing is offered to outside payers until at least one rail is
+          checked.
+        </p>
         <div class="public-mode-controls">
           <label class="public-mode-rails-label">accepted rails</label>
           <ul class="public-mode-rails-list" id="public-mode-rails-list">
