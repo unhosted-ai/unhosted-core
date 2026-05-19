@@ -19,7 +19,7 @@
 # 2.38+ symbols (__isoc23_strtoll et al). Bookworm ships glibc 2.36
 # and so failed to link them. Both stages must match so the runtime
 # image can resolve the same libc symbols at load time.
-FROM --platform=$BUILDPLATFORM rust:1.86-slim-trixie AS build
+FROM --platform=$BUILDPLATFORM rust:1-slim-trixie AS build
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
 WORKDIR /src
