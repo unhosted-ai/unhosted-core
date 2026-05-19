@@ -178,6 +178,14 @@ enum DistillAction {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Publish a trained adapter to the Hugging Face Hub. Fills in
+    /// the model-card template from the flags you pass and uploads
+    /// the adapter directory. Requires HF_TOKEN. All args after `--`
+    /// forward to push_to_hub.py.
+    Push {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -360,6 +368,7 @@ fn run_distill(action: DistillAction) -> Result<()> {
         DistillAction::Data { args } => ("gen_data.py", args),
         DistillAction::Train { args } => ("train.py", args),
         DistillAction::Eval { args } => ("eval.py", args),
+        DistillAction::Push { args } => ("push_to_hub.py", args),
     };
     let script_path = locate_distill_script(script)?;
     let python = python_executable();

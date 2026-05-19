@@ -53,4 +53,4 @@ unhosted serve --upstream-model {adapter_name}
 
 ## Reproducing this card
 
-This file was generated from `model-card.template.md`. Fill in every `{placeholder}` before publishing — leaving a placeholder is a stronger signal than missing the section entirely.
+This file was generated from `model-card.template.md`. All placeholders are filled by `push_to_hub.py` — an unfilled one is a publisher bug; the script refuses to push.
