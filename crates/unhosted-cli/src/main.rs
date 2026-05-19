@@ -141,6 +141,43 @@ enum Command {
         #[command(subcommand)]
         action: VramPoolAction,
     },
+    /// Distillation recipe — train a small specialist by SFT'ing
+    /// a tiny open base on synthetic data from a teacher model.
+    /// Thin wrapper around the Python scripts in `models/distill/`;
+    /// see that directory's README for the full recipe + expected
+    /// hardware budget.
+    Distill {
+        #[command(subcommand)]
+        action: DistillAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum DistillAction {
+    /// Generate synthetic (prompt, response) pairs from a directory
+    /// of documents using any OpenAI-compatible teacher endpoint.
+    /// Defaults to a local unhosted daemon at 127.0.0.1:7777.
+    /// All args after `--` are passed through to gen_data.py.
+    Data {
+        /// Trailing args forwarded verbatim. Use `--` to separate
+        /// (e.g. `unhosted distill data -- --docs ./notes --out data/train.jsonl`).
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// SFT a LoRA adapter on a JSONL of training pairs. Defaults
+    /// target TinyLlama-1.1B-Chat. All args after `--` forward to
+    /// train.py.
+    Train {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Compare a fine-tuned adapter against a baseline on a held-out
+    /// JSONL test set. Both models reached via OpenAI-compatible
+    /// endpoints. All args after `--` forward to eval.py.
+    Eval {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -302,9 +339,93 @@ async fn main() -> Result<()> {
         Command::VramPool { action } => {
             run_vram_pool(action).await?;
         }
+        Command::Distill { action } => {
+            run_distill(action)?;
+        }
     }
 
     Ok(())
+}
+
+// ─── distillation recipe ──────────────────────────────────────────────
+// Shells out to the Python scripts in `models/distill/`. Keeping these
+// Python rather than reimplementing in Rust on purpose: the ML
+// ecosystem (transformers, trl, peft, bitsandbytes) only exists in
+// Python, and rewriting the SFT loop in Rust would be a months-long
+// project that delivers nothing the user couldn't already do with the
+// same scripts.
+
+fn run_distill(action: DistillAction) -> Result<()> {
+    let (script, extra) = match action {
+        DistillAction::Data { args } => ("gen_data.py", args),
+        DistillAction::Train { args } => ("train.py", args),
+        DistillAction::Eval { args } => ("eval.py", args),
+    };
+    let script_path = locate_distill_script(script)?;
+    let python = python_executable();
+    let status = std::process::Command::new(&python)
+        .arg(&script_path)
+        .args(&extra)
+        .status()
+        .with_context(|| {
+            format!(
+                "failed to exec `{} {}` — is Python ≥ 3.10 installed and on PATH?",
+                python,
+                script_path.display()
+            )
+        })?;
+    if !status.success() {
+        std::process::exit(status.code().unwrap_or(1));
+    }
+    Ok(())
+}
+
+fn python_executable() -> String {
+    // Respect $UNHOSTED_PYTHON, then $PYTHON, then default to python3.
+    // venv users will set $UNHOSTED_PYTHON to their venv's interpreter.
+    if let Ok(v) = std::env::var("UNHOSTED_PYTHON") {
+        if !v.is_empty() {
+            return v;
+        }
+    }
+    if let Ok(v) = std::env::var("PYTHON") {
+        if !v.is_empty() {
+            return v;
+        }
+    }
+    "python3".to_string()
+}
+
+/// Find a distillation script across a few sensible locations:
+///   1. $UNHOSTED_DISTILL_DIR/<script>   — explicit override
+///   2. ./models/distill/<script>        — running from the repo
+///   3. <exe-dir>/../share/unhosted/distill/<script> — installed layout
+fn locate_distill_script(name: &str) -> Result<PathBuf> {
+    let candidates: Vec<PathBuf> = std::iter::empty::<PathBuf>()
+        .chain(
+            std::env::var("UNHOSTED_DISTILL_DIR")
+                .ok()
+                .map(|d| PathBuf::from(d).join(name)),
+        )
+        .chain(std::iter::once(PathBuf::from("models/distill").join(name)))
+        .chain(
+            std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.to_owned()))
+                .map(|d| d.join("../share/unhosted/distill").join(name)),
+        )
+        .collect();
+    for c in &candidates {
+        if c.exists() {
+            return Ok(c.clone());
+        }
+    }
+    anyhow::bail!(
+        "could not find {name}. Looked in: {:?}.\n\
+         Set $UNHOSTED_DISTILL_DIR to the directory containing it, \
+         or run from the repo root.",
+        candidates
+    )
 }
 
 /// Build `PeerCandidate` entries from the peer registry for the
