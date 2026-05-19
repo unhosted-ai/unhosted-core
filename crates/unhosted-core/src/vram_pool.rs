@@ -452,7 +452,10 @@ pub enum PoolState {
     /// Children being spawned (orchestrator role). `stage` advances
     /// as each child reports ready; the UI shows it as a progress
     /// indicator.
-    Starting { stage: PoolStartingStage, plan: Plan },
+    Starting {
+        stage: PoolStartingStage,
+        plan: Plan,
+    },
     /// Both children up; `llama-server` answering on `endpoint`. The
     /// daemon's chat-completions proxy can now route through this
     /// endpoint instead of (or in addition to) the user's pre-existing
@@ -594,11 +597,11 @@ impl PoolManager {
         // llama-server connects only to remote rpc-servers via
         // --rpc.
         if has_local_layer_host {
-            let rpc_bin = self
-                .cap
-                .rpc_server_path
-                .as_deref()
-                .ok_or_else(|| anyhow::anyhow!("rpc-server binary not found — install the unhosted-ai/homebrew-unhosted tap"))?;
+            let rpc_bin = self.cap.rpc_server_path.as_deref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "rpc-server binary not found — install the unhosted-ai/homebrew-unhosted tap"
+                )
+            })?;
             let rpc_port = plan
                 .layer_hosts
                 .iter()
@@ -664,7 +667,6 @@ impl PoolManager {
                 tokio::time::sleep(RPC_SERVER_BIND_POLL).await;
             }
         }
-
 
         // Now llama-server with --rpc pointing at the rpc-server we
         // just started. The model argument is plan.model verbatim;
@@ -782,11 +784,11 @@ impl PoolManager {
             }
         }
 
-        let rpc_bin = self
-            .cap
-            .rpc_server_path
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("rpc-server binary not found — install the unhosted-ai/homebrew-unhosted tap"))?;
+        let rpc_bin = self.cap.rpc_server_path.as_deref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "rpc-server binary not found — install the unhosted-ai/homebrew-unhosted tap"
+            )
+        })?;
 
         tracing::info!(
             bin = %rpc_bin,
@@ -889,8 +891,10 @@ fn spawn_model_load_poller(inner: Arc<Mutex<PoolInner>>, endpoint: String) {
             // already marked us Failed.
             {
                 let g = inner.lock().await;
-                if matches!(g.state, PoolState::Idle | PoolState::Failed { .. } | PoolState::Running { .. })
-                {
+                if matches!(
+                    g.state,
+                    PoolState::Idle | PoolState::Failed { .. } | PoolState::Running { .. }
+                ) {
                     return;
                 }
                 if g.user_stopped {
@@ -1008,7 +1012,8 @@ fn spawn_pool_supervisor(inner: Arc<Mutex<PoolInner>>) {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             let mut guard = inner.lock().await;
-            if guard.user_stopped || matches!(guard.state, PoolState::Idle | PoolState::Failed { .. })
+            if guard.user_stopped
+                || matches!(guard.state, PoolState::Idle | PoolState::Failed { .. })
             {
                 return;
             }
@@ -1175,13 +1180,7 @@ mod tests {
     #[test]
     fn plan_errors_when_all_requested_peers_incapable() {
         let peers = vec![peer("pi5", "192.168.1.50", false)];
-        let err = plan(
-            true,
-            &peers,
-            &["pi5".to_string()],
-            Some("m".into()),
-        )
-        .unwrap_err();
+        let err = plan(true, &peers, &["pi5".to_string()], Some("m".into())).unwrap_err();
         assert_eq!(err, PlanError::NoRpcCapablePeers);
     }
 

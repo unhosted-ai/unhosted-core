@@ -434,8 +434,14 @@ pub async fn serve(node: Node) -> Result<()> {
         // an rpc-server as a layer host. Auth: signed peer request
         // (not loopback or bearer-token like the orchestrator-side
         // endpoints — the caller is by definition a peer).
-        .route("/v1/vram-pool/layer-host/start", post(vram_pool_layer_host_start_handler))
-        .route("/v1/vram-pool/layer-host/stop", post(vram_pool_layer_host_stop_handler))
+        .route(
+            "/v1/vram-pool/layer-host/start",
+            post(vram_pool_layer_host_start_handler),
+        )
+        .route(
+            "/v1/vram-pool/layer-host/stop",
+            post(vram_pool_layer_host_stop_handler),
+        )
         // Public-mode policy (ADR-0010 slice 2). GET reads the
         // currently advertised PeerPaymentPolicy; PUT replaces it.
         // Both are local-user-only — only the daemon owner decides
@@ -449,12 +455,18 @@ pub async fn serve(node: Node) -> Result<()> {
         // policy decision without quoting. Lets the UI (and tests)
         // ask "would this peer accept a US payer paying via
         // lightning?" before any real quote/job exists. Local-only.
-        .route("/v1/public-mode/policy/inspect", post(public_mode_policy_inspect_handler))
+        .route(
+            "/v1/public-mode/policy/inspect",
+            post(public_mode_policy_inspect_handler),
+        )
         // Sign a UsageReport with this daemon's Ed25519 identity.
         // Local-only. The caller supplies everything except the
         // host_pubkey; we fill it from the daemon's identity so the
         // claimed signer can't disagree with the actual signer.
-        .route("/v1/public-mode/receipt/sign", post(public_mode_receipt_sign_handler))
+        .route(
+            "/v1/public-mode/receipt/sign",
+            post(public_mode_receipt_sign_handler),
+        )
         // Quote: a stranger asks "what would this cost?" with a
         // signed body proving they hold the payer pubkey they claim.
         // NOT loopback-gated — payers are by definition external.
@@ -2951,7 +2963,10 @@ async fn public_mode_policy_inspect_handler(
         }
     };
     let resp = match policy.accepts(&payer) {
-        Ok(()) => PolicyInspectResponse { accepted: true, reason: None },
+        Ok(()) => PolicyInspectResponse {
+            accepted: true,
+            reason: None,
+        },
         Err(err) => PolicyInspectResponse {
             accepted: false,
             reason: Some(err.to_string()),
@@ -3020,9 +3035,7 @@ async fn vram_pool_start_handler(
     // leak rpc-server processes on their boxes.
     let mut started: Vec<vram_pool::LayerHost> = Vec::new();
     for host in &remote_hosts {
-        if let Err(e) =
-            ask_peer_to_host(&state, &host.name, host.addr.port()).await
-        {
+        if let Err(e) = ask_peer_to_host(&state, &host.name, host.addr.port()).await {
             for prior in &started {
                 let _ = ask_peer_to_stop_hosting(&state, &prior.name).await;
             }
@@ -3063,11 +3076,7 @@ async fn vram_pool_start_handler(
 /// `PoolState::Hosting` response. The peer's daemon will TCP-probe
 /// its rpc-server bind before replying, so a 200 means the peer is
 /// actually accepting RPC connections.
-async fn ask_peer_to_host(
-    state: &NodeState,
-    peer_name: &str,
-    rpc_port: u16,
-) -> anyhow::Result<()> {
+async fn ask_peer_to_host(state: &NodeState, peer_name: &str, rpc_port: u16) -> anyhow::Result<()> {
     let peer_addr = peer_daemon_addr(state, peer_name)
         .ok_or_else(|| anyhow::anyhow!("peer `{peer_name}` not in registry"))?;
     let body = serde_json::json!({
@@ -3233,15 +3242,10 @@ async fn vram_pool_layer_host_stop_handler(
     if !matches!(outcome, auth::AuthOutcome::Peer(_)) {
         return Err(StatusCode::FORBIDDEN);
     }
-    state
-        .vram_pool
-        .stop()
-        .await
-        .map(axum::Json)
-        .map_err(|e| {
-            tracing::error!(error = %e, "vram-pool: layer-host stop failed");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })
+    state.vram_pool.stop().await.map(axum::Json).map_err(|e| {
+        tracing::error!(error = %e, "vram-pool: layer-host stop failed");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
 }
 
 /// Route an inbound relay request by its `kind` to the right local handler.

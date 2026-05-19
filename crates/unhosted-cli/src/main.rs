@@ -429,7 +429,9 @@ async fn run_vram_pool(action: VramPoolAction) -> Result<()> {
                     std::process::exit(1);
                 }
                 Err(e) => {
-                    eprintln!("could not reach the local daemon at http://{DEFAULT_NODE_ADDR}: {e}");
+                    eprintln!(
+                        "could not reach the local daemon at http://{DEFAULT_NODE_ADDR}: {e}"
+                    );
                     eprintln!("is `unhosted serve` running, or is the .app open?");
                     std::process::exit(1);
                 }

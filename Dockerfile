@@ -19,9 +19,14 @@ ARG TARGETPLATFORM
 ARG BUILDPLATFORM
 WORKDIR /src
 
-# System deps for cargo + reqwest's tls
+# System deps for cargo + reqwest's tls, plus libstdc++ for ONNX
+# Runtime which fastembed (private-memory embedder) pulls in. Without
+# libstdc++ the final link step fails with "unable to find library
+# -lstdc++" — slim debian images don't include it by default and the
+# regular rust toolchain expects to find it for any crate that links
+# C++ (ONNX is the big one here).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    pkg-config libssl-dev ca-certificates \
+    pkg-config libssl-dev ca-certificates libstdc++-12-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Cache dependencies separately from the source so changes to src
@@ -45,7 +50,7 @@ LABEL org.opencontainers.image.vendor="unhosted-ai"
 LABEL org.opencontainers.image.authors="Unhosted contributors <noreply@unhosted.dev>"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
+    ca-certificates libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /src/target/release/unhosted /usr/local/bin/unhosted
