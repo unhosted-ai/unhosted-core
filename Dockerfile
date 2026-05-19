@@ -14,7 +14,12 @@
 #     -e UNHOSTED_LLAMA_SERVER_URL=http://host.docker.internal:8080 \
 #     ghcr.io/unhosted-ai/unhosted:latest serve --addr 0.0.0.0:7777
 
-FROM --platform=$BUILDPLATFORM rust:1.86-slim-bookworm AS build
+# Base images pinned to debian trixie (13) because ONNX Runtime
+# binaries downloaded by the fastembed/ort crates reference glibc
+# 2.38+ symbols (__isoc23_strtoll et al). Bookworm ships glibc 2.36
+# and so failed to link them. Both stages must match so the runtime
+# image can resolve the same libc symbols at load time.
+FROM --platform=$BUILDPLATFORM rust:1.86-slim-trixie AS build
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
 WORKDIR /src
@@ -26,7 +31,7 @@ WORKDIR /src
 # regular rust toolchain expects to find it for any crate that links
 # C++ (ONNX is the big one here).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    pkg-config libssl-dev ca-certificates libstdc++-12-dev \
+    pkg-config libssl-dev ca-certificates libstdc++-14-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Cache dependencies separately from the source so changes to src
@@ -36,7 +41,7 @@ COPY crates ./crates
 RUN cargo build --release -p unhosted-cli && \
     strip target/release/unhosted
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 # OCI annotations — picked up by GitHub Container Registry to link this
 # package to its source repository, license, and docs on the package page.
