@@ -16,6 +16,7 @@ path = "src/main.rs"
 [dependencies]
 tauri = { workspace = true }
 tauri-plugin-updater = { workspace = true }
+tauri-plugin-single-instance = { workspace = true }
 anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

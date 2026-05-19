@@ -27,6 +27,7 @@
 
 use anyhow::Result;
 use std::time::{Duration, Instant};
+use tauri::Manager;
 use tauri_plugin_updater::UpdaterExt;
 
 const DEFAULT_NODE_URL: &str = "http://127.0.0.1:7777";
@@ -87,6 +88,14 @@ fn main() {
     tracing::info!(node_url = %node_url, "opening tauri desktop shell");
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            // A second instance tried to launch — focus the existing window instead.
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+                let _ = window.unminimize();
+            }
+        }))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             // Kick off a background updater check on startup. Failures
