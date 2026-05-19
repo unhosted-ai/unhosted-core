@@ -1,0 +1,11 @@
+# Per-run artifacts. Each run dir keeps notes.md + run_eval.py for
+# documentation/reproduction; everything else is large or
+# environment-specific and stays out of git.
+
+*/.venv/
+*/data/
+*/docs/
+*/out/
+*/eval/
+*/checkpoints/
+*/__pycache__/

@@ -134,8 +134,13 @@ def detect_dtype() -> str:
         cc = torch.cuda.get_device_capability(0)[0]
         return "bfloat16" if cc >= 8 else "float16"
     if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        # MPS bf16 support is patchy; fp16 is the safer call.
-        return "float16"
+        # Use bf16 on MPS. fp16's range is too narrow for SFT — we hit
+        # gradient overflow → NaN within the first few steps of a real
+        # training run, despite "successfully" completing the loop with
+        # mean_token_accuracy=0 (the canary). bf16 has fp32's exponent
+        # range so gradients survive; supported on M-series Macs since
+        # macOS 14. If you're on older macOS, pass --force-fp32.
+        return "bfloat16"
     return "float32"
 
 
@@ -220,7 +225,7 @@ def train(args) -> None:
         learning_rate=args.learning_rate,
         lr_scheduler_type="cosine",
         warmup_ratio=0.05,
-        max_seq_length=args.max_seq_len,
+        max_length=args.max_seq_len,
         logging_steps=10,
         save_strategy="epoch",
         save_total_limit=2,
