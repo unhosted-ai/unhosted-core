@@ -2786,11 +2786,14 @@ async fn public_mode_policy_put_handler(
     State(state): State<NodeState>,
     axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
     headers: HeaderMap,
-    axum::Json(policy): axum::Json<public_mode::PeerPaymentPolicy>,
+    axum::Json(mut policy): axum::Json<public_mode::PeerPaymentPolicy>,
 ) -> Result<axum::Json<public_mode::PeerPaymentPolicy>, StatusCode> {
     let outcome = state.classify(&headers, Some(remote.ip()), &[]);
     require_auth(&outcome, true)?;
-    if let Err(e) = public_mode::save(&policy) {
+    // `save` merges the sanctions block-list into the policy before
+    // writing. The response is the policy as actually persisted, so a
+    // caller who PUT with KP missing sees KP present in the response.
+    if let Err(e) = public_mode::save(&mut policy) {
         tracing::error!(error = %e, "public_mode: save failed");
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }

@@ -103,6 +103,20 @@ No dates. We will ship and tell you what works.
 
 [AGPL-3.0](LICENSE). Read it, fork it, audit it, ship it. You can't take it, host it as a paid service, and pretend you wrote it.
 
+## Legal and compliance
+
+This is open-source software. You run it on your hardware. There is no Unhosted Inc. behind a managed service. The documents below are what the project promises, what it doesn't, and the duties that fall on you when you operate a node — especially in trusted-peer or public mode.
+
+- **[PRIVACY.md](PRIVACY.md)** — exactly what data lives where, by file path and endpoint. The features that send data off your machine, all of them opt-in.
+- **[ACCEPTABLE_USE.md](ACCEPTABLE_USE.md)** — hard prohibitions (CSAM, sanctioned-party service, mass-influence ops, ten others), public-mode host and payer duties, reporting paths.
+- **[TERMS.md](TERMS.md)** — as-is software, no warranty, no service-provider relationship, peer-to-peer payments, no medical / legal / financial / safety-critical use.
+- **[COMPLIANCE.md](COMPLIANCE.md)** — sanctions, export controls (EAR §740.17), EU AI Act, GDPR / CCPA / LGPD, MiCA, model licenses. Operator-vs-project responsibility split spelled out.
+- **[SECURITY.md](SECURITY.md)** — vulnerability disclosure.
+- **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** — community.
+- **[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)** — AGPL § 5 attributions for direct dependencies and the model weights pulled at runtime.
+
+Sanctions defaults (`KP`, `IR`, `SY`, `CU`) are auto-merged into every saved public-mode policy by the daemon (`enforce_sanctions_defaults` in [`crates/unhosted-core/src/public_mode.rs`](crates/unhosted-core/src/public_mode.rs)). A caller can't accidentally ship a policy that's open to a comprehensively-sanctioned jurisdiction.
+
 ## Brand and project
 
 The brand exists on purpose, in public. See [BRAND.md](BRAND.md) for visual identity and voice rules. See [MANIFESTO.md](MANIFESTO.md) for why this project exists.
