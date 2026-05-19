@@ -87,26 +87,31 @@ curl -sf -X PUT "http://$ADDR/v1/public-mode/policy" \
     -H "content-type: application/json" \
     -d '{"accepted_rails":["lightning","usdc_base"],"min_kyc":"email","blocked_countries":[]}' >/dev/null
 
-# Seed a sample chat so the chat view isn't empty
+# Seed a sample chat so the chat view isn't empty. Schema lives in
+# crates/unhosted-core/src/chats.rs: { id, title, createdAt, updatedAt,
+# messages: [{role, text, ts, stats?}] }.
 SAMPLE_CHAT=$(cat <<'JSON'
 {
   "id": "chat_demo",
   "title": "What is unhosted?",
+  "createdAt": 1716096000,
+  "updatedAt": 1716096300,
   "messages": [
-    {"role": "user", "content": "What is unhosted in one sentence?"},
-    {"role": "assistant", "content": "Unhosted pools the computers you already own — and optionally your friends' machines, and a public swarm of strangers' GPUs — into one inference cluster you control."},
-    {"role": "user", "content": "How does the trust radius work?"},
-    {"role": "assistant", "content": "Three concentric rings: local (your devices), trusted (paired peers — friends, family, team), and public (strangers' GPUs, opt-in, paid in stablecoin). You decide which rings your daemon uses."}
-  ],
-  "model": "qwen2.5:3b",
-  "createdAt": 1716096000000,
-  "updatedAt": 1716096000000
+    {"role": "user", "text": "What is unhosted in one sentence?", "ts": 1716096000},
+    {"role": "assistant", "text": "Unhosted pools the computers you already own — and optionally your friends' machines, and a public swarm of strangers' GPUs — into one inference cluster you control.", "ts": 1716096060},
+    {"role": "user", "text": "How does the trust radius work?", "ts": 1716096180},
+    {"role": "assistant", "text": "Three concentric rings: local (your own devices), trusted (paired peers — friends, family, team), and public (strangers' GPUs, opt-in, paid in stablecoin). You decide which rings your daemon uses.", "ts": 1716096300}
+  ]
 }
 JSON
 )
-curl -sf -X PUT "http://$ADDR/v1/chats/chat_demo" \
+# Tolerant: a schema drift here shouldn't kill the script — we'll still
+# get useful sidebar shots even if the seeded chat doesn't render.
+if ! curl -sf -X PUT "http://$ADDR/v1/chats/chat_demo" \
     -H "content-type: application/json" \
-    -d "$SAMPLE_CHAT" >/dev/null
+    -d "$SAMPLE_CHAT" >/dev/null; then
+    echo "[screenshots] warn: chat seed failed (schema may have drifted) — continuing"
+fi
 
 # ─── capture helpers ──────────────────────────────────────────────────
 # Drive Safari, wait, get its window rect, screencapture by rect.
@@ -140,19 +145,41 @@ APPLESCRIPT
         sleep 1
     fi
 
-    # Bounds of front Safari window in screen coords.
+    # Bounds of Safari's window in screen coords. Use Safari's own
+    # AppleScript dictionary, not System Events — the latter can
+    # surface helper windows (download progress, popovers) as the
+    # "front window" and return their bounds instead. Safari's
+    # `bounds of window 1` is the real browsing window we just sized.
     BOUNDS=$(osascript <<'APPLESCRIPT'
-tell application "System Events"
-    tell process "Safari"
-        set p to position of front window
-        set s to size of front window
-        return (item 1 of p as text) & "," & (item 2 of p as text) & "," & (item 1 of s as text) & "," & (item 2 of s as text)
-    end tell
+tell application "Safari"
+    set b to bounds of window 1
+    set x1 to item 1 of b
+    set y1 to item 2 of b
+    set x2 to item 3 of b
+    set y2 to item 4 of b
+    return (x1 as text) & "," & (y1 as text) & "," & ((x2 - x1) as text) & "," & ((y2 - y1) as text)
 end tell
 APPLESCRIPT
 )
     echo "[shot] $out  rect=$BOUNDS"
-    screencapture -R "$BOUNDS" -x "$out"
+    if ! err=$(screencapture -R "$BOUNDS" -x "$out" 2>&1); then
+        : # screencapture returned non-zero, $err has the message
+    fi
+    if [ ! -s "$out" ]; then
+        cat >&2 <<EOF
+
+[screenshots] screencapture did not produce a file (or produced 0 bytes).
+              This is almost always Screen Recording permission on macOS.
+
+              Grant your Terminal app permission:
+                System Settings → Privacy & Security → Screen Recording
+                → toggle the terminal you're running this from on.
+              Then fully quit and reopen the terminal and rerun this script.
+
+              Underlying message: ${err:-no output}
+EOF
+        exit 1
+    fi
 }
 
 # ─── shots ────────────────────────────────────────────────────────────
