@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+
+# Training artifacts. Adapters can be large (~50–500 MB);
+# never commit them. Push to HF Hub instead.
+out/
+data/
+checkpoints/
+wandb/
+
+# OS noise.
+.DS_Store
