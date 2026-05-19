@@ -19,6 +19,21 @@
 
 > **Status: pre-alpha.** Reading this README is currently the only thing that works. The manifesto is real. The product is being built in public.
 
+## Screenshots
+
+<table>
+  <tr>
+    <td><a href="assets/screenshots/01-overview.png"><img src="assets/screenshots/01-overview.png" alt="Overview — main UI" width="380"></a><br><sub><b>Overview.</b> Default view: chat composer + sidebar.</sub></td>
+    <td><a href="assets/screenshots/02-chat.png"><img src="assets/screenshots/02-chat.png" alt="An active chat" width="380"></a><br><sub><b>Chat.</b> A running conversation with the local upstream.</sub></td>
+  </tr>
+  <tr>
+    <td><a href="assets/screenshots/03-public-mode.png"><img src="assets/screenshots/03-public-mode.png" alt="Public-mode policy panel" width="380"></a><br><sub><b>Public mode.</b> Rail checkboxes + KYC + sanctions-default block-list.</sub></td>
+    <td><a href="assets/screenshots/04-vram-pool.png"><img src="assets/screenshots/04-vram-pool.png" alt="VRAM-pool sidebar" width="380"></a><br><sub><b>VRAM pool.</b> Layer-split inference across paired peers.</sub></td>
+  </tr>
+</table>
+
+> Don't see images? They're regenerated per release. On macOS run `./scripts/screenshots.sh` to populate them locally; see [assets/screenshots/README.md](assets/screenshots/README.md) for the manual path.
+
 ## What it is
 
 Unhosted pools the computers you already own — and, optionally, the computers your friends own, and beyond that a public swarm of strangers' GPUs — into a single inference cluster. One endpoint. Mac, Linux, Windows. CUDA, Metal, ROCm.
