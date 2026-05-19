@@ -104,6 +104,18 @@ This section replaces the typical "Features" list. It's the truth about what wor
 
 Reproducible benchmarks land in `benchmarks/` once any code exists. We will publish honest tokens-per-second numbers, not marketing language.
 
+## Plugins
+
+The MCP server in [`unhosted-plugins`](https://github.com/unhosted-ai/unhosted-plugins) lets MCP-aware host apps (Claude Desktop, Cursor, Zed) call into your local daemon — `unhosted_status`, `unhosted_web_fetch`, `unhosted_memory_*`, `unhosted_vram_pool_status`. One command wires it up:
+
+```bash
+unhosted mcp install claude-desktop   # writes ~/Library/Application Support/Claude/claude_desktop_config.json
+unhosted mcp install cursor           # writes ~/.cursor/mcp.json
+unhosted mcp install zed              # writes ~/.config/zed/settings.json
+```
+
+Each command merges into the host's existing config (preserves your other MCP servers), backs up the original to `<file>.unhosted.bak` once, and is idempotent. Use `unhosted mcp print <host>` to see the snippet without writing. Pass `--daemon-url` + `--bearer` to point the host at a daemon behind a tunnel.
+
 ## Roadmap
 
 1. Single-host inference wrapping llama.cpp (Mac, Linux)

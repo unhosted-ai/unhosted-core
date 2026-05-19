@@ -150,6 +150,60 @@ enum Command {
         #[command(subcommand)]
         action: DistillAction,
     },
+    /// MCP plugin wiring — point an MCP-aware host (Claude Desktop,
+    /// Cursor, Zed) at the local daemon via the
+    /// `@unhosted-ai/mcp-server` shim. `print` shows the config
+    /// snippet on stdout; `install` writes it to the host's config
+    /// file. Code for the shim lives in the `unhosted-plugins` repo.
+    Mcp {
+        #[command(subcommand)]
+        action: McpAction,
+    },
+}
+
+/// Where the daemon is reachable from the host app. Defaults to
+/// loopback at the standard port; override for tunnels.
+const DEFAULT_DAEMON_URL: &str = "http://127.0.0.1:7777";
+
+#[derive(Subcommand, Debug)]
+enum McpAction {
+    /// Print the MCP server config snippet for the named host. Does
+    /// not modify any files — pipe / paste it yourself.
+    Print {
+        /// claude-desktop, cursor, or zed
+        #[arg(value_enum)]
+        host: McpHost,
+        /// Daemon URL the MCP shim should call. Defaults to loopback.
+        #[arg(long, default_value = DEFAULT_DAEMON_URL)]
+        daemon_url: String,
+        /// Optional bearer token. Only needed for non-loopback daemons
+        /// (e.g. behind a Cloudflare tunnel).
+        #[arg(long)]
+        bearer: Option<String>,
+    },
+    /// Install the MCP server config into the named host's config
+    /// file. Idempotent: re-running with the same args is a no-op.
+    /// Backs up the existing config to `<file>.unhosted.bak` on
+    /// first write so a misconfigured host can be recovered.
+    Install {
+        #[arg(value_enum)]
+        host: McpHost,
+        #[arg(long, default_value = DEFAULT_DAEMON_URL)]
+        daemon_url: String,
+        #[arg(long)]
+        bearer: Option<String>,
+        /// Skip the host-config write and just print the file path
+        /// that would be written to. Useful for dry-run / debugging.
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+#[derive(clap::ValueEnum, Debug, Clone, Copy)]
+enum McpHost {
+    ClaudeDesktop,
+    Cursor,
+    Zed,
 }
 
 #[derive(Subcommand, Debug)]
@@ -350,8 +404,190 @@ async fn main() -> Result<()> {
         Command::Distill { action } => {
             run_distill(action)?;
         }
+        Command::Mcp { action } => {
+            run_mcp(action)?;
+        }
     }
 
+    Ok(())
+}
+
+// ─── mcp plugin wiring ────────────────────────────────────────────────
+// Generates the JSON snippet that points an MCP-aware host at the
+// `@unhosted-ai/mcp-server` shim, with env vars pointing at the local
+// daemon. Hosts use slightly different config shapes:
+//
+//   Claude Desktop:  ~/Library/Application Support/Claude/claude_desktop_config.json
+//                    { "mcpServers": { "unhosted": { command, args, env } } }
+//   Cursor:          ~/.cursor/mcp.json   (per-user, since Cursor 0.42)
+//                    { "mcpServers": { ... } }   (same shape as Claude Desktop)
+//   Zed:             ~/.config/zed/settings.json
+//                    { "context_servers": { "unhosted": { command, args, env } } }
+//
+// We don't ship the MCP server itself — it's in unhosted-plugins. The
+// `npx -y @unhosted-ai/mcp-server` invocation fetches the latest
+// published version on demand. Until that package is on npm (pending
+// user creds), the snippet still works for anyone who has the repo
+// checked out — they can replace the command/args with
+// `node /path/to/unhosted-plugins/mcp-server/dist/index.js`.
+
+fn run_mcp(action: McpAction) -> Result<()> {
+    match action {
+        McpAction::Print {
+            host,
+            daemon_url,
+            bearer,
+        } => {
+            let snippet = build_mcp_config(host, &daemon_url, bearer.as_deref());
+            println!("{}", serde_json::to_string_pretty(&snippet)?);
+        }
+        McpAction::Install {
+            host,
+            daemon_url,
+            bearer,
+            dry_run,
+        } => {
+            let path = mcp_host_config_path(host)?;
+            if dry_run {
+                println!("would write to: {}", path.display());
+                return Ok(());
+            }
+            install_mcp_config(host, &daemon_url, bearer.as_deref(), &path)?;
+            println!("wrote: {}", path.display());
+            println!();
+            println!(
+                "restart {} for changes to take effect.",
+                mcp_host_name(host)
+            );
+        }
+    }
+    Ok(())
+}
+
+fn mcp_host_name(host: McpHost) -> &'static str {
+    match host {
+        McpHost::ClaudeDesktop => "Claude Desktop",
+        McpHost::Cursor => "Cursor",
+        McpHost::Zed => "Zed",
+    }
+}
+
+/// Build the `unhosted` MCP server stanza. Shape varies per host, so
+/// the caller's `host` decides which top-level key wraps it.
+fn build_mcp_config(host: McpHost, daemon_url: &str, bearer: Option<&str>) -> serde_json::Value {
+    let mut env = serde_json::Map::new();
+    env.insert(
+        "UNHOSTED_DAEMON_URL".to_string(),
+        serde_json::Value::String(daemon_url.to_string()),
+    );
+    if let Some(b) = bearer {
+        env.insert(
+            "UNHOSTED_BEARER".to_string(),
+            serde_json::Value::String(b.to_string()),
+        );
+    }
+    let stanza = serde_json::json!({
+        "command": "npx",
+        "args": ["-y", "@unhosted-ai/mcp-server"],
+        "env": serde_json::Value::Object(env),
+    });
+    // Top-level key: Claude Desktop + Cursor both use `mcpServers`;
+    // Zed uses `context_servers`. Cross-host consistency would be
+    // nice; reality is what it is.
+    let outer_key = match host {
+        McpHost::ClaudeDesktop | McpHost::Cursor => "mcpServers",
+        McpHost::Zed => "context_servers",
+    };
+    serde_json::json!({
+        outer_key: { "unhosted": stanza }
+    })
+}
+
+fn mcp_host_config_path(host: McpHost) -> Result<PathBuf> {
+    let home = unhosted_core::paths::home_dir()?;
+    Ok(match host {
+        McpHost::ClaudeDesktop => home
+            .join("Library")
+            .join("Application Support")
+            .join("Claude")
+            .join("claude_desktop_config.json"),
+        McpHost::Cursor => home.join(".cursor").join("mcp.json"),
+        McpHost::Zed => home.join(".config").join("zed").join("settings.json"),
+    })
+}
+
+/// Merge the unhosted MCP stanza into the host's existing config (or
+/// create the config if missing). Other servers / settings in the
+/// file are preserved. Backs up the original to
+/// `<file>.unhosted.bak` once on first write.
+fn install_mcp_config(
+    host: McpHost,
+    daemon_url: &str,
+    bearer: Option<&str>,
+    path: &std::path::Path,
+) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating {}", parent.display()))?;
+    }
+    let outer_key = match host {
+        McpHost::ClaudeDesktop | McpHost::Cursor => "mcpServers",
+        McpHost::Zed => "context_servers",
+    };
+
+    let mut root: serde_json::Value = if path.exists() {
+        let bak = path.with_extension("json.unhosted.bak");
+        if !bak.exists() {
+            std::fs::copy(path, &bak)
+                .with_context(|| format!("backing up {} -> {}", path.display(), bak.display()))?;
+        }
+        let text =
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        if text.trim().is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?
+        }
+    } else {
+        serde_json::json!({})
+    };
+
+    if !root.is_object() {
+        anyhow::bail!(
+            "{} is not a JSON object — refusing to overwrite",
+            path.display()
+        );
+    }
+    let obj = root.as_object_mut().expect("checked above");
+    let stanza = build_mcp_config(host, daemon_url, bearer);
+    let stanza_obj = stanza
+        .as_object()
+        .expect("build_mcp_config always returns an object")
+        .clone();
+    // Get/insert the top-level key as an object.
+    let bucket = obj
+        .entry(outer_key.to_string())
+        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+    if !bucket.is_object() {
+        anyhow::bail!(
+            "{} has a non-object '{}' field — refusing to overwrite",
+            path.display(),
+            outer_key
+        );
+    }
+    let bucket_obj = bucket.as_object_mut().expect("checked above");
+    // Merge: we own only the "unhosted" sub-key.
+    if let Some(serde_json::Value::Object(inner)) = stanza_obj.get(outer_key) {
+        if let Some(unhosted_entry) = inner.get("unhosted") {
+            bucket_obj.insert("unhosted".to_string(), unhosted_entry.clone());
+        }
+    }
+
+    let tmp = path.with_extension("json.unhosted.tmp");
+    std::fs::write(&tmp, serde_json::to_string_pretty(&root)?)
+        .with_context(|| format!("writing {}", tmp.display()))?;
+    std::fs::rename(&tmp, path)
+        .with_context(|| format!("rename {} -> {}", tmp.display(), path.display()))?;
     Ok(())
 }
 
