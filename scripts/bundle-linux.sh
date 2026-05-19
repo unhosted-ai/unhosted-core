@@ -61,7 +61,12 @@ command -v strip >/dev/null 2>&1 && strip "$STAGE/unhosted" "$STAGE/unhosted-des
 
 # ----- icon + .desktop --------------------------------------------------------
 
+ICON_SRC="$ROOT/crates/unhosted-desktop/icons"
 cp "$ROOT/branding/logo/app-icon.svg" "$STAGE/unhosted.svg"
+cp "$ICON_SRC/32x32.png"       "$STAGE/icon-32.png"
+cp "$ICON_SRC/128x128.png"     "$STAGE/icon-128.png"
+cp "$ICON_SRC/128x128@2x.png"  "$STAGE/icon-256.png"
+cp "$ICON_SRC/icon.png"        "$STAGE/icon-512.png"
 cp "$ROOT/scripts/unhosted.desktop"   "$STAGE/unhosted.desktop"
 
 # ----- README ----------------------------------------------------------------
@@ -92,7 +97,10 @@ echo "→ packing $TARBALL"
 # Files are extracted directly into the user's tmp dir by install.sh,
 # which `find`s the binaries by name. No nested top-level directory.
 tar -czf "$TARBALL" -C "$STAGE" \
-  unhosted unhosted-desktop unhosted.desktop unhosted.svg README
+  unhosted unhosted-desktop \
+  unhosted.desktop unhosted.svg \
+  icon-32.png icon-128.png icon-256.png icon-512.png \
+  README
 
 echo
 echo "Done."

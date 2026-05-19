@@ -1,5 +1,7 @@
-# Claude / agent state
-.claude/
+# Claude / agent state — commit shared config (settings.json, hooks/), ignore personal
+.claude/settings.local.json
+.claude/memory/
+.claude/todos/
 
 # macOS
 .DS_Store

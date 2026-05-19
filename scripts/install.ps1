@@ -10,6 +10,21 @@
 
 $ErrorActionPreference = "Stop"
 
+# ---- helpers -----------------------------------------------------------------
+
+function Write-Header { param($msg)
+    Write-Host ""
+    Write-Host "  $msg" -ForegroundColor Cyan -NoNewline
+    Write-Host ""
+}
+function Write-Ok   { param($msg) Write-Host "  " -NoNewline; Write-Host "v" -ForegroundColor Green -NoNewline; Write-Host "  $msg" }
+function Write-Info { param($msg) Write-Host "  $msg" -ForegroundColor DarkGray }
+function Write-Warn { param($msg) Write-Host "  ! $msg" -ForegroundColor Yellow }
+function Write-Step { param($msg) Write-Host ""; Write-Host $msg -ForegroundColor White }
+function Write-Fail { param($msg) Write-Host "error: $msg" -ForegroundColor Red; exit 1 }
+
+# ---- config ------------------------------------------------------------------
+
 $Repo       = "unhosted-ai/unhosted-core"
 $InstallDir = if ($env:UNHOSTED_INSTALL_DIR) { $env:UNHOSTED_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA "unhosted" }
 $Version    = if ($env:UNHOSTED_VERSION) { $env:UNHOSTED_VERSION } else { "latest" }
@@ -19,17 +34,20 @@ $NoDesktop  = ($env:UNHOSTED_NO_DESKTOP -eq "1")
 
 $arch = (Get-CimInstance -ClassName Win32_Processor).Architecture
 switch ($arch) {
-    9       { $Target = "x86_64-pc-windows-msvc" }   # AMD64
-    12      { Write-Error "unhosted: ARM64 Windows builds aren't published yet. Build from source."; exit 1 }
-    default { Write-Error "unhosted: unsupported architecture code '$arch'"; exit 1 }
+    9       { $Target = "x86_64-pc-windows-msvc" }
+    12      { Write-Fail "ARM64 Windows builds aren't published yet. Build from source." }
+    default { Write-Fail "unsupported architecture code '$arch'" }
 }
 
-Write-Host "unhosted installer"
-Write-Host "  platform: windows / $Target"
-Write-Host "  install:  $InstallDir\unhosted.exe"
 Write-Host ""
+Write-Host "  unhosted" -ForegroundColor Cyan -NoNewline
+Write-Host "  —  local AI mesh"
+Write-Info "platform  windows / $Target"
+Write-Info "install   $InstallDir\unhosted.exe"
 
 # ---- find release ------------------------------------------------------------
+
+Write-Step "Downloading"
 
 if ($Version -eq "latest") {
     $api = "https://api.github.com/repos/$Repo/releases/latest"
@@ -39,49 +57,43 @@ if ($Version -eq "latest") {
 
 $rel = Invoke-RestMethod -Uri $api -UserAgent "unhosted-installer"
 $asset = $rel.assets | Where-Object { $_.name -eq "unhosted-$Target.zip" } | Select-Object -First 1
-if (-not $asset) {
-    Write-Error "unhosted: no release asset found for $Target in $Version."
-    exit 1
-}
+if (-not $asset) { Write-Fail "no release asset found for $Target in $Version." }
 
-# ---- download + extract ------------------------------------------------------
+Write-Info $asset.browser_download_url
 
 $tmp = Join-Path $env:TEMP ("unhosted-install-" + [System.IO.Path]::GetRandomFileName())
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 
 $zip = Join-Path $tmp "unhosted.zip"
-Write-Host "  downloading $($asset.browser_download_url) ..."
 Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip -UseBasicParsing
-
 Expand-Archive -Path $zip -DestinationPath $tmp -Force
 
-# Find both binaries inside the extracted "unhosted-<target>/" directory.
 $cliExe = Get-ChildItem -Path $tmp -Recurse -Filter "unhosted.exe" `
     | Where-Object { $_.Name -eq "unhosted.exe" } | Select-Object -First 1
 $desktopExe = Get-ChildItem -Path $tmp -Recurse -Filter "unhosted-desktop.exe" | Select-Object -First 1
 
-if (-not $cliExe) {
-    Write-Error "unhosted: archive did not contain unhosted.exe"
-    exit 1
-}
+if (-not $cliExe) { Write-Fail "archive did not contain unhosted.exe" }
 
 # ---- install binaries --------------------------------------------------------
 
+Write-Step "Installing"
+
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 Copy-Item -Path $cliExe.FullName -Destination (Join-Path $InstallDir "unhosted.exe") -Force
+Write-Ok "$InstallDir\unhosted.exe"
 
 $desktopPath = $null
 if ($desktopExe -and (-not $NoDesktop)) {
     $desktopPath = Join-Path $InstallDir "unhosted-desktop.exe"
     Copy-Item -Path $desktopExe.FullName -Destination $desktopPath -Force
-    Write-Host "  installed: $desktopPath"
+    Write-Ok $desktopPath
 }
 
-# Add to user PATH if not already there.
+# PATH registration
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($userPath -notlike "*$InstallDir*") {
     [Environment]::SetEnvironmentVariable("Path", "$userPath;$InstallDir", "User")
-    Write-Host "  added $InstallDir to your user PATH (restart your shell)"
+    Write-Warn "added $InstallDir to your user PATH — restart your shell to pick it up"
 }
 
 # ---- Start Menu shortcut for the desktop shell ------------------------------
@@ -93,13 +105,14 @@ if ($desktopPath -and (Test-Path $desktopPath)) {
     try {
         $shell = New-Object -ComObject WScript.Shell
         $shortcut = $shell.CreateShortcut($lnk)
-        $shortcut.TargetPath  = $desktopPath
+        $shortcut.TargetPath      = $desktopPath
         $shortcut.WorkingDirectory = $InstallDir
-        $shortcut.Description = "Unhosted — your local AI mesh"
+        $shortcut.Description     = "Unhosted — your local AI mesh"
+        $shortcut.IconLocation    = "$desktopPath,0"
         $shortcut.Save()
-        Write-Host "  installed: $lnk"
+        Write-Ok $lnk
     } catch {
-        Write-Host "  could not create Start Menu shortcut ($_)" -ForegroundColor Yellow
+        Write-Warn "could not create Start Menu shortcut: $_"
     }
 }
 
@@ -107,17 +120,19 @@ Remove-Item -Path $tmp -Recurse -Force
 
 # ---- verify ------------------------------------------------------------------
 
-Write-Host ""
-& (Join-Path $InstallDir "unhosted.exe") --version
+Write-Step "Installed"
+$ver = & (Join-Path $InstallDir "unhosted.exe") --version
+Write-Host "  $ver" -ForegroundColor Green
 
-Write-Host ""
-Write-Host "next:"
-Write-Host "  1. install llama.cpp: see https://github.com/ggerganov/llama.cpp/releases (windows builds)"
-Write-Host "  2. pull a model:      unhosted pull llama3.2:1b"
-Write-Host "  3. start the backend: llama-server.exe -m <model.gguf> --port 8080"
-Write-Host "  4. run the daemon:    unhosted serve"
+# ---- next steps --------------------------------------------------------------
+
+Write-Step "Next steps"
+Write-Info "1. install llama.cpp   https://github.com/ggerganov/llama.cpp/releases"
+Write-Info "2. pull a model        unhosted pull llama3.2:1b"
+Write-Info "3. run the daemon      unhosted serve"
 if ($desktopPath) {
-    Write-Host "  5. open the app:      unhosted-desktop   (or click Unhosted in the Start Menu)"
+    Write-Info "4. open the app        unhosted-desktop   (or click Unhosted in the Start Menu)"
 } else {
-    Write-Host "  5. open the app:      start http://127.0.0.1:7777"
+    Write-Info "4. open the app        start http://127.0.0.1:7777"
 }
+Write-Host ""

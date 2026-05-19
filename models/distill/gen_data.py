@@ -10,8 +10,18 @@ Pointed by default at a local unhosted daemon
 (`http://127.0.0.1:7777/v1/chat/completions`) because that's the
 loop unhosted itself wants to enable: you can distill from your own
 running stack. Override with --base-url + --api-key for OpenAI,
-Anthropic, Together, Groq, or anything else that speaks the
-OpenAI-compatible chat-completions wire format.
+Together, Groq, or anything else that speaks the OpenAI-compatible
+chat-completions wire format.
+
+For Claude teachers (recommended for highest-quality data), pass the
+model name directly and set ANTHROPIC_API_KEY:
+
+  python gen_data.py --docs docs/ --out data/train.jsonl \\
+      --model claude-opus-4-7
+
+The script detects "claude-*" model names and switches automatically
+to the Anthropic SDK (native messages API, not the compat layer).
+`pip install anthropic` is required only for this path.
 
 Key design choices:
 
@@ -173,8 +183,65 @@ def call_teacher(
     temperature: float,
     timeout: int,
 ) -> list[dict]:
-    """POST to /v1/chat/completions and return a list of {q, a} dicts.
-    Raises on persistent failure after retries."""
+    """Route to the right backend based on the model name and return [{q, a}]."""
+    if model.startswith("claude-"):
+        return _call_teacher_claude(model, document, n_pairs, temperature)
+    return _call_teacher_openai(base_url, api_key, model, document, n_pairs, temperature, timeout)
+
+
+def _call_teacher_claude(
+    model: str,
+    document: str,
+    n_pairs: int,
+    temperature: float,
+) -> list[dict]:
+    """Use the native Anthropic SDK (not the compat layer) for Claude models.
+    Requires: pip install anthropic   and   ANTHROPIC_API_KEY in environment."""
+    try:
+        import anthropic
+    except ImportError:
+        sys.exit(
+            "error: the 'anthropic' package is required for Claude teacher models.\n"
+            "  pip install anthropic"
+        )
+
+    client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY automatically
+
+    last_err: Exception | None = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            msg = client.messages.create(
+                model=model,
+                max_tokens=4096,
+                system=SYSTEM_PROMPT,
+                messages=[
+                    {"role": "user", "content": USER_PROMPT_TEMPLATE.format(n=n_pairs, document=document)},
+                ],
+                temperature=temperature,
+            )
+            content = msg.content[0].text
+            return parse_teacher_response(content, n_pairs)
+        except Exception as e:
+            last_err = e
+            if attempt < MAX_RETRIES:
+                wait = RETRY_BACKOFF_S * attempt
+                print(f"warn: Claude call failed ({e}); retry {attempt}/{MAX_RETRIES} in {wait}s")
+                time.sleep(wait)
+                continue
+            raise RuntimeError(f"Claude call failed after {MAX_RETRIES} attempts: {e}") from last_err
+    raise RuntimeError("unreachable")
+
+
+def _call_teacher_openai(
+    base_url: str,
+    api_key: str,
+    model: str,
+    document: str,
+    n_pairs: int,
+    temperature: float,
+    timeout: int,
+) -> list[dict]:
+    """POST to /v1/chat/completions (OpenAI-compatible) and return [{q, a}]."""
     body = {
         "model": model,
         "messages": [

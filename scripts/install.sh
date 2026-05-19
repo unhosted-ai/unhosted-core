@@ -11,6 +11,24 @@
 
 set -e
 
+# ---- color output (only when stdout is a real terminal) ----------------------
+
+if [ -t 1 ]; then
+  BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
+  GREEN='\033[32m'; CYAN='\033[36m'; YELLOW='\033[33m'; RED='\033[31m'
+else
+  BOLD=''; DIM=''; RESET=''; GREEN=''; CYAN=''; YELLOW=''; RED=''
+fi
+
+say()  { printf "${CYAN}${BOLD}%s${RESET}\n"   "$*"; }
+ok()   { printf "  ${GREEN}✓${RESET}  %s\n"   "$*"; }
+info() { printf "  ${DIM}%s${RESET}\n"         "$*"; }
+warn() { printf "  ${YELLOW}!${RESET}  %s\n"  "$*"; }
+die()  { printf "${RED}error:${RESET} %s\n" "$*" >&2; exit 1; }
+step() { printf "\n${BOLD}%s${RESET}\n" "$*"; }
+
+# ---- config ------------------------------------------------------------------
+
 REPO="unhosted-ai/unhosted-core"
 INSTALL_DIR="${UNHOSTED_INSTALL_DIR:-/usr/local/bin}"
 VERSION="${UNHOSTED_VERSION:-latest}"
@@ -21,25 +39,24 @@ OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
 
 case "$OS-$ARCH" in
-  darwin-arm64|darwin-aarch64)   TARGET="aarch64-apple-darwin";   PLATFORM="macos" ;;
-  darwin-x86_64)                 TARGET="x86_64-apple-darwin";    PLATFORM="macos" ;;
+  darwin-arm64|darwin-aarch64)   TARGET="aarch64-apple-darwin";     PLATFORM="macos" ;;
+  darwin-x86_64)                 TARGET="x86_64-apple-darwin";      PLATFORM="macos" ;;
   linux-x86_64)                  TARGET="x86_64-unknown-linux-gnu"; PLATFORM="linux" ;;
   linux-aarch64|linux-arm64)     TARGET="aarch64-unknown-linux-gnu"; PLATFORM="linux" ;;
   *windows*|*mingw*|*msys*|*cygwin*)
-    echo "unhosted: this script is for unix shells. on Windows, use PowerShell:"
-    echo "  irm https://raw.githubusercontent.com/$REPO/main/scripts/install.ps1 | iex"
-    exit 1
+    die "this script is for unix shells. on Windows, use PowerShell:
+  irm https://raw.githubusercontent.com/$REPO/main/scripts/install.ps1 | iex"
     ;;
   *)
-    echo "unhosted: unsupported platform '$OS-$ARCH'."
-    echo "see https://github.com/$REPO/releases — or build from source."
-    exit 1
+    die "unsupported platform '$OS-$ARCH'.
+  see https://github.com/$REPO/releases — or build from source."
     ;;
 esac
 
-echo "unhosted installer"
-echo "  platform: $OS / $ARCH  →  $TARGET"
-echo "  install:  $INSTALL_DIR/unhosted"
+printf "\n${BOLD}  unhosted${RESET}  —  local AI mesh\n\n"
+info "platform  $OS / $ARCH  →  $TARGET"
+info "install   $INSTALL_DIR/unhosted"
+printf "\n"
 
 # ---- find release ------------------------------------------------------------
 
@@ -56,115 +73,99 @@ ASSET_URL="$(
     | sed 's/.*"\(https:[^"]*\)".*/\1/'
 )"
 
-if [ -z "$ASSET_URL" ]; then
-  echo "unhosted: no release found for $TARGET ($VERSION)."
-  echo "see https://github.com/$REPO/releases"
-  exit 1
-fi
+[ -n "$ASSET_URL" ] || die "no release found for $TARGET ($VERSION).
+  see https://github.com/$REPO/releases"
 
 # ---- download + extract ------------------------------------------------------
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-echo "  downloading $ASSET_URL ..."
-curl -fsSL "$ASSET_URL" -o "$TMP/unhosted.tar.gz"
+step "Downloading"
+info "$ASSET_URL"
+curl -fsSL --progress-bar "$ASSET_URL" -o "$TMP/unhosted.tar.gz"
 tar -xzf "$TMP/unhosted.tar.gz" -C "$TMP"
 
 CLI_BIN="$(find "$TMP" -type f -name unhosted -not -name 'unhosted-*' | head -1)"
 DESKTOP_BIN="$(find "$TMP" -type f -name 'unhosted-desktop' | head -1)"
 
-if [ -z "$CLI_BIN" ]; then
-  echo "unhosted: archive did not contain a binary named 'unhosted'."
-  exit 1
-fi
+[ -n "$CLI_BIN" ] || die "archive did not contain a binary named 'unhosted'."
 
 # ---- install binaries --------------------------------------------------------
 
+step "Installing"
 mkdir -p "$INSTALL_DIR" 2>/dev/null || true
 
 install_bin() {
-  src="$1"
-  dst="$2"
+  src="$1"; dst="$2"
   if [ -w "$INSTALL_DIR" ]; then
     mv "$src" "$dst"
   else
-    echo "  needs sudo to write to $INSTALL_DIR"
+    warn "needs sudo to write to $INSTALL_DIR"
     sudo mv "$src" "$dst"
   fi
   chmod +x "$dst"
 }
 
 install_bin "$CLI_BIN" "$INSTALL_DIR/unhosted"
+ok "$INSTALL_DIR/unhosted"
 
+DESKTOP_PATH=""
 if [ "${UNHOSTED_NO_DESKTOP:-0}" != "1" ] && [ -n "$DESKTOP_BIN" ]; then
   install_bin "$DESKTOP_BIN" "$INSTALL_DIR/unhosted-desktop"
-  echo "  installed: $INSTALL_DIR/unhosted-desktop"
+  ok "$INSTALL_DIR/unhosted-desktop"
+  DESKTOP_PATH="$INSTALL_DIR/unhosted-desktop"
 fi
 
 # ---- Linux desktop integration ----------------------------------------------
-# Wire up a .desktop file + icon so the GUI shell shows up in the launcher.
-# Skipped on macOS (the .app bundle handles this separately).
 
 if [ "$PLATFORM" = "linux" ] && [ -x "$INSTALL_DIR/unhosted-desktop" ]; then
   APPS_DIR="$HOME/.local/share/applications"
-  ICONS_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
-  mkdir -p "$APPS_DIR" "$ICONS_DIR"
+  mkdir -p "$APPS_DIR"
 
-  ICON_SRC="$(find "$TMP" -type f -name 'unhosted.svg' | head -1)"
-  if [ -n "$ICON_SRC" ]; then
-    cp "$ICON_SRC" "$ICONS_DIR/unhosted.svg"
+  # SVG icon (scalable)
+  ICON_SVG_SRC="$(find "$TMP" -type f -name 'unhosted.svg' | head -1)"
+  if [ -n "$ICON_SVG_SRC" ]; then
+    SCALABLE_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
+    mkdir -p "$SCALABLE_DIR"
+    cp "$ICON_SVG_SRC" "$SCALABLE_DIR/unhosted.svg"
   fi
+
+  # PNG rasters at each size (bundled as icon-32.png, icon-128.png, etc.)
+  for pair in "32:icon-32.png" "128:icon-128.png" "256:icon-256.png" "512:icon-512.png"; do
+    SIZE="${pair%%:*}"; FILE="${pair##*:}"
+    PNG_SRC="$(find "$TMP" -type f -name "$FILE" | head -1)"
+    if [ -n "$PNG_SRC" ]; then
+      ICON_DIR="$HOME/.local/share/icons/hicolor/${SIZE}x${SIZE}/apps"
+      mkdir -p "$ICON_DIR"
+      cp "$PNG_SRC" "$ICON_DIR/unhosted.png"
+    fi
+  done
 
   DESKTOP_SRC="$(find "$TMP" -type f -name 'unhosted.desktop' | head -1)"
   if [ -n "$DESKTOP_SRC" ]; then
-    # Rewrite Exec= to the absolute install path so it works regardless of PATH.
     sed "s|^Exec=.*|Exec=$INSTALL_DIR/unhosted-desktop|; s|^TryExec=.*|TryExec=$INSTALL_DIR/unhosted-desktop|" \
       "$DESKTOP_SRC" > "$APPS_DIR/unhosted.desktop"
+    ok "$APPS_DIR/unhosted.desktop"
   fi
 
-  # Refresh the desktop database if we can (silent if the tool isn't installed).
+  command -v gtk-update-icon-cache >/dev/null 2>&1 \
+    && gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" >/dev/null 2>&1 || true
   command -v update-desktop-database >/dev/null 2>&1 \
     && update-desktop-database "$APPS_DIR" >/dev/null 2>&1 || true
 
-  echo "  installed: $APPS_DIR/unhosted.desktop"
-
-  # Print a runtime-deps hint. tao+wry need these at runtime; missing pkgs
-  # are the most common "the GUI won't open" failure mode on Linux.
-  echo
-  echo "  desktop runtime deps (Linux):"
-  echo "    Debian/Ubuntu:  sudo apt install libgtk-3-0 libsoup-3.0-0 libwebkit2gtk-4.1-0"
-  echo "    Fedora:         sudo dnf install gtk3 libsoup3 webkit2gtk4.1"
-  echo "    Arch:           sudo pacman -S gtk3 libsoup3 webkit2gtk-4.1"
-
-  # ---- Linux systemd user service ------------------------------------------
-  # Without this, users tend to run `unhosted serve` in a terminal (or worse:
-  # a VS Code integrated terminal). Close the terminal and the daemon dies,
-  # taking the tunnel and chat sync with it. Drop the unit file and tell
-  # the user how to enable it persistently — same pattern as e.g. ollama's
-  # installer.
   SERVICE_SRC="$(find "$TMP" -type f -name 'unhosted.service' | head -1)"
   if [ -n "$SERVICE_SRC" ]; then
     SYSTEMD_DIR="$HOME/.config/systemd/user"
     mkdir -p "$SYSTEMD_DIR"
-    # Rewrite ExecStart so the unit doesn't depend on $PATH at boot.
     sed "s|^ExecStart=.*|ExecStart=$INSTALL_DIR/unhosted serve|" \
       "$SERVICE_SRC" > "$SYSTEMD_DIR/unhosted.service"
-    echo "  installed: $SYSTEMD_DIR/unhosted.service"
-    echo
-    echo "  to run unhosted as a background service (survives terminal/VS Code closing):"
-    echo "    systemctl --user daemon-reload"
-    echo "    systemctl --user enable --now unhosted"
-    echo "    journalctl --user -u unhosted -f         # follow logs"
-    echo
-    echo "  to keep it running even when logged out (Linux):"
-    echo "    sudo loginctl enable-linger \$USER"
+    ok "$SYSTEMD_DIR/unhosted.service"
   fi
 fi
 
 # ---- macOS .app install (optional, separate asset) --------------------------
-# The release ships a `unhosted-macos-app-*.tar.gz` containing unhosted.app.
-# Drop it in /Applications by hand, or fetch it here when present.
+
 if [ "$PLATFORM" = "macos" ]; then
   APP_URL="$(
     curl -fsSL "$API" \
@@ -173,7 +174,7 @@ if [ "$PLATFORM" = "macos" ]; then
       | sed 's/.*"\(https:[^"]*\)".*/\1/'
   )"
   if [ -n "$APP_URL" ]; then
-    echo "  fetching macOS .app bundle ..."
+    info "fetching macOS .app bundle ..."
     curl -fsSL "$APP_URL" -o "$TMP/unhosted-app.tar.gz"
     tar -xzf "$TMP/unhosted-app.tar.gz" -C "$TMP"
     if [ -d "$TMP/unhosted.app" ]; then
@@ -181,34 +182,57 @@ if [ "$PLATFORM" = "macos" ]; then
       if [ -w "/Applications" ]; then
         rm -rf "$DEST" && mv "$TMP/unhosted.app" "$DEST"
       else
-        echo "  needs sudo to write to /Applications"
+        warn "needs sudo to write to /Applications"
         sudo rm -rf "$DEST" && sudo mv "$TMP/unhosted.app" "$DEST"
       fi
-      echo "  installed: $DEST"
+      ok "$DEST"
     fi
   fi
 fi
 
 # ---- verify ------------------------------------------------------------------
 
-echo
+step "Installed"
 if command -v unhosted >/dev/null 2>&1; then
-  echo "installed:"
-  unhosted --version
+  printf "  "; unhosted --version
 else
-  echo "installed to $INSTALL_DIR/unhosted, but it isn't on your PATH."
-  echo "add this line to your shell rc:"
-  echo "  export PATH=\"\$PATH:$INSTALL_DIR\""
+  warn "installed to $INSTALL_DIR/unhosted, but it isn't on your PATH."
+  info "add this line to your shell rc:"
+  info "  export PATH=\"\$PATH:$INSTALL_DIR\""
 fi
 
-echo
-echo "next:"
-echo "  1. install llama.cpp:  brew install llama.cpp   (mac)"
-echo "  2. download a model:   see docs/learn for a 1B starter model"
-echo "  3. start the backend:  llama-server -m model.gguf --port 8080"
-echo "  4. run the daemon:     unhosted serve"
-if [ -x "$INSTALL_DIR/unhosted-desktop" ]; then
-  echo "  5. open the app:       unhosted-desktop      (or use the launcher)"
-else
-  echo "  5. open the app:       http://127.0.0.1:7777"
+# ---- next steps --------------------------------------------------------------
+
+step "Next steps"
+
+if [ "$PLATFORM" = "linux" ]; then
+  info "1. install llama.cpp   https://github.com/ggerganov/llama.cpp/releases"
+elif [ "$PLATFORM" = "macos" ]; then
+  info "1. install llama.cpp   brew install llama.cpp"
 fi
+info "2. pull a model        unhosted pull llama3.2:1b"
+info "3. run the daemon      unhosted serve"
+
+if [ -x "$INSTALL_DIR/unhosted-desktop" ]; then
+  info "4. open the app        unhosted-desktop   (or launch from your app menu)"
+else
+  info "4. open the app        http://127.0.0.1:7777"
+fi
+
+if [ "$PLATFORM" = "linux" ] && [ -n "$SERVICE_SRC" ]; then
+  printf "\n"
+  info "run as a background service (survives closing the terminal):"
+  info "  systemctl --user daemon-reload"
+  info "  systemctl --user enable --now unhosted"
+  info "  journalctl --user -u unhosted -f"
+fi
+
+if [ "$PLATFORM" = "linux" ]; then
+  printf "\n"
+  info "desktop runtime deps:"
+  info "  Debian/Ubuntu:  sudo apt install libgtk-3-0 libsoup-3.0-0 libwebkit2gtk-4.1-0"
+  info "  Fedora:         sudo dnf install gtk3 libsoup3 webkit2gtk4.1"
+  info "  Arch:           sudo pacman -S gtk3 libsoup3 webkit2gtk-4.1"
+fi
+
+printf "\n"

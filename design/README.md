@@ -4,15 +4,44 @@ Architectural decision records (ADRs) — short, dated documents that capture *w
 
 Each file is numbered (`NNNN-slug.md`) and never renumbered. Decisions can be superseded by later ADRs but never silently rewritten.
 
-## Format
+## Workflow
+
+### Spec-first (default)
+Write the spec before any code lands. Status stays `Draft` until reviewed, then moves to `Accepted`.
+
+```
+bash scripts/new-spec.sh <slug>          # creates design/NNNN-slug.md
+# fill it in, get sign-off
+# then implement
+```
+
+### Hybrid
+Spec and code land together in the same PR. Use this when the design is obvious but you still want a record.
+
+```
+bash scripts/new-spec.sh <slug> Hybrid   # status is Hybrid from the start
+```
+
+A Claude hook will remind you to run one of the above when you create a new source module with no matching spec. It warns but never blocks.
+
+### Superseding a decision
+Set the old spec's status to `Superseded by NNNN` and link to the new one. Never edit the rationale in the old doc.
+
+## Spec format
 
 Each ADR has:
 
-- **Status**: Draft / Accepted / Superseded by NNNN
-- **Targets**: which version this lands in
-- The decisions themselves
-- The reasoning (especially the *not chosen* options and why)
-- Open questions that aren't being decided yet
+- **Status**: `Draft` / `Hybrid` / `Accepted` / `Superseded by NNNN`
+- **Captured**: date the spec was first written
+- **Target**: which version this is planned for
+- **Motivation**: the problem and who it affects
+- **Decision**: what exactly we're building (interface, data structures, protocol)
+- **Alternatives considered**: what we ruled out and why
+- **Implementation sketch**: high-level steps to confirm it's buildable
+- **Open questions**: things not yet decided
+- **Out of scope**: explicit non-decisions to prevent scope creep
+
+See `TEMPLATE.md` for the blank form.
 
 ## Index
 
@@ -24,3 +53,5 @@ Each ADR has:
 - [`0006-public-mode-onboarding-and-wallet.md`](0006-public-mode-onboarding-and-wallet.md) — public-mode account model + wallet binding + first-90s flow
 - [`0007-security-hardening.md`](0007-security-hardening.md) — local bearer auth, replay defense, relay caps + rate limits
 - [`0008-quic-peer-transport.md`](0008-quic-peer-transport.md) — encrypted peer-to-peer via QUIC + Ed25519-bound certs (no separate Noise layer)
+- [`0009-vram-pooling.md`](0009-vram-pooling.md) — distributed inference across LAN peers via llama.cpp RPC
+- [`0010-custom-llm-pipeline.md`](0010-custom-llm-pipeline.md) — distil a specialist model from open-source bases using Claude or a local daemon as teacher

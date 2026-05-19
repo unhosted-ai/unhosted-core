@@ -30,3 +30,7 @@ protobuf>=4.25
 accelerate>=1.0,<2.0
 safetensors>=0.4
 huggingface-hub>=0.26
+
+# Optional: required only when using a Claude model as the teacher
+# (--model claude-opus-4-7, --model claude-sonnet-4-6, etc.)
+anthropic>=0.40
