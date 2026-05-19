@@ -79,7 +79,7 @@ Equivalent regimes — **CCPA/CPRA** (California), **LGPD** (Brazil), **PIPEDA**
 
 ## Money transmission, MiCA, and crypto regulation
 
-**No rails are wired in this repo as of v0.0.45.** The `PeerPaymentPolicy` and `/v1/public-mode/quote` endpoint are policy-only; nothing settles. This section is forward-looking.
+**No rails are wired in this repo as of v0.0.50.** The `PeerPaymentPolicy` and `/v1/public-mode/quote` endpoint are policy-only; nothing settles. The rail integration plan is sketched in [`unhosted-payments/design/0011-payment-rail-integration-plan.md`](https://github.com/unhosted-ai/unhosted-payments/blob/main/design/0011-payment-rail-integration-plan.md), with a per-rail compliance map. This section is forward-looking.
 
 ### Design intent
 
@@ -135,6 +135,12 @@ This is a jurisdiction-specific operator obligation. Briefly:
 - **Many jurisdictions** treat crypto-asset receipt at fair market value as taxable income on the day of receipt.
 
 The project provides no tax advice and no tax forms.
+
+## Intellectual property
+
+[IP_POSTURE.md](IP_POSTURE.md) is the standing IP policy: license (AGPL-3.0-or-later), DCO requirement, defensive-publication register of mechanisms we believe are non-obvious, and an explicit list of what we do not claim is novel.
+
+Operators preparing a commercial deployment, an acquisition, an audit, or a patent filing should read it. The novelty register is a living document; entries are added in the same PR as the code they describe, and moved to "not claimed" if later prior-art searches anticipate them.
 
 ## Reporting and contact
 

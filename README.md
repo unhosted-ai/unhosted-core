@@ -138,6 +138,7 @@ This is open-source software. You run it on your hardware. There is no Unhosted 
 - **[ACCEPTABLE_USE.md](ACCEPTABLE_USE.md)** — hard prohibitions (CSAM, sanctioned-party service, mass-influence ops, ten others), public-mode host and payer duties, reporting paths.
 - **[TERMS.md](TERMS.md)** — as-is software, no warranty, no service-provider relationship, peer-to-peer payments, no medical / legal / financial / safety-critical use.
 - **[COMPLIANCE.md](COMPLIANCE.md)** — sanctions, export controls (EAR §740.17), EU AI Act, GDPR / CCPA / LGPD, MiCA, model licenses. Operator-vs-project responsibility split spelled out.
+- **[IP_POSTURE.md](IP_POSTURE.md)** — license, DCO, trademark, patent posture, and a defensive-publication register of mechanisms we believe are non-obvious. Documented as prior art.
 - **[SECURITY.md](SECURITY.md)** — vulnerability disclosure.
 - **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** — community.
 - **[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)** — AGPL § 5 attributions for direct dependencies and the model weights pulled at runtime.
