@@ -52,3 +52,4 @@ crates/unhosted-desktop/gen/
 # explicitly never want those weights checked in.
 **/.fastembed_cache/
 
+/target/shotter

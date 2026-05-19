@@ -23,14 +23,14 @@ Format: PNG. Keep individual files under 500 KB — use a tool like `pngquant`, 
 ./scripts/screenshots.sh
 ```
 
-Spins up a fresh daemon on `127.0.0.1:7798` with a clean config dir, sets a meaningful public-mode policy, seeds a sample chat, drives Safari to each view, and screencaptures by window bounds. Drops all four PNGs into this directory.
+Builds a small Swift CLI (`scripts/shotter.swift` → `target/shotter`, ~3s one-time) that uses `WKWebView.takeSnapshot()` to render each view to a PNG via WebKit's own compositor. **No Screen Recording permission required**, no focus stealing, no popping windows — the WebView is offscreen the whole time.
 
 Requirements:
 
-- macOS (uses `screencapture` + `osascript`).
-- Terminal app has Screen Recording permission (System Settings → Privacy & Security → Screen Recording). Granted once, persists across reboots.
+- macOS with Xcode command-line tools (`xcode-select --install` if missing).
 - A built daemon at `target/debug/unhosted` or `target/release/unhosted`. `cargo build -p unhosted-cli` produces the former.
-- Safari will briefly take focus during each shot. Don't run this while presenting.
+
+The script spins a fresh daemon on `127.0.0.1:7798` with a clean config dir, sets a meaningful public-mode policy so the sidebar has substance, then renders each shot at 2× backing scale (Retina-sharp on any Mac).
 
 ### Manual
 
@@ -42,4 +42,4 @@ The UI changes every release. When it changes meaningfully, rerun `scripts/scree
 
 ## Why these aren't in CI
 
-`screencapture` needs Screen Recording permission. CI runners don't grant it. A headless Chromium screenshot path is an option (Playwright); we haven't added it because the manual-on-release cadence is fine and the dependency footprint is large.
+The shotter only builds on macOS (uses Cocoa + WebKit). A cross-platform headless renderer (Playwright/Puppeteer) is possible but adds ~300 MB of Chromium download to the dev workflow; the manual-on-release cadence is fine and the Mac shotter is a five-line Swift program shipped in `scripts/shotter.swift`.
