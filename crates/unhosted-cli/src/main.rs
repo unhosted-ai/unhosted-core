@@ -159,6 +159,19 @@ enum Command {
         #[command(subcommand)]
         action: McpAction,
     },
+    /// Upgrade unhosted to the latest published release. Re-runs the
+    /// official install script (the same one the README points at)
+    /// which downloads the signed tarball for the current platform
+    /// from GitHub releases and replaces the on-disk binaries.
+    /// Desktop users get a native auto-update prompt instead —
+    /// this is for CLI installs.
+    Upgrade {
+        /// Skip the published-version check and run the install
+        /// script unconditionally. Useful when reinstalling the
+        /// same version to fix a botched install.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 /// Where the daemon is reachable from the host app. Defaults to
@@ -406,6 +419,9 @@ async fn main() -> Result<()> {
         }
         Command::Mcp { action } => {
             run_mcp(action)?;
+        }
+        Command::Upgrade { force } => {
+            run_upgrade(force).await?;
         }
     }
 
@@ -1403,4 +1419,85 @@ fn init_tracing() {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("unhosted_core=info,unhosted_cli=info"));
     fmt().with_env_filter(filter).with_target(false).init();
+}
+
+// ─── upgrade ──────────────────────────────────────────────────────────
+// `unhosted upgrade` re-runs the official install script. Desktop
+// users get an auto-update prompt via tauri-plugin-updater; this
+// command is for CLI installs (curl install.sh | sh). It's a thin
+// wrapper that:
+//   1. (unless --force) calls `unhosted_core::update_check::check`
+//      to see if a newer release exists. If we're already current,
+//      print and bail without touching disk.
+//   2. Detects platform — Windows ⇒ install.ps1, otherwise install.sh.
+//   3. Pipes curl|sh (or iwr|iex on Windows) inheriting stdio so
+//      the user sees the install script's own progress.
+//
+// We deliberately don't try to do an in-process self-rewrite —
+// macOS code-signing makes that brittle (the freshly-replaced
+// binary needs ad-hoc signing before it'll run), and the install
+// script already handles every edge case the original install
+// went through.
+
+const INSTALL_SH_URL: &str =
+    "https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.sh";
+const INSTALL_PS1_URL: &str =
+    "https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.ps1";
+
+async fn run_upgrade(force: bool) -> Result<()> {
+    let current = env!("CARGO_PKG_VERSION");
+    println!("current version: {current}");
+
+    if !force {
+        let http = reqwest::Client::new();
+        match unhosted_core::update_check::check(&http).await {
+            Ok(Some(latest)) => {
+                println!("latest published: v{latest} — upgrading");
+            }
+            Ok(None) => {
+                println!("already on the latest published release.");
+                println!("re-run with --force to reinstall the same version.");
+                return Ok(());
+            }
+            Err(e) => {
+                // Don't refuse to upgrade just because the version
+                // check failed (offline, rate-limited, etc). Surface
+                // the warning and let the user decide via --force,
+                // but in the common case (intermittent network), the
+                // install script itself will retry.
+                eprintln!(
+                    "warning: could not reach GitHub releases ({e}). \
+                     re-run with --force to install anyway."
+                );
+                return Ok(());
+            }
+        }
+    }
+
+    if cfg!(target_os = "windows") {
+        // PowerShell: irm <url> | iex. We invoke powershell directly
+        // so the user doesn't have to be in a powershell prompt.
+        let cmd = format!("irm {INSTALL_PS1_URL} | iex");
+        let status = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &cmd])
+            .status()
+            .context("running powershell install.ps1")?;
+        if !status.success() {
+            anyhow::bail!("install.ps1 failed (exit {:?})", status.code());
+        }
+    } else {
+        // curl -fsSL <url> | sh. Same one-liner as the README.
+        let cmd = format!("curl -fsSL {INSTALL_SH_URL} | sh");
+        let status = std::process::Command::new("sh")
+            .args(["-c", &cmd])
+            .status()
+            .context("running install.sh")?;
+        if !status.success() {
+            anyhow::bail!("install.sh failed (exit {:?})", status.code());
+        }
+    }
+
+    println!();
+    println!("upgrade complete. restart any running `unhosted serve` to pick up the new binary.");
+    Ok(())
 }

@@ -22,6 +22,7 @@ pub mod relay_client;
 pub mod router;
 pub mod transport;
 pub mod tunnel;
+pub mod update_check;
 pub mod upstream;
 pub mod vram_pool;
 mod web;
@@ -340,6 +341,13 @@ pub async fn serve(node: Node) -> Result<()> {
         vram_pool: Arc::new(vram_pool::PoolManager::new(vram_pool::probe())),
         rail_registry: Arc::new(rail_registry),
     };
+
+    // CLI-side update check. Desktop users get update prompts via
+    // tauri-plugin-updater; CLI users (curl install.sh | sh) have
+    // no equivalent. This logs a single info line at startup if a
+    // newer release is available. Disabled by
+    // `UNHOSTED_NO_UPDATE_CHECK=1` for the no-network crowd.
+    update_check::spawn_background(state.http.clone());
 
     // Eager tunnel: if the operator opted in (--eager-tunnel /
     // UNHOSTED_EAGER_TUNNEL=1), kick off cloudflared right away in the
