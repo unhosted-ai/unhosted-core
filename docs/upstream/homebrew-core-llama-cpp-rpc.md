@@ -33,7 +33,7 @@ llama.cpp's RPC mode (`-DGGML_RPC=ON`) ships an `rpc-server` binary that accepts
 
 ### Caveats / known issues
 
-`GGML_BLAS=ON` + `GGML_RPC=ON` triggers a GGML_ASSERT in the RMS_NORM op at first inference (see https://github.com/ggml-org/llama.cpp/issues/[fill-in-after-filing]). This PR therefore explicitly disables BLAS when RPC is enabled. The performance impact on systems where BLAS would have been used is minimal — llama.cpp's own kernels handle the same ops on the affected codepaths, and BLAS on the consumer-CPU side is rarely the bottleneck for inference-shaped workloads.
+`GGML_BLAS=ON` + `GGML_RPC=ON` triggers a GGML_ASSERT in the RMS_NORM op at first inference (see https://github.com/ggml-org/llama.cpp/issues/23382). This PR therefore explicitly disables BLAS when RPC is enabled. The performance impact on systems where BLAS would have been used is minimal — llama.cpp's own kernels handle the same ops on the affected codepaths, and BLAS on the consumer-CPU side is rarely the bottleneck for inference-shaped workloads.
 
 If/when the upstream bug is fixed, the BLAS-off flag should be removed in a follow-up PR.
 
@@ -91,5 +91,5 @@ Not applicable — this is an additive build-flag change. Existing users of `lla
 ### Related context
 
 - llama.cpp upstream RPC docs: https://github.com/ggml-org/llama.cpp/tree/master/tools/rpc
-- Known upstream bug (BLAS + RPC): https://github.com/ggml-org/llama.cpp/issues/[fill-in-after-filing]
+- Known upstream bug (BLAS + RPC): https://github.com/ggml-org/llama.cpp/issues/23382
 - VRAM-pooling ADR using this flow: https://github.com/unhosted-ai/unhosted-core/blob/main/design/0009-vram-pooling.md
