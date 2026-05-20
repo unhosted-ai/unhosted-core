@@ -304,54 +304,56 @@ function runTrustRadius() {
   // and animates down to 0 ("fully drawn"). The dashed public ring
   // uses its existing stroke-dasharray (3 6) for the visible look;
   // we override only during the draw-in transition.
-  const setupDraw = (circle) => {
-    const r = parseFloat(circle.getAttribute("r")) || 0;
-    const C = 2 * Math.PI * r;
-    circle.style.strokeDasharray = String(C);
-    circle.style.strokeDashoffset = String(C);
-    return C;
-  };
-  const trustedC = setupDraw(trustedCircle);
-  const publicC = setupDraw(publicCircle);
-
-  // The local (filled) disc starts at scale 0 with its center as
-  // the transform origin. SVG's transform-origin is finicky across
-  // browsers; setting it explicitly on the element works in Chrome,
-  // Safari, Firefox.
-  localCircle.style.transformBox = "fill-box";
-  localCircle.style.transformOrigin = "center";
-  localCircle.style.transform = "scale(0)";
-  if (localLabel) {
-    localLabel.style.opacity = "0";
-  }
-
+  // IMPORTANT: do NOT set the "empty" stroke state synchronously up
+  // front. If we did and `inView` never fires (section already in
+  // viewport on load, IntersectionObserver flaky in some browsers,
+  // or the safety timer disarms motion-armed before this runs), the
+  // rings would be stuck invisible. Set the empty state inside the
+  // inView callback instead, right before the animation that resolves
+  // it. The rings render as static SVG until the moment of animation.
   inView(
     svg,
     () => {
-      // local disc pops in first (it's the center; the inside-out
-      // narrative starts here)
+      // local disc — set initial scale, then pop in.
+      localCircle.style.transformBox = "fill-box";
+      localCircle.style.transformOrigin = "center";
+      localCircle.style.transform = "scale(0)";
+      if (localLabel) localLabel.style.opacity = "0";
       animate(
         localCircle,
         { transform: ["scale(0)", "scale(1)"] },
         { duration: 0.5, ease: EASE },
       );
-      // trusted ring draws after the local pop completes
+      // trusted ring — set empty stroke, draw to full.
+      const trustedR = parseFloat(trustedCircle.getAttribute("r")) || 0;
+      const trustedC = 2 * Math.PI * trustedR;
+      trustedCircle.style.strokeDasharray = String(trustedC);
+      trustedCircle.style.strokeDashoffset = String(trustedC);
       animate(
         trustedCircle,
         { strokeDashoffset: [trustedC, 0] },
         { duration: 0.9, delay: 0.35, ease: EASE },
       );
-      // public ring draws last (and longest — it's biggest)
+      // public ring — same, then restore the dashed pattern.
+      const publicR = parseFloat(publicCircle.getAttribute("r")) || 0;
+      const publicC = 2 * Math.PI * publicR;
+      publicCircle.style.strokeDasharray = String(publicC);
+      publicCircle.style.strokeDashoffset = String(publicC);
       animate(
         publicCircle,
         { strokeDashoffset: [publicC, 0] },
         { duration: 1.1, delay: 0.7, ease: EASE },
       );
-      // restore the dashed look on the public ring once it's drawn
+      // Restore everything to its static state after animations
+      // complete — belt-and-braces. If any animate() promise rejects
+      // silently, this still ensures the diagram ends up in its
+      // intended visible state.
       setTimeout(() => {
+        trustedCircle.style.strokeDasharray = "";
+        trustedCircle.style.strokeDashoffset = "";
         publicCircle.style.strokeDasharray = "3 6";
         publicCircle.style.strokeDashoffset = "0";
-      }, 1850);
+      }, 1900);
       // label fades up after the disc lands
       if (localLabel) {
         animate(
