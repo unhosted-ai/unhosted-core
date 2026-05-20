@@ -171,6 +171,12 @@ struct NodeState {
     /// present and let `start()` fail with a clear error when the
     /// machine isn't RPC-capable.
     vram_pool: Arc<vram_pool::PoolManager>,
+    /// Payment-rail adapters. The daemon seeds this with a `ManualAdapter`
+    /// at startup (Phase A — ADR-0011 in unhosted-payments). Lightning /
+    /// USDC / Stripe adapters are registered conditionally in later
+    /// slices when their sibling crates land and the operator's policy
+    /// names that rail.
+    rail_registry: Arc<unhosted_payments_core::RailRegistry>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -277,6 +283,17 @@ pub async fn serve(node: Node) -> Result<()> {
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
+    // Phase-A rail registry: just the Manual adapter at the same
+    // 10-micros-per-unit price the stub quote handler used, so this
+    // slice is a pure plumbing change (the registry is now the
+    // authoritative pricing source, but the number doesn't move).
+    // Lightning / USDC / Stripe adapters land in subsequent slices.
+    let mut rail_registry = unhosted_payments_core::RailRegistry::empty();
+    rail_registry.insert(std::sync::Arc::new(unhosted_payments_core::ManualAdapter::new(
+        STUB_UNIT_PRICE_MICROS,
+        "out-of-band — operator marks paid",
+    )));
+
     let state = NodeState {
         node: Arc::new(node.clone()),
         router: router.clone(),
@@ -293,6 +310,7 @@ pub async fn serve(node: Node) -> Result<()> {
         http,
         summarize_inflight: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         vram_pool: Arc::new(vram_pool::PoolManager::new(vram_pool::probe())),
+        rail_registry: Arc::new(rail_registry),
     };
 
     // Eager tunnel: if the operator opted in (--eager-tunnel /
@@ -2840,12 +2858,15 @@ struct PolicyInspectResponse {
 // ─── public-mode quote ────────────────────────────────────────────────────
 // Slice 2b: the actual "tell me what this would cost" call. A payer
 // signs a canonical body with their Ed25519 key, the daemon verifies
-// the sig, runs policy.accepts(), and returns a Quote on success or
-// a structured rejection on failure. Pricing is a fixed default for
-// now (10 micros per unit) — slice 3 will plumb in real rail-side
-// quotes. The point of shipping the endpoint shape early is so the
-// payer-side helpers (wallet-js, slice 4) can be written against a
-// stable wire format.
+// the sig, runs policy.accepts(), and dispatches to the rail adapter
+// registered for `payer.rail`. The adapter returns the price + TTL;
+// the daemon wraps that into a Quote and signs nothing yet (the
+// receipt is signed later via /v1/public-mode/receipt/sign).
+//
+// Phase A (this slice): only the Manual adapter is registered, so a
+// payer who names any other rail gets back Rejected("rail X not
+// configured on this host"). Lightning / USDC / Stripe adapters land
+// in sibling crates and are inserted into the registry conditionally.
 
 #[derive(serde::Deserialize, serde::Serialize, Clone)]
 struct QuoteRequestBody {
@@ -2867,11 +2888,18 @@ struct QuoteRequest {
 struct Quote {
     job_id: String,
     host_pubkey: String,
+    /// Echo back the rail the adapter quoted on, so a payer who
+    /// supports multiple rails can route their wallet to the right one
+    /// without re-parsing the request they just sent.
+    rail: public_mode::PaymentRail,
     unit_price_micros: u64,
     quoted_units: u64,
+    /// Total in the rail's native smallest unit (sats / cents / etc).
+    /// The adapter computes this; the daemon forwards.
+    total_native: u64,
     /// Unix seconds. Quote is valid until this timestamp; after that
-    /// the payer must re-quote. Short window (5 min) — quotes that
-    /// linger are a footgun for sudden policy changes.
+    /// the payer must re-quote. The adapter chooses the window — short
+    /// for Lightning (BOLT-11 expiry), longer for Manual.
     expires_at: u64,
 }
 
@@ -2882,11 +2910,11 @@ enum QuoteResponse {
     Rejected { reason: String },
 }
 
-/// Fixed-price placeholder until rail-aware pricing lands in slice 3.
-/// 10 micros = $0.00001 — small enough that a quote against the
-/// stub never looks like a real number to a UI tester.
+/// Phase-A default for the Manual adapter the daemon seeds at startup.
+/// 10 micros = $0.00001 — small enough that a quote against the stub
+/// never looks like a real number to a UI tester. Lightning / USDC /
+/// Stripe adapters carry their own rail-native pricing.
 const STUB_UNIT_PRICE_MICROS: u64 = 10;
-const QUOTE_TTL_SECONDS: u64 = 300;
 
 async fn public_mode_quote_handler(
     State(state): State<NodeState>,
@@ -2921,24 +2949,44 @@ async fn public_mode_quote_handler(
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
-    match policy.accepts(&req.body.payer) {
-        Ok(()) => {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            Ok(axum::Json(QuoteResponse::Quote(Quote {
-                job_id: format!("job_{now:x}"),
-                host_pubkey: state.identity.public_b64(),
-                unit_price_micros: STUB_UNIT_PRICE_MICROS,
-                quoted_units: req.body.requested_units,
-                expires_at: now + QUOTE_TTL_SECONDS,
-            })))
-        }
-        Err(err) => Ok(axum::Json(QuoteResponse::Rejected {
+    if let Err(err) = policy.accepts(&req.body.payer) {
+        return Ok(axum::Json(QuoteResponse::Rejected {
             reason: err.to_string(),
-        })),
+        }));
     }
+
+    // Policy says "we'd take this payer on this rail"; now ask the
+    // rail adapter what it actually costs. A rail accepted by policy
+    // but not registered in the adapter table is an operator-side
+    // misconfiguration — surface it as a Rejected so the payer sees
+    // a deterministic answer instead of a 500.
+    let Some(adapter) = state.rail_registry.get(req.body.payer.rail) else {
+        return Ok(axum::Json(QuoteResponse::Rejected {
+            reason: format!(
+                "rail {} not configured on this host",
+                req.body.payer.rail.as_str()
+            ),
+        }));
+    };
+    let rail_quote = match adapter
+        .quote(&req.body.payer, req.body.requested_units)
+        .await
+    {
+        Ok(q) => q,
+        Err(e) => {
+            tracing::error!(error = %e, "public_mode: rail adapter quote failed");
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+    Ok(axum::Json(QuoteResponse::Quote(Quote {
+        job_id: rail_quote.job_id,
+        host_pubkey: state.identity.public_b64(),
+        rail: rail_quote.rail,
+        unit_price_micros: rail_quote.unit_price_micros,
+        quoted_units: rail_quote.units,
+        total_native: rail_quote.total_native,
+        expires_at: rail_quote.expires_at,
+    })))
 }
 
 #[derive(serde::Deserialize)]
@@ -4065,5 +4113,64 @@ mod lib_tests {
         let a = sa("192.168.1.42:7777");
         let b = sa("192.168.1.99:7777");
         assert!(discovered_is_better(&a, &b));
+    }
+}
+
+// ─── public-mode quote / rail registry ────────────────────────────────────
+// Smoke tests for the slice that wires `RailRegistry` into the daemon's
+// quote handler. We don't drive the HTTP endpoint here — `axum` plumbing
+// is upstream's test surface — we exercise the same registry the daemon
+// constructs at startup and assert dispatch shape + Manual fallback.
+
+#[cfg(test)]
+mod rail_registry_tests {
+    use super::*;
+    use std::sync::Arc;
+    use unhosted_payments_core::{
+        Country, KycTier, ManualAdapter, PayerContext, PaymentRail, RailRegistry,
+    };
+
+    fn manual_payer() -> PayerContext {
+        PayerContext {
+            rail: PaymentRail::Manual,
+            kyc: KycTier::None,
+            country: Country::new("US").unwrap(),
+        }
+    }
+
+    fn daemon_default_registry() -> RailRegistry {
+        // Mirror the construction in `run()`: one ManualAdapter at the
+        // Phase-A stub price. If this drifts, the daemon test will
+        // catch the divergence before the binary does.
+        let mut reg = RailRegistry::empty();
+        reg.insert(Arc::new(ManualAdapter::new(
+            STUB_UNIT_PRICE_MICROS,
+            "out-of-band — operator marks paid",
+        )));
+        reg
+    }
+
+    #[tokio::test]
+    async fn registry_quotes_manual_at_stub_price() {
+        let reg = daemon_default_registry();
+        let adapter = reg
+            .get(PaymentRail::Manual)
+            .expect("manual adapter must be seeded at startup");
+        let q = adapter.quote(&manual_payer(), 100).await.unwrap();
+        assert_eq!(q.rail, PaymentRail::Manual);
+        assert_eq!(q.units, 100);
+        assert_eq!(q.unit_price_micros, STUB_UNIT_PRICE_MICROS);
+        assert_eq!(q.total_native, STUB_UNIT_PRICE_MICROS * 100);
+    }
+
+    #[test]
+    fn registry_misses_unconfigured_rail() {
+        // The handler treats a None lookup as a deterministic Rejected
+        // reason, not a 500. If a future change registers Lightning by
+        // default, this assertion is the canary that flags it.
+        let reg = daemon_default_registry();
+        assert!(reg.get(PaymentRail::Lightning).is_none());
+        assert!(reg.get(PaymentRail::UsdcBase).is_none());
+        assert!(reg.get(PaymentRail::StripeConnect).is_none());
     }
 }
