@@ -1215,11 +1215,27 @@ async fn pair_offer_handler(
     }))
 }
 
-/// Pick the address to put in a pair offer. If the bind address is loopback,
-/// fall back to whatever interface the OS would use to reach an external host
-/// (the standard "open a UDP socket and ask" trick — no packets sent).
+/// Pick the address to put in a pair offer.
+///
+/// Rule: be honest about where the daemon actually listens.
+/// - Unspecified bind (0.0.0.0, ::): the daemon listens on every
+///   interface but the bind addr itself isn't dial-able. Replace
+///   with a LAN IP so the offer is usable from elsewhere on the
+///   network.
+/// - Loopback bind (127.0.0.1, ::1): the daemon listens *only* on
+///   loopback. Advertise loopback. Anyone scanning the offer from
+///   off-machine genuinely can't reach this daemon — telling them
+///   to dial a LAN IP would be a lie.
+/// - Specific IP bind: pass through unchanged.
+///
+/// Earlier versions advertised a LAN IP for loopback binds too,
+/// which made loopback multi-daemon test setups (e.g. v0.0.53's
+/// vrampool-loopback benchmark) require manual URI rewriting from
+/// `addr=10.x.x.x:port` to `addr=127.0.0.1:port`. Surfaced in
+/// runs/2026-05-20-vrampool-loopback/notes.md.
 fn advertised_addr(bind: SocketAddr) -> SocketAddr {
-    if !bind.ip().is_loopback() {
+    if !bind.ip().is_unspecified() {
+        // Loopback or specific IP — pass through.
         return bind;
     }
     if let Some(ip) = local_lan_ip() {
