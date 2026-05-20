@@ -38,6 +38,24 @@
   <script type="module" src="motion.js"></script>
   <script type="module" src="theme.js"></script>
 
+  <!-- page-nav: vertical section TOC on the left of wide viewports.
+       Hidden below 1100px (the page width where a fixed sidebar
+       starts cramping content). Each link points at a section
+       anchor; motion.js wires an IntersectionObserver to mark the
+       in-view section's link active. -->
+  <aside class="page-nav" aria-label="page sections">
+    <span class="page-nav-label">on this page</span>
+    <a href="#top" data-section="top"><span class="dot"></span><span class="lbl">overview</span></a>
+    <a href="#quickstart" data-section="quickstart"><span class="dot"></span><span class="lbl">quickstart</span></a>
+    <a href="#modes" data-section="modes"><span class="dot"></span><span class="lbl">trust radius</span></a>
+    <a href="#how" data-section="how"><span class="dot"></span><span class="lbl">how it works</span></a>
+    <a href="#status" data-section="status"><span class="dot"></span><span class="lbl">status</span></a>
+    <a href="#network" data-section="network"><span class="dot"></span><span class="lbl">network &amp; security</span></a>
+    <a href="#download" data-section="download"><span class="dot"></span><span class="lbl">download</span></a>
+    <a href="#backend" data-section="backend"><span class="dot"></span><span class="lbl">use as backend</span></a>
+    <a href="#faq" data-section="faq"><span class="dot"></span><span class="lbl">faq</span></a>
+  </aside>
+
   <!-- sticky nav: fixed-position, slides down once the wordmark
        scrolls past. Always present in the DOM; visibility is
        toggled by motion.js once the wordmark band leaves view. -->

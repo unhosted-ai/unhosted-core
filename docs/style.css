@@ -2045,6 +2045,107 @@ html.motion-armed [data-qs-fill] { width: 0; }
 }
 
 /* ==========================================================================
+   page-nav — left-side vertical section TOC for the long single-page
+   index. Visible at ≥1100px (the width where there's room for a
+   sidebar without crowding the 1200px content max). Each link sits
+   on a row with a small leading dot; the active section's link is
+   filled-dot + full-opacity label. motion.js wires the active state
+   via IntersectionObserver.
+   ========================================================================== */
+.page-nav {
+  display: none;
+}
+@media (min-width: 1100px) {
+  .page-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    position: fixed;
+    top: 50%;
+    left: 24px;
+    transform: translateY(-50%);
+    z-index: 40;
+    padding: 14px 14px 14px 12px;
+    background: color-mix(in srgb, var(--bg) 70%, transparent);
+    -webkit-backdrop-filter: saturate(140%) blur(10px);
+    backdrop-filter: saturate(140%) blur(10px);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    font-size: 13px;
+    /* Slight fade-in on first render: motion.js doesn't need to
+       touch this element — the page-nav exists independent of the
+       motion-armed gate so it works even when JS fails. */
+    opacity: 0.96;
+    max-height: 80vh;
+    overflow-y: auto;
+    /* Visually quiet at rest; lift on hover so the focus shifts
+       cleanly to the nav when the user reaches for it. */
+    transition: opacity .25s ease, transform .35s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .page-nav:hover {
+    opacity: 1;
+  }
+}
+@media (min-width: 1500px) {
+  .page-nav {
+    left: 32px;
+    padding: 16px 18px 16px 14px;
+    font-size: 13.5px;
+  }
+}
+.page-nav-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--mute);
+  padding: 0 6px 6px 14px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+.page-nav a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--fg);
+  opacity: 0.55;
+  padding: 4px 10px 4px 6px;
+  border-radius: 6px;
+  transition: opacity .2s ease, color .2s ease, background .2s ease;
+}
+.page-nav a:hover {
+  opacity: 1;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+}
+.page-nav a .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: 1.4px solid var(--mute);
+  background: transparent;
+  flex-shrink: 0;
+  transition: background .2s ease, border-color .2s ease, transform .2s ease;
+}
+.page-nav a:hover .dot {
+  border-color: var(--accent);
+}
+.page-nav a.is-active {
+  opacity: 1;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  font-weight: 500;
+}
+.page-nav a.is-active .dot {
+  background: var(--accent);
+  border-color: var(--accent);
+  transform: scale(1.1);
+}
+.page-nav a .lbl {
+  white-space: nowrap;
+}
+
+/* ==========================================================================
    docs page (docs.html) — narrow column, plain language, lots of breath
    ========================================================================== */
 

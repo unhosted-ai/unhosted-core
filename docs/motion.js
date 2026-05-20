@@ -73,6 +73,7 @@ try {
     splitWordmark();           // still split so layout matches, no anim
     revealAll();
     initStickyNav();
+    initPageNav();
   } else {
     splitWordmark();
     runEntrance();
@@ -81,6 +82,7 @@ try {
     runTrustRadius();
     runQuickstartRail();
     initStickyNav();
+    initPageNav();
   }
   clearTimeout(safetyTimer);
 } catch (e) {
@@ -92,6 +94,7 @@ try {
     el.style.visibility = "visible";
   });
   try { initStickyNav(); } catch (_) {}
+  try { initPageNav(); } catch (_) {}
   throw e;
 }
 
@@ -365,6 +368,110 @@ function runTrustRadius() {
     },
     { amount: 0.4 },
   );
+}
+
+// ─── page-nav (left-side section TOC) ────────────────────────────
+// One IntersectionObserver across every section anchored by the
+// nav. Whichever section has the most viewport coverage wins the
+// `.is-active` class on its matching nav link. We don't pick by
+// "first intersecting" because sections of very different heights
+// would let a tiny section near the top steal active from a tall
+// one the user is actually reading.
+function initPageNav() {
+  const nav = document.querySelector(".page-nav");
+  if (!nav) return;
+  const links = Array.from(nav.querySelectorAll("a[data-section]"));
+  if (links.length === 0) return;
+
+  // Map each section id → its link, and collect the sections that
+  // actually exist on this page (the nav lists `#top` which is the
+  // hero element, not a section — handle that as a separate case).
+  const linkByKey = new Map();
+  for (const a of links) linkByKey.set(a.dataset.section, a);
+
+  // Resolve target elements. `top` → the hero header element; the
+  // others → the <section id=…>.
+  const targets = [];
+  for (const a of links) {
+    const key = a.dataset.section;
+    const el =
+      key === "top"
+        ? document.querySelector("header.hero")
+        : document.getElementById(key);
+    if (el) targets.push({ key, el });
+  }
+  if (targets.length === 0) return;
+
+  // Click handler — smooth-scroll the anchor into view. Default
+  // href="#anchor" works without JS too; we just gentler the
+  // animation when JS is on.
+  for (const a of links) {
+    a.addEventListener("click", (e) => {
+      const key = a.dataset.section;
+      const el =
+        key === "top"
+          ? document.querySelector("header.hero")
+          : document.getElementById(key);
+      if (!el) return;
+      e.preventDefault();
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      // Update active state immediately for snappy feedback;
+      // observer will reconfirm shortly.
+      setActive(key);
+      // Update the URL hash without re-triggering a jump.
+      if (history.replaceState) {
+        history.replaceState(null, "", `#${key}`);
+      }
+    });
+  }
+
+  function setActive(key) {
+    for (const a of links) {
+      a.classList.toggle("is-active", a.dataset.section === key);
+    }
+  }
+
+  // Track in-view ratio for each section. Whichever has the highest
+  // ratio wins. We use rootMargin to bias slightly toward "section
+  // whose top is near the top of the viewport" — that matches the
+  // user's intuition of "I'm reading this section now".
+  const ratios = new Map();
+  for (const { key } of targets) ratios.set(key, 0);
+
+  const obs = new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        const key =
+          e.target.id ||
+          (e.target.tagName === "HEADER" ? "top" : null);
+        if (!key) continue;
+        ratios.set(key, e.intersectionRatio);
+      }
+      // Find the section with the highest ratio. Tie-break: the
+      // first one in DOM order (matches reading direction).
+      let best = null;
+      let bestRatio = 0;
+      for (const { key } of targets) {
+        const r = ratios.get(key) || 0;
+        if (r > bestRatio) {
+          best = key;
+          bestRatio = r;
+        }
+      }
+      if (best) setActive(best);
+    },
+    {
+      // Multiple thresholds so the observer fires often enough for
+      // the active state to track scroll smoothly.
+      threshold: [0, 0.1, 0.25, 0.5, 0.75, 1],
+      rootMargin: "-80px 0px -40% 0px",
+    },
+  );
+  for (const { el } of targets) obs.observe(el);
+
+  // Seed initial state — pick whichever target is most visible on
+  // first paint (usually the hero/top).
+  setActive(targets[0].key);
 }
 
 // ─── sticky nav ──────────────────────────────────────────────────
