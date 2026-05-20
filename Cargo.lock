@@ -2171,6 +2171,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "rustls",
+ "rustls-native-certs",
  "tokio",
  "tokio-rustls",
  "tower-service",
@@ -3993,6 +3994,7 @@ dependencies = [
  "pin-project-lite",
  "quinn",
  "rustls",
+ "rustls-native-certs",
  "rustls-pki-types",
  "serde",
  "serde_json",
@@ -5807,7 +5809,7 @@ dependencies = [
 
 [[package]]
 name = "unhosted-cli"
-version = "0.0.60"
+version = "0.0.61"
 dependencies = [
  "anyhow",
  "clap",
@@ -5822,7 +5824,7 @@ dependencies = [
 
 [[package]]
 name = "unhosted-core"
-version = "0.0.60"
+version = "0.0.61"
 dependencies = [
  "anyhow",
  "axum",
@@ -5850,12 +5852,13 @@ dependencies = [
  "tower-http",
  "tracing",
  "unhosted-payments-core",
+ "unhosted-payments-lightning",
  "url",
 ]
 
 [[package]]
 name = "unhosted-desktop"
-version = "0.0.60"
+version = "0.0.61"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -5872,7 +5875,7 @@ dependencies = [
 [[package]]
 name = "unhosted-payments-core"
 version = "0.0.3"
-source = "git+https://github.com/unhosted-ai/unhosted-payments.git?rev=da7a374e029915c317d17ad6299bef32ce4aa85a#da7a374e029915c317d17ad6299bef32ce4aa85a"
+source = "git+https://github.com/unhosted-ai/unhosted-payments.git?rev=33f69eca09119f710e6fa7073412b2dc16df1c98#33f69eca09119f710e6fa7073412b2dc16df1c98"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -5883,8 +5886,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "unhosted-payments-lightning"
+version = "0.0.1"
+source = "git+https://github.com/unhosted-ai/unhosted-payments.git?rev=33f69eca09119f710e6fa7073412b2dc16df1c98#33f69eca09119f710e6fa7073412b2dc16df1c98"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "hex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
+ "unhosted-payments-core",
+]
+
+[[package]]
 name = "unhosted-relay"
-version = "0.0.60"
+version = "0.0.61"
 dependencies = [
  "anyhow",
  "axum",

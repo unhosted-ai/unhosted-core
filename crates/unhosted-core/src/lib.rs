@@ -12,6 +12,8 @@ pub mod auth;
 pub mod chats;
 pub mod discovery;
 pub mod identity;
+#[cfg(feature = "rail-lightning")]
+pub mod lightning_cfg;
 pub mod memory;
 pub mod paths;
 pub mod peer;
@@ -283,16 +285,42 @@ pub async fn serve(node: Node) -> Result<()> {
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
-    // Phase-A rail registry: just the Manual adapter at the same
-    // 10-micros-per-unit price the stub quote handler used, so this
-    // slice is a pure plumbing change (the registry is now the
-    // authoritative pricing source, but the number doesn't move).
-    // Lightning / USDC / Stripe adapters land in subsequent slices.
+    // Rail registry: Manual adapter is always registered. Lightning
+    // / USDC / Stripe are added conditionally per Cargo feature +
+    // operator config presence. The default daemon binary therefore
+    // contains zero rail-specific HTTP / gRPC / RPC code.
     let mut rail_registry = unhosted_payments_core::RailRegistry::empty();
     rail_registry.insert(std::sync::Arc::new(unhosted_payments_core::ManualAdapter::new(
         STUB_UNIT_PRICE_MICROS,
         "out-of-band — operator marks paid",
     )));
+    #[cfg(feature = "rail-lightning")]
+    {
+        // We register Lightning only when the operator has dropped
+        // a config file in place. Absent config = "operator hasn't
+        // opted into Lightning yet" — silent skip, no log spam. A
+        // *parse error* on an existing file is a misconfiguration
+        // the operator should see; we log warn-level and continue
+        // without Lightning rather than refusing to boot, so an
+        // unrelated typo doesn't take the whole daemon down.
+        match lightning_cfg::load() {
+            Ok(Some(cfg)) => match unhosted_payments_lightning::LightningAdapter::new(cfg) {
+                Ok(adapter) => {
+                    tracing::info!(
+                        "lightning: adapter registered (LND REST at operator-configured URL)"
+                    );
+                    rail_registry.insert(std::sync::Arc::new(adapter));
+                }
+                Err(e) => tracing::warn!(error = %e, "lightning: adapter construction failed"),
+            },
+            Ok(None) => {
+                tracing::debug!("lightning: no config file at ~/.config/unhosted/lightning.toml — skipping registration");
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "lightning: config load failed — Lightning quotes will be rejected");
+            }
+        }
+    }
 
     let state = NodeState {
         node: Arc::new(node.clone()),

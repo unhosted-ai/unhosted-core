@@ -44,3 +44,16 @@ rcgen.workspace = true
 # install onnxruntime by hand to use private memory.
 fastembed = { version = "5", default-features = false, features = ["hf-hub-native-tls", "ort-download-binaries-native-tls"] }
 unhosted-payments-core.workspace = true
+# Lightning rail adapter (LND REST). Pulled in only when the daemon is
+# built with `--features rail-lightning` — the default binary still
+# contains zero rail-specific code, per ADR-0011's "no rail in the
+# default build" rule.
+unhosted-payments-lightning = { workspace = true, optional = true }
+
+[features]
+default = []
+# Compile in the LightningAdapter and register it at startup when the
+# operator has a `~/.config/unhosted/lightning.toml` config file. With
+# the feature off, Lightning quotes return Rejected("rail lightning
+# not configured on this host") — same as before this slice.
+rail-lightning = ["dep:unhosted-payments-lightning"]

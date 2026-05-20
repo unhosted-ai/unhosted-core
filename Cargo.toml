@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/unhosted-core", "crates/unhosted-cli", "crates/unhosted-desktop", "crates/unhosted-relay"]
 
 [workspace.package]
-version = "0.0.60"
+version = "0.0.61"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/unhosted-ai/unhosted"
@@ -52,10 +52,12 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 rustls-pki-types = "1"
 rcgen = { version = "0.13", default-features = false, features = ["pem", "ring"] }
 # Settlement primitives for public-mode (PeerPaymentPolicy, signed
-# receipts). Pinned to a commit on `main` so the build is reproducible
-# without crates.io publishing; bump intentionally when a new policy
-# shape lands. See `unhosted-payments` repo for the ADR.
-unhosted-payments-core = { git = "https://github.com/unhosted-ai/unhosted-payments.git", rev = "da7a374e029915c317d17ad6299bef32ce4aa85a" }
+# receipts) + per-rail adapter crates. Pinned to commits on `main` so
+# the build is reproducible without crates.io publishing; bump
+# intentionally when a new policy / rail shape lands. See
+# `unhosted-payments` repo for the ADR.
+unhosted-payments-core = { git = "https://github.com/unhosted-ai/unhosted-payments.git", rev = "33f69eca09119f710e6fa7073412b2dc16df1c98" }
+unhosted-payments-lightning = { git = "https://github.com/unhosted-ai/unhosted-payments.git", rev = "33f69eca09119f710e6fa7073412b2dc16df1c98" }
 
 [profile.release]
 opt-level = 3
