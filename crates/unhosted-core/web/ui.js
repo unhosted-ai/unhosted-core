@@ -2776,3 +2776,110 @@ document.addEventListener("visibilitychange", () => {
   refreshChatsFromServer();
   fetchTunnel().then((s) => { if (s) renderTunnel(s); });
 });
+
+// ---------------------------------------------------------- settings modal
+// Owns every "configuration" panel that used to clutter the sidebar
+// (tunnel, phone, memory, vram-pool, public-mode, benchmark, developer).
+// Opened by the gear icon in the sidebar footer; tabbed into three
+// logical buckets.
+const settingsEls = {
+  modal: $("#settings-modal"),
+  close: $("#settings-modal-close"),
+  openBtn: $("#settings-open"),
+  tunnelChip: $("#conn-tunnel-chip"),
+  tunnelChipLabel: $("#conn-tunnel-chip-label"),
+  tabs: () => Array.from(document.querySelectorAll(".settings-tab")),
+  panels: () => Array.from(document.querySelectorAll(".settings-panel")),
+};
+
+function openSettingsModal(tab) {
+  if (!settingsEls.modal) return;
+  settingsEls.modal.hidden = false;
+  if (tab) switchSettingsTab(tab);
+  // Focus the close button — gives ESC + tab-to-controls instant
+  // affordance without trapping focus inside the modal.
+  if (settingsEls.close) {
+    setTimeout(() => settingsEls.close.focus(), 50);
+  }
+}
+
+function closeSettingsModal() {
+  if (!settingsEls.modal) return;
+  settingsEls.modal.hidden = true;
+}
+
+function switchSettingsTab(name) {
+  for (const t of settingsEls.tabs()) {
+    const active = t.dataset.tab === name;
+    t.classList.toggle("is-active", active);
+    t.setAttribute("aria-selected", active ? "true" : "false");
+  }
+  for (const p of settingsEls.panels()) {
+    p.hidden = p.dataset.panel !== name;
+  }
+}
+
+if (settingsEls.openBtn) {
+  settingsEls.openBtn.addEventListener("click", () => openSettingsModal());
+}
+if (settingsEls.close) {
+  settingsEls.close.addEventListener("click", closeSettingsModal);
+}
+if (settingsEls.modal) {
+  // Click backdrop to close (but not when clicking inside the modal).
+  settingsEls.modal.addEventListener("click", (e) => {
+    if (e.target === settingsEls.modal) closeSettingsModal();
+  });
+}
+for (const t of settingsEls.tabs()) {
+  t.addEventListener("click", () => switchSettingsTab(t.dataset.tab));
+}
+// ESC closes the settings modal (only when it's the topmost — if pair
+// modal is open over it, this shouldn't fire). Listening on the
+// modal itself rather than document so it doesn't fight other ESC
+// handlers.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (settingsEls.modal && !settingsEls.modal.hidden) {
+    closeSettingsModal();
+  }
+});
+
+// The compact tunnel-state chip in the connection row. Click → open
+// settings on the network tab. State labels are kept in sync by
+// `renderTunnel()` in the main flow — we re-read the chip's
+// data-state and update its visible label whenever the tunnel state
+// changes. To avoid touching renderTunnel() directly, watch the
+// existing tunnel-status-line element for mutations: that line is
+// already updated for every state transition.
+if (settingsEls.tunnelChip) {
+  settingsEls.tunnelChip.addEventListener("click", () =>
+    openSettingsModal("network"),
+  );
+  const tunnelStatusLine = document.getElementById("tunnel-status-line");
+  if (tunnelStatusLine) {
+    const syncChip = () => {
+      const text = (tunnelStatusLine.textContent || "").toLowerCase();
+      let state = "off";
+      let label = "local only";
+      if (text.includes("starting") || text.includes("connecting")) {
+        state = "starting";
+        label = "starting…";
+      } else if (
+        text.startsWith("on ") ||
+        text.includes("live") ||
+        text.includes("public")
+      ) {
+        state = "on";
+        label = "public";
+      }
+      settingsEls.tunnelChip.dataset.state = state;
+      if (settingsEls.tunnelChipLabel) {
+        settingsEls.tunnelChipLabel.textContent = label;
+      }
+    };
+    const obs = new MutationObserver(syncChip);
+    obs.observe(tunnelStatusLine, { childList: true, characterData: true, subtree: true });
+    syncChip();
+  }
+}
