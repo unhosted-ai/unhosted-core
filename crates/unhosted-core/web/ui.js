@@ -214,6 +214,12 @@ const els = {
   connModel: $("#conn-model"),
   connUpstream: $("#conn-upstream"),
   connNode: $("#conn-node"),
+  // Duplicated values inside the expandable "show request flow"
+  // pipeline. Filled alongside the compact rows so users who open
+  // the pipeline see the same data.
+  connModelPipe: $("#conn-model-pipe"),
+  connUpstreamPipe: $("#conn-upstream-pipe"),
+  connNodePipe: $("#conn-node-pipe"),
   peersBlock: $("#peers-block"),
   peerList: $("#peer-list"),
   newChat: $("#new-chat"),
@@ -673,7 +679,18 @@ async function refreshStatus() {
     els.connModel.textContent = "—";
     els.connUpstream.textContent = "—";
     els.connNode.textContent = "—";
+    syncPipelineFields();
   }
+}
+
+// Mirror the compact connection-row values into the expandable
+// pipeline siblings. Called at the end of renderStatus so the
+// expandable "show request flow" view stays in sync with the
+// always-visible key-value list.
+function syncPipelineFields() {
+  if (els.connModelPipe) els.connModelPipe.textContent = els.connModel?.textContent || "—";
+  if (els.connUpstreamPipe) els.connUpstreamPipe.textContent = els.connUpstream?.textContent || "—";
+  if (els.connNodePipe) els.connNodePipe.textContent = els.connNode?.textContent || "—";
 }
 
 // Gates the share UI (tunnel toggle, QR panel, developer panel) based on
@@ -739,6 +756,7 @@ function renderStatus(s) {
     }
   }
   els.connNode.textContent = s.node.addr;
+  syncPipelineFields();
 
   if (s.peers && s.peers.length > 0) {
     els.peersBlock.hidden = false;

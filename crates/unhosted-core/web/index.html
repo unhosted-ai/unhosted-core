@@ -417,6 +417,11 @@
         <ul class="discovered-list" id="discovered-list"></ul>
       </div>
 
+      <!-- connection panel — was a tall 4-step vertical pipeline
+           (model ↑ llama-server ↑ unhosted node ↑ you). Compressed
+           to a single status row + key-value list. The full pipeline
+           is preserved behind a <details> for users who want the
+           "where does my request actually flow" visualization. -->
       <div class="sidebar-section connection" id="connection-panel">
         <h4>
           <svg class="h4-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -429,25 +434,18 @@
           <span class="conn-state" id="status-label">checking…</span>
         </div>
 
-        <div class="pipeline" id="pipeline">
-          <div class="pipe-step">
-            <div class="pipe-label">model</div>
-            <div class="pipe-value" id="conn-model">—</div>
+        <div class="conn-kv" id="conn-kv">
+          <div class="conn-kv-row">
+            <span class="conn-kv-label">model</span>
+            <span class="conn-kv-value" id="conn-model">—</span>
           </div>
-          <div class="pipe-arrow" aria-hidden="true">↑</div>
-          <div class="pipe-step">
-            <div class="pipe-label">llama-server</div>
-            <div class="pipe-value" id="conn-upstream">—</div>
+          <div class="conn-kv-row">
+            <span class="conn-kv-label">upstream</span>
+            <span class="conn-kv-value" id="conn-upstream">—</span>
           </div>
-          <div class="pipe-arrow" aria-hidden="true">↑</div>
-          <div class="pipe-step">
-            <div class="pipe-label">unhosted node</div>
-            <div class="pipe-value" id="conn-node">—</div>
-          </div>
-          <div class="pipe-arrow" aria-hidden="true">↑</div>
-          <div class="pipe-step you">
-            <div class="pipe-label">you</div>
-            <div class="pipe-value">this window</div>
+          <div class="conn-kv-row">
+            <span class="conn-kv-label">daemon</span>
+            <span class="conn-kv-value" id="conn-node">—</span>
           </div>
         </div>
 
@@ -455,6 +453,31 @@
           <span class="lock" aria-hidden="true">●</span>
           all local — nothing leaves this machine.
         </div>
+
+        <details class="pipeline-details">
+          <summary class="pipeline-summary">show request flow</summary>
+          <div class="pipeline" id="pipeline">
+            <div class="pipe-step">
+              <div class="pipe-label">model</div>
+              <div class="pipe-value" id="conn-model-pipe">—</div>
+            </div>
+            <div class="pipe-arrow" aria-hidden="true">↑</div>
+            <div class="pipe-step">
+              <div class="pipe-label">llama-server</div>
+              <div class="pipe-value" id="conn-upstream-pipe">—</div>
+            </div>
+            <div class="pipe-arrow" aria-hidden="true">↑</div>
+            <div class="pipe-step">
+              <div class="pipe-label">unhosted node</div>
+              <div class="pipe-value" id="conn-node-pipe">—</div>
+            </div>
+            <div class="pipe-arrow" aria-hidden="true">↑</div>
+            <div class="pipe-step you">
+              <div class="pipe-label">you</div>
+              <div class="pipe-value">this window</div>
+            </div>
+          </div>
+        </details>
 
         <div class="peers-block" id="peers-block" hidden>
           <h5>peers</h5>
