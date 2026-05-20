@@ -1262,6 +1262,16 @@ function renderTunnel(s) {
     els.tunnelWarn.hidden = false;
     if (els.tunnelProgress) els.tunnelProgress.hidden = true;
     renderPhoneQr(linkHref);
+    // Auto-open the phone-section the moment the tunnel is live —
+    // that's the only time the QR is actually useful. Respects the
+    // user's choice afterward (we only force-open once per state
+    // transition into "running", not on every re-render).
+    if (els.phoneSection && !els.phoneSection.dataset.autoOpenedFor || els.phoneSection.dataset.autoOpenedFor !== s.url) {
+      if (els.phoneSection) {
+        els.phoneSection.open = true;
+        els.phoneSection.dataset.autoOpenedFor = s.url;
+      }
+    }
   } else if (state === "starting") {
     const stage = TUNNEL_STAGES[s.stage] || TUNNEL_STAGES.spawning;
     els.tunnelLabel.textContent = "starting…";
@@ -1281,6 +1291,7 @@ function renderTunnel(s) {
     els.tunnelWarn.hidden = true;
     if (els.tunnelProgress) els.tunnelProgress.hidden = true;
     renderPhoneQr(null);
+    if (els.phoneSection) delete els.phoneSection.dataset.autoOpenedFor;
   } else {
     els.tunnelLabel.textContent = "enable";
     els.tunnelStatus.textContent = "off — your daemon is only reachable on this network.";
@@ -1289,6 +1300,7 @@ function renderTunnel(s) {
     els.tunnelWarn.hidden = true;
     if (els.tunnelProgress) els.tunnelProgress.hidden = true;
     renderPhoneQr(null);
+    if (els.phoneSection) delete els.phoneSection.dataset.autoOpenedFor;
   }
 }
 
