@@ -5807,7 +5807,7 @@ dependencies = [
 
 [[package]]
 name = "unhosted-cli"
-version = "0.0.58"
+version = "0.0.59"
 dependencies = [
  "anyhow",
  "clap",
@@ -5822,7 +5822,7 @@ dependencies = [
 
 [[package]]
 name = "unhosted-core"
-version = "0.0.58"
+version = "0.0.59"
 dependencies = [
  "anyhow",
  "axum",
@@ -5855,7 +5855,7 @@ dependencies = [
 
 [[package]]
 name = "unhosted-desktop"
-version = "0.0.58"
+version = "0.0.59"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -5871,9 +5871,10 @@ dependencies = [
 
 [[package]]
 name = "unhosted-payments-core"
-version = "0.0.2"
-source = "git+https://github.com/unhosted-ai/unhosted-payments.git?rev=92213eee91d0c92e9b96594b6796de8169daefc1#92213eee91d0c92e9b96594b6796de8169daefc1"
+version = "0.0.3"
+source = "git+https://github.com/unhosted-ai/unhosted-payments.git?rev=da7a374e029915c317d17ad6299bef32ce4aa85a#da7a374e029915c317d17ad6299bef32ce4aa85a"
 dependencies = [
+ "async-trait",
  "base64 0.22.1",
  "ed25519-dalek",
  "serde",
@@ -5883,7 +5884,7 @@ dependencies = [
 
 [[package]]
 name = "unhosted-relay"
-version = "0.0.58"
+version = "0.0.59"
 dependencies = [
  "anyhow",
  "axum",
