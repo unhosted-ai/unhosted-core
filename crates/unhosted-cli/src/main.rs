@@ -1012,24 +1012,47 @@ async fn handle_pair(action: PairAction) -> Result<()> {
             let parsed =
                 parse_offer(&offer).with_context(|| format!("parsing offer URI: {offer}"))?;
 
-            // Need our own identity + name + addr to send to the offerer.
-            let me = unhosted_core::Identity::load_or_create()?;
-            let my_name = unhosted_core::default_node_name();
+            // Ask the target daemon what its identity is — over HTTP,
+            // not by loading our process's own identity.toml. The CLI's
+            // XDG_CONFIG_HOME may not match the daemon's (loopback
+            // multi-daemon test setups, deployments where the CLI runs
+            // as a different user than the daemon, etc.). The
+            // /v1/identity endpoint is the source of truth.
+            let client = reqwest::Client::new();
+            let identity_url = format!("{}/v1/identity", node.trim_end_matches('/'));
+            let identity: serde_json::Value = client
+                .get(&identity_url)
+                .send()
+                .await
+                .with_context(|| format!("reading local daemon identity at {identity_url}"))?
+                .error_for_status()
+                .with_context(|| format!("daemon at {identity_url} returned an error"))?
+                .json()
+                .await?;
+            let my_pubkey = identity
+                .get("pubkey")
+                .and_then(|v| v.as_str())
+                .context("local daemon /v1/identity missing pubkey")?
+                .to_string();
+            let my_name = identity
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+                .unwrap_or_else(unhosted_core::default_node_name);
             // Parse local node's listen address from --node so we know what
             // address to give the offerer for return-routing.
             let my_addr = derive_listen_addr(&node)?;
 
             // 1. Tell the OFFERER to accept us — they validate the token and
-            //    store us as a trusted peer.
+            //    store us as a trusted peer with our real pubkey.
             let accept_url = format!("http://{}/v1/pair/accept", parsed.addr);
             let body = serde_json::json!({
                 "token": parsed.token,
                 "peer_name": my_name,
-                "peer_pubkey": me.public_b64(),
+                "peer_pubkey": my_pubkey,
                 "peer_addr": my_addr.to_string(),
             });
 
-            let client = reqwest::Client::new();
             let resp = client
                 .post(&accept_url)
                 .json(&body)
@@ -1059,8 +1082,11 @@ async fn handle_pair(action: PairAction) -> Result<()> {
                 .parse::<SocketAddr>()
                 .context("offerer response addr not parseable")?;
 
-            // 2. Now register them as a trusted peer locally too, via our
-            //    own daemon's existing POST /v1/peers endpoint.
+            // 2. Register the offerer as a trusted peer in OUR daemon's
+            //    registry — including their pubkey in the same call, so
+            //    we don't have to patch peers.toml on disk afterwards
+            //    (which broke when the CLI's XDG_CONFIG_HOME differed
+            //    from the daemon's).
             let local_url = format!("{}/v1/peers", node.trim_end_matches('/'));
             let resp = client
                 .post(&local_url)
@@ -1068,6 +1094,7 @@ async fn handle_pair(action: PairAction) -> Result<()> {
                     "name": their_name,
                     "addr": their_addr.to_string(),
                     "priority": 5,
+                    "pubkey": their_pubkey,
                 }))
                 .send()
                 .await
@@ -1076,20 +1103,10 @@ async fn handle_pair(action: PairAction) -> Result<()> {
                 anyhow::bail!("local daemon rejected peer add: HTTP {}", resp.status());
             }
 
-            // 3. Decorate the local registry with the pubkey so requests
-            //    will eventually carry signed-auth headers. (The daemon's
-            //    /v1/peers endpoint doesn't accept pubkey yet, so we patch
-            //    the on-disk file directly.)
-            let mut reg = PeerRegistry::load()?;
-            if let Some(p) = reg.peers.iter_mut().find(|p| p.name == their_name) {
-                p.pubkey = Some(their_pubkey.to_string());
-                reg.save()?;
-            }
-
             println!();
             println!("paired with {their_name} ({their_addr})");
             println!("their pubkey: {their_pubkey}");
-            println!("ours:         {}", me.public_b64());
+            println!("ours:         {my_pubkey}");
             println!();
             println!("both sides now treat each other as trusted peers.");
         }

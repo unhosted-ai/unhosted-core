@@ -53,13 +53,9 @@ The single-Mac baseline against the *same* model on the *same* daemon will alway
 
 ## What broke / surfaced
 
-1. **Pair-flow bug.** `unhosted pair offer` + `unhosted pair accept` completed successfully, but ended up with the wrong pubkeys on disk:
-   - Daemon A's `peers.toml` had B's pubkey set to a value that didn't match B's actual `identity.toml`.
-   - Daemon B's `peers.toml` had no pubkey for A at all.
+1. **Pair-flow bug — FIXED in v0.0.54.** Originally `unhosted pair offer` + `unhosted pair accept` completed successfully but wrote the wrong / missing pubkeys to disk because the CLI loaded `Identity::load_or_create()` from the CLI process's own `XDG_CONFIG_HOME` rather than the target daemon's, and patched the CLI's local `peers.toml` rather than the daemon's. End result: `peers.toml` on both sides had garbage pubkeys, so every signed peer request failed auth, including `/v1/vram-pool/layer-host/start`.
 
-   With wrong/missing pubkeys, every signed peer request fails auth — including `/v1/vram-pool/layer-host/start`, which is exactly the call the orchestrator needs to make to ask a peer to host layers.
-
-   I patched around it by writing both `peers.toml` files manually with the real values from each daemon's `identity.toml`. The pool then came up. **This needs a separate issue + fix.** Pair-flow can't be the way to onboard peers if it produces unverifiable signed requests.
+   During this run I patched around it by writing pubkeys to the daemon `peers.toml` files manually. The next commit fixed it for real: the CLI now reads the daemon's identity via `GET /v1/identity`, and `POST /v1/peers` was extended to accept an optional `pubkey` field so the trusted-pairing flow can persist the peer + its pubkey in a single HTTP call. Verified end-to-end: fresh pair → pool up, no manual patches.
 
 2. **Pair-offer URI's `addr` uses LAN IP, not the addr the daemon is bound to.** I had to manually rewrite `addr=10.88.111.150:7787` to `addr=127.0.0.1:7787` for the loopback test. For a real LAN test this would be fine; for loopback or for daemons bound to specific interfaces, the URI generator should reflect the bind address. Minor follow-up.
 

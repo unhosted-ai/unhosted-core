@@ -1048,6 +1048,16 @@ struct PairRequest {
     addr: SocketAddr,
     #[serde(default = "default_pair_priority")]
     priority: u8,
+    /// Optional Ed25519 public key (base64 no-pad) for the peer being
+    /// added. The /v1/pair/accept handler discovers the pubkey via the
+    /// pairing token exchange; this field exists so the CLI's accept
+    /// flow can pass the pubkey through to the daemon's registry in
+    /// one call instead of patching `peers.toml` on disk (which
+    /// breaks when the CLI's XDG_CONFIG_HOME differs from the
+    /// daemon's). Background: pair-accept bug surfaced by the
+    /// 2026-05-20 vrampool-loopback benchmark.
+    #[serde(default)]
+    pubkey: Option<String>,
 }
 
 fn default_pair_priority() -> u8 {
@@ -1077,7 +1087,10 @@ async fn pair_handler(
         addr: req.addr,
         priority: req.priority,
         models: vec![],
-        pubkey: None, // LAN-discovered; trusted pairing flows through /v1/pair/accept
+        // None for LAN-discovered peers; Some for trusted pairing
+        // where the CLI already learned the peer's pubkey from the
+        // /v1/pair/accept reply and is registering it in one call.
+        pubkey: req.pubkey.clone(),
     };
 
     {
