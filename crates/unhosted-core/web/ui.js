@@ -2560,6 +2560,161 @@ if (publicModeInspectBtn) {
   });
 }
 
+// ------------------------------------------------------------- benchmark
+// Sidebar panel that fires a real chat completion against the local
+// node, measures wall time + token count from the upstream's usage
+// field, and reports tok/sec. History is persisted to localStorage so
+// the panel survives reloads. Same shape as scripts /tmp/bench.py
+// from the 2026-05-20 loopback run — moves "what tok/sec am I doing
+// right now" out of the terminal and into the app.
+
+const BENCH_HISTORY_KEY = "unhosted-bench-history-v1";
+const BENCH_HISTORY_MAX = 25;
+const BENCH_PROMPT = "Explain quantum tunneling in three sentences.";
+const BENCH_MAX_TOKENS = 200;
+
+function loadBenchHistory() {
+  try {
+    const raw = localStorage.getItem(BENCH_HISTORY_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function saveBenchHistory(history) {
+  try {
+    localStorage.setItem(
+      BENCH_HISTORY_KEY,
+      JSON.stringify(history.slice(-BENCH_HISTORY_MAX)),
+    );
+  } catch (_) {
+    /* localStorage full / unavailable / private mode: ignore */
+  }
+}
+
+function median(xs) {
+  if (xs.length === 0) return 0;
+  const sorted = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[mid - 1] + sorted[mid]) / 2
+    : sorted[mid];
+}
+
+async function runBenchmark() {
+  const statusEl = document.getElementById("bench-status");
+  const runBtn = document.getElementById("bench-run");
+  const resultsEl = document.getElementById("bench-results");
+  if (!statusEl || !runBtn || !resultsEl) return;
+
+  runBtn.disabled = true;
+  statusEl.textContent = "running… (≤ 60s)";
+  const t0 = performance.now();
+
+  let body;
+  try {
+    const resp = await fetch("/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "default",
+        messages: [{ role: "user", content: BENCH_PROMPT }],
+        max_tokens: BENCH_MAX_TOKENS,
+        temperature: 0.0,
+        stream: false,
+      }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    body = await resp.json();
+  } catch (e) {
+    statusEl.textContent = `error: ${e.message || e}`;
+    runBtn.disabled = false;
+    return;
+  }
+
+  const elapsedMs = performance.now() - t0;
+  const usage = body.usage || {};
+  const outTokens = usage.completion_tokens || 0;
+  if (!outTokens || elapsedMs <= 0) {
+    statusEl.textContent = "ran but upstream didn't report completion_tokens — can't compute tok/sec";
+    runBtn.disabled = false;
+    return;
+  }
+  const tps = (outTokens * 1000) / elapsedMs;
+  const model = body.model || "(unknown)";
+  // The OpenAI-compat layer doesn't surface "via" reliably; we infer
+  // from the daemon's status endpoint.
+  let via = "local";
+  try {
+    const s = await (await fetch("/v1/status")).json();
+    via = s.upstream?.url || "local";
+  } catch (_) {}
+
+  const entry = {
+    at: Date.now(),
+    tps,
+    elapsedMs,
+    outTokens,
+    model,
+    via,
+  };
+  const history = loadBenchHistory();
+  history.push(entry);
+  saveBenchHistory(history);
+
+  renderBench(entry, history);
+  runBtn.disabled = false;
+  statusEl.textContent = "done.";
+}
+
+function renderBench(entry, history) {
+  const resultsEl = document.getElementById("bench-results");
+  const histWrap = document.getElementById("bench-history-wrap");
+  if (!resultsEl) return;
+
+  if (entry) {
+    document.getElementById("bench-last").textContent = `${entry.tps.toFixed(1)} tok/s  (${entry.outTokens} tok / ${(entry.elapsedMs / 1000).toFixed(2)}s)`;
+    document.getElementById("bench-last").dataset.good = entry.tps >= 10 ? "yes" : "no";
+    document.getElementById("bench-model").textContent = entry.model;
+    document.getElementById("bench-via").textContent = entry.via;
+  }
+
+  const last5 = history.slice(-5).map((e) => e.tps);
+  document.getElementById("bench-median").textContent =
+    last5.length === 0 ? "—" : `${median(last5).toFixed(1)} tok/s  (n=${last5.length})`;
+
+  resultsEl.hidden = history.length === 0;
+  if (histWrap) histWrap.hidden = history.length < 2;
+
+  const histList = document.getElementById("bench-history");
+  if (histList) {
+    histList.innerHTML = "";
+    for (const e of history.slice().reverse()) {
+      const li = document.createElement("li");
+      const when = new Date(e.at);
+      const ts = when.toLocaleTimeString();
+      li.textContent = `${ts}  ${e.tps.toFixed(1)} tok/s  ${e.outTokens}tok/${(e.elapsedMs / 1000).toFixed(1)}s`;
+      histList.appendChild(li);
+    }
+  }
+}
+
+const benchRunBtn = document.getElementById("bench-run");
+if (benchRunBtn) {
+  benchRunBtn.addEventListener("click", runBenchmark);
+  // Render any persisted history on load — so users see the panel
+  // populated immediately, not just after a fresh run.
+  const persisted = loadBenchHistory();
+  if (persisted.length > 0) {
+    renderBench(persisted[persisted.length - 1], persisted);
+    document.getElementById("bench-status").textContent =
+      `last run ${new Date(persisted[persisted.length - 1].at).toLocaleString()}`;
+  }
+}
+
 // ---------------------------------------------------------------- boot
 
 // Render synchronously first (empty list, while the daemon answers)
