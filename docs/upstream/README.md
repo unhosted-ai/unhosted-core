@@ -6,7 +6,7 @@ Why drafted-but-not-filed: filing an issue or PR makes a public claim under your
 
 To submit one, copy the file's body into the target tracker's "new issue" or PR form. The header in each file says where it goes and what title to use.
 
-| File | Target | What it does |
-| --- | --- | --- |
-| [`llama-cpp-rms-norm-blas.md`](llama-cpp-rms-norm-blas.md) | `ggml-org/llama.cpp` issues | Reports the BLAS + RMS_NORM abort in `rpc-server` we hit during VRAM-pool work, with repro + suggested fix. |
-| [`homebrew-core-llama-cpp-rpc.md`](homebrew-core-llama-cpp-rpc.md) | `Homebrew/homebrew-core` PR | Adds `-DGGML_RPC=ON` to the official `llama.cpp` formula so users don't need our custom tap to run VRAM-pool. |
+| File | Status | Target | Summary |
+| --- | --- | --- | --- |
+| [`llama-cpp-rms-norm-blas.md`](llama-cpp-rms-norm-blas.md) | **FILED** as [llama.cpp#23382](https://github.com/ggml-org/llama.cpp/issues/23382) | `ggml-org/llama.cpp` issues | BLAS + RMS_NORM abort in `rpc-server`, with repro + suggested fix. Live and open. |
+| [`homebrew-core-llama-cpp-rpc.md`](homebrew-core-llama-cpp-rpc.md) | **PARKED** — blocked on llama.cpp#23382 | `Homebrew/homebrew-core` PR (against `Formula/g/ggml.rb`) | Will add `-DGGML_RPC=ON` to ggml's formula once the upstream BLAS+RPC bug is resolved. Filing it now would ship a known crash. |

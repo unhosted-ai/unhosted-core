@@ -1,95 +1,107 @@
-# [draft] homebrew-core PR — enable GGML_RPC in llama.cpp formula
+# [parked] homebrew-core PR — enable GGML_RPC in ggml formula
 
-**Target:** https://github.com/Homebrew/homebrew-core — PR against the `llama.cpp` formula at `Formula/l/llama.cpp.rb`.
+**Status: PARKED, blocked on [ggml-org/llama.cpp#23382](https://github.com/ggml-org/llama.cpp/issues/23382) being resolved upstream.** Do not file in current form.
 
-**Suggested PR title:** `llama.cpp: enable GGML_RPC for distributed inference`
+## Why parked
 
----
+When this draft was first written (May 2026), it targeted `Formula/l/llama.cpp.rb` with a `+ -DGGML_RPC=ON + -DGGML_BLAS=OFF` diff. Both assumptions are now wrong:
 
-## How to file
+1. **`ggml` is a separate Homebrew formula now.** The `llama.cpp` formula at `Formula/l/llama.cpp.rb` carries a literal maintainer comment: `# NOTE: reject all PRs that try to bundle ggml`. Build flags like `GGML_RPC` and `GGML_BLAS` belong on `Formula/g/ggml.rb`, not the llama.cpp formula.
+2. **`ggml` already ships with `-DGGML_BLAS=ON`** alongside `-DGGML_BACKEND_DL=ON` (backends are dlopen'd plugins).
+3. **Adding `-DGGML_RPC=ON` to ggml's formula today would ship a known crash** to every `brew install ggml && llama-server --rpc=...` user — they'd load both BLAS and RPC plugins and hit the bug filed at [#23382](https://github.com/ggml-org/llama.cpp/issues/23382).
 
-1. Fork `Homebrew/homebrew-core`.
-2. Create a branch: `git checkout -b llama-cpp-ggml-rpc`.
-3. Apply the diff below to `Formula/l/llama.cpp.rb`.
-4. Test locally:
-   ```bash
-   brew install --build-from-source ./Formula/l/llama.cpp.rb
-   which rpc-server          # should now exist on PATH after install
-   llama-server --help | grep -- --rpc   # should show the flag
-   ```
-5. Push your fork's branch and open the PR. Homebrew has a [contribution guide](https://docs.brew.sh/Adding-Software-to-Homebrew) — the relevant audit step is `brew audit --strict --new llama.cpp`.
+The original draft's "disable BLAS to work around" approach worked for our own tap (`unhosted-ai/homebrew-unhosted`) because we're the sole consumer and our users self-select for the RPC use case. It would NOT work for homebrew-core — disabling BLAS in the official ggml formula would regress CPU performance for every existing user, the vast majority of whom don't use RPC at all.
 
-## PR body (paste below)
+## When to unpark
 
-### What this PR does
+When ggml-org/llama.cpp#23382 is one of:
 
-Enables the `GGML_RPC` build flag so the formula installs both `llama-server` (with `--rpc` support) and the `rpc-server` binary needed for layer-split distributed inference across multiple machines.
+- **Fixed (closed as resolved)** in a tagged llama.cpp release. The fix lives in ggml's graph dispatcher, so the same release of ggml that picks up the upstream tag will carry the fix. After Homebrew's ggml formula bumps to that tag (their version bumper runs ~every 10 llama.cpp tags), file the PR adding `-DGGML_RPC=ON`. With the bug gone, `GGML_BACKEND_DL` keeps everything isolated and there's no regression risk.
 
-Previously, users who wanted to run a model larger than any single machine's VRAM (e.g. Llama 70B split across two consumer GPUs over LAN) had to build llama.cpp from source or use a third-party tap. The capability is mature in upstream; this PR makes it available via the standard formula.
+- **Confirmed-not-a-bug by maintainers** with guidance like "the user must build with one of `GGML_BLAS=OFF` or `GGML_RPC=OFF`." In that case, adding GGML_RPC to homebrew-core is a non-starter and this draft can be deleted.
 
-### Why
+- **Worked around in upstream cmake** (e.g., `GGML_RPC=ON` automatically disables BLAS dispatch for unsupported ops). Same as the "fixed" path.
 
-llama.cpp's RPC mode (`-DGGML_RPC=ON`) ships an `rpc-server` binary that accepts a remote `llama-server --rpc=host:port` connection and serves a subset of the model's layers from the remote machine's GPU. It's the path for users who want to combine multiple consumer GPUs without buying datacenter hardware. The feature is documented upstream at https://github.com/ggml-org/llama.cpp/tree/master/tools/rpc.
+## Live formula state (snapshot, 2026-05-20)
 
-### Caveats / known issues
+For when future-you re-reads this:
 
-`GGML_BLAS=ON` + `GGML_RPC=ON` triggers a GGML_ASSERT in the RMS_NORM op at first inference (see https://github.com/ggml-org/llama.cpp/issues/23382). This PR therefore explicitly disables BLAS when RPC is enabled. The performance impact on systems where BLAS would have been used is minimal — llama.cpp's own kernels handle the same ops on the affected codepaths, and BLAS on the consumer-CPU side is rarely the bottleneck for inference-shaped workloads.
-
-If/when the upstream bug is fixed, the BLAS-off flag should be removed in a follow-up PR.
-
-### Diff
-
-```diff
-diff --git a/Formula/l/llama.cpp.rb b/Formula/l/llama.cpp.rb
---- a/Formula/l/llama.cpp.rb
-+++ b/Formula/l/llama.cpp.rb
-@@ -<line>,<count> +<line>,<count> @@ class LlamaCpp < Formula
-   def install
-     args = std_cmake_args + %W[
--      -DLLAMA_BUILD_TESTS=OFF
--      -DLLAMA_BUILD_EXAMPLES=ON
--      -DLLAMA_BUILD_SERVER=ON
--      -DGGML_NATIVE=OFF
-+      -DLLAMA_BUILD_TESTS=OFF
-+      -DLLAMA_BUILD_EXAMPLES=ON
-+      -DLLAMA_BUILD_SERVER=ON
-+      -DGGML_NATIVE=OFF
-+      -DGGML_RPC=ON
-+      -DGGML_BLAS=OFF
-     ]
-
-     system "cmake", "-S", ".", "-B", "build", *args
-     system "cmake", "--build", "build"
-     system "cmake", "--install", "build"
-   end
-+
-+  test do
-+    # Existing tests preserved; add a smoke for rpc-server's presence.
-+    assert_predicate bin/"rpc-server", :exist?
-+    assert_predicate bin/"rpc-server", :executable?
-+  end
- end
+```ruby
+# Formula/l/llama.cpp.rb (current upstream)
+class LlamaCpp < Formula
+  # ... depends_on "ggml" — NO ggml flags here ...
+  def install
+    args = %W[
+      -DBUILD_SHARED_LIBS=ON
+      -DCMAKE_INSTALL_RPATH=#{rpath}
+      -DLLAMA_ALL_WARNINGS=OFF
+      -DLLAMA_BUILD_TESTS=OFF
+      -DLLAMA_OPENSSL=ON
+      -DLLAMA_USE_SYSTEM_GGML=ON
+    ]
+    # ...
+  end
+end
 ```
 
-(The exact line numbers and surrounding context to fill in by looking at the live formula at `Formula/l/llama.cpp.rb` when the PR is prepared.)
+```ruby
+# Formula/g/ggml.rb (current upstream)
+class Ggml < Formula
+  def install
+    args = %W[
+      -DBUILD_SHARED_LIBS=ON
+      -DCMAKE_INSTALL_RPATH=#{rpath}
+      -DGGML_ALL_WARNINGS=OFF
+      -DGGML_BACKEND_DIR=#{libexec}
+      -DGGML_BACKEND_DL=ON      # ← backends are dlopen'd plugins
+      -DGGML_BLAS=ON            # ← already on
+      -DGGML_BUILD_EXAMPLES=OFF
+      -DGGML_BUILD_TESTS=OFF
+      -DGGML_CCACHE=OFF
+      -DGGML_LTO=ON
+      -DGGML_NATIVE=OFF
+    ]
+    args += %w[-DGGML_BLAS_VENDOR=OpenBLAS -DGGML_VULKAN=ON] if OS.linux?
+    # ... no GGML_RPC ← this is what the eventual PR adds ...
+  end
+end
+```
 
-### Resource impact
+## Open secondary question
 
-- Binary size: `rpc-server` is ~5 MB. Negligible.
-- Build time: adds maybe 30 seconds to a cold build.
-- No new dependencies on the host system.
+Whether `rpc-server` (the binary in `tools/rpc/` of the llama.cpp source) is actually built by the current Homebrew install of llama.cpp. The current install line is just `cmake --install build` with no `LLAMA_BUILD_*` flags, so it ships whatever the upstream CMakeLists builds by default. If `rpc-server` isn't in the bottled binary set, a second PR (against `Formula/l/llama.cpp.rb`) may be needed to enable it. Worth verifying before filing the ggml PR.
 
-### Backporting
+## What the eventual PR will look like
 
-Not applicable — this is an additive build-flag change. Existing users of `llama-server` see no behavior change.
+When unblocked, the homebrew-core PR is small:
 
-### Testing
+```diff
+--- a/Formula/g/ggml.rb
++++ b/Formula/g/ggml.rb
+@@ -<line>,<count> +<line>,<count> @@ class Ggml < Formula
+       -DGGML_LTO=ON
+       -DGGML_NATIVE=OFF
++      -DGGML_RPC=ON
+     ]
+```
 
-- macOS 14 (Apple Silicon): builds, `llama-server --rpc 127.0.0.1:50052 -m model.gguf` proxies to a `rpc-server` listening on that port and serves tokens. Verified end-to-end with TinyLlama-1.1B-Chat against itself (loopback two-process simulation) and intentionally also with a second Mac on the LAN.
-- Linux: not yet locally verified by the PR author. Would appreciate a co-tester running the same `brew install --build-from-source` flow on Linuxbrew.
+PR body — short and factual, no LLM polish needed:
 
-### Related context
+```
+Enables the RPC backend in ggml so that downstream consumers (llama.cpp's
+--rpc flag, etc.) can use distributed-inference setups via `brew install`
+instead of building from source.
 
-- llama.cpp upstream RPC docs: https://github.com/ggml-org/llama.cpp/tree/master/tools/rpc
-- Known upstream bug (BLAS + RPC): https://github.com/ggml-org/llama.cpp/issues/23382
-- VRAM-pooling ADR using this flow: https://github.com/unhosted-ai/unhosted-core/blob/main/design/0009-vram-pooling.md
+Per GGML_BACKEND_DL=ON (already enabled), the RPC backend lands as a
+separately-loadable plugin (libggml-rpc.<dylib|so>). Users who don't
+use RPC see no behavior change.
+
+Upstream bug ggml-org/llama.cpp#23382 (RPC + BLAS abort in RMS_NORM)
+was resolved in <commit>, included in the current bottled ggml release.
+```
+
+That's the whole thing. The current ~1500 word draft was overdoing it.
+
+## What we ship in the meantime
+
+Our own tap (`unhosted-ai/homebrew-unhosted`) ships `llama-cpp-rpc` with `-DGGML_RPC=ON -DGGML_BLAS=OFF`. That formula stays for as long as the upstream bug isn't fixed; it's the only known way to get a working RPC build on macOS via Homebrew today. Users following our docs install both `brew install llama.cpp` (for normal use) and `brew install unhosted-ai/unhosted/llama-cpp-rpc` (for VRAM-pooling).
