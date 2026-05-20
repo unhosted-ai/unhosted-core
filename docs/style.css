@@ -2939,6 +2939,30 @@ hr.divider {
 .radius-diagram .ring-local circle { transition: fill .2s ease; }
 .radius-diagram .ring-local:hover circle { fill: var(--accent); }
 
+/* Hover-focus sync between the diagram + legend. When .radius-diagram
+   has `is-focused-X` set by motion.js, the matching ring un-mutes and
+   the other two rings + legend rows dim. Reverse: hovering a legend
+   row sets the same class so the matching ring lights up. The
+   transitions are short — 200ms — so the sync feels instant. */
+.radius-diagram[class*="is-focused-"] .ring circle,
+.radius-diagram[class*="is-focused-"] .radius-legend li {
+  transition: opacity .2s ease, stroke-width .2s ease, fill .2s ease;
+}
+.radius-diagram.is-focused-local .ring-trusted circle,
+.radius-diagram.is-focused-local .ring-public circle { opacity: 0.25; }
+.radius-diagram.is-focused-trusted .ring-local circle,
+.radius-diagram.is-focused-trusted .ring-public circle { opacity: 0.25; }
+.radius-diagram.is-focused-public .ring-local circle,
+.radius-diagram.is-focused-public .ring-trusted circle { opacity: 0.25; }
+.radius-diagram.is-focused-trusted .ring-trusted circle,
+.radius-diagram.is-focused-public .ring-public circle { stroke: var(--accent); stroke-width: 2.2; }
+.radius-diagram.is-focused-local .ring-local circle { fill: var(--accent); }
+
+/* Legend side: dim the rows that aren't currently focused. */
+.radius-diagram.is-focused-local .radius-legend li:not(:nth-child(1)),
+.radius-diagram.is-focused-trusted .radius-legend li:not(:nth-child(2)),
+.radius-diagram.is-focused-public .radius-legend li:not(:nth-child(3)) { opacity: 0.4; }
+
 /* only one text element lives inside the svg: "local", centered on
    the filled disc. White on near-black: high contrast at every size. */
 .radius-diagram .ring-label.inside {

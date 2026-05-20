@@ -136,19 +136,46 @@ function revealAll() {
 
 // ─── entrance (top-of-page, load-time) ───────────────────────────
 function runEntrance() {
-  // Per-character wordmark reveal. Each letter starts shifted down
-  // 14px with a slight blur and rises into place. The stagger is
-  // tight (40 ms) — letters land fast enough that the eye reads
-  // "unhosted" as a unit, not as a typed-out sequence.
+  // Per-character wordmark reveal. Each letter starts compressed
+  // toward the center with a slight blur + extra vertical drop,
+  // then expands to its natural letter-spacing as it settles.
+  // The compound effect: the wordmark looks like it "unfolds"
+  // outward from the center while each glyph rises into place.
+  //
+  // Why this is more theatrical than a plain fade:
+  //   - letter-spacing animates from -0.18em (cramped) to the
+  //     natural -0.05em, giving the wordmark a kinetic feeling
+  //     of *opening* as it lands.
+  //   - per-character y-offset is now 28px (was 14) for more
+  //     drama on the brand moment.
+  //   - blur is 10px (was 8), so each char emerges from softness.
+  //   - stagger is 55ms (was 40) — letters land slow enough to
+  //     read as choreographed, not flicker.
+  //   - duration is 0.85s (was 0.6) — gives the eye time to
+  //     register the unfold.
+  //
+  // After entrance, kickWordmarkLife() takes over with subtle
+  // forever-loops (breathing, hover lift) so the wordmark isn't
+  // static dead pixels on a scrolled page.
+  animate(
+    ".wordmark",
+    { letterSpacing: ["-0.18em", "-0.05em"] },
+    { duration: 0.95, delay: 0.05, ease: EASE },
+  );
   safeAnimate(
     ".wm-char",
     {
       opacity: [0, 1],
-      transform: ["translateY(14px)", "translateY(0)"],
-      filter: ["blur(8px)", "blur(0)"],
+      transform: [
+        "translateY(28px) scale(0.92)",
+        "translateY(0) scale(1)",
+      ],
+      filter: ["blur(10px)", "blur(0)"],
     },
-    { duration: 0.6, delay: stagger(0.04, { start: 0.05 }), ease: EASE },
+    { duration: 0.85, delay: stagger(0.055, { start: 0.08 }), ease: EASE },
   );
+  // Schedule the "alive" loops to start once the entrance settles.
+  setTimeout(kickWordmarkLife, 1100);
 
   safeAnimate(
     ".lede h2",
@@ -285,15 +312,93 @@ function runScrollIn() {
   });
 }
 
+// ─── wordmark "alive" loops ──────────────────────────────────────
+// After the entrance lands, the wordmark would otherwise sit as
+// static black pixels at the top of the page — visually dead. Two
+// ambient effects keep it feeling alive without being distracting:
+//
+//   1. Breathing scale loop. 1.0 → 1.012 → 1.0 over 5.4 s,
+//      `repeat: Infinity`, `repeatType: "mirror"`. The amplitude
+//      is small enough that it reads as "this is a live brand"
+//      rather than "this is animated". Pauses on hover so a per-
+//      character lift can take over.
+//
+//   2. Per-character hover lift. Mousing over a single glyph
+//      raises it 6px and scales it slightly. Mousing off restores.
+//      Works even after the entrance is done because the spans
+//      stay in the DOM (split is synchronous in splitWordmark).
+//
+// Both loops respect prefers-reduced-motion via the early bail in
+// the main entrypoint — if the user has reduced motion on, we
+// call revealAll() and never invoke this function.
+function kickWordmarkLife() {
+  const h1 = document.querySelector(".wordmark");
+  if (!h1) return;
+  // The constant breathing loop. Stored on the element so a hover
+  // can pause/resume it cleanly.
+  let breathing;
+  const startBreathing = () => {
+    if (breathing) return;
+    breathing = animate(
+      h1,
+      { transform: ["scale(1)", "scale(1.012)", "scale(1)"] },
+      {
+        duration: 5.4,
+        ease: [0.45, 0, 0.55, 1],
+        repeat: Infinity,
+      },
+    );
+  };
+  const stopBreathing = () => {
+    if (breathing && typeof breathing.stop === "function") {
+      breathing.stop();
+    }
+    breathing = null;
+  };
+  startBreathing();
+
+  // Per-character hover lift. We use mouseenter/mouseleave on the
+  // H1 with event-target inspection rather than per-char listeners
+  // — fewer handlers, same UX.
+  const chars = Array.from(h1.querySelectorAll(".wm-char"));
+  for (const ch of chars) {
+    ch.addEventListener("mouseenter", () => {
+      stopBreathing();
+      animate(
+        ch,
+        { transform: ["translateY(0) scale(1)", "translateY(-8px) scale(1.05)"] },
+        { duration: 0.25, ease: [0.34, 1.56, 0.64, 1] },
+      );
+    });
+    ch.addEventListener("mouseleave", () => {
+      animate(
+        ch,
+        { transform: ["translateY(-8px) scale(1.05)", "translateY(0) scale(1)"] },
+        { duration: 0.35, ease: EASE },
+      );
+    });
+  }
+  // When the whole wordmark loses pointer focus (cursor leaves the
+  // H1), resume breathing.
+  h1.addEventListener("mouseleave", () => {
+    setTimeout(startBreathing, 400);
+  });
+}
+
 // ─── trust-radius rings ──────────────────────────────────────────
 // Three concentric rings centered on (100, 100):
 //   • outer "public":  r = 92, dashed stroke
 //   • middle "trusted": r = 62, solid stroke
 //   • inner "local":   r = 34, filled disc
 // Drawn inside → out so the user reads "this is what you start with,
-// this is what you extend into, this is what's outside". The outer
-// two animate via stroke-dashoffset; the filled center scales in
-// last with its label.
+// this is what you extend into, this is what's outside". After the
+// draw-in entrance, the diagram stays "alive" with:
+//   - a slow infinite rotation on the dashed public ring (60s/rev),
+//     signalling that "public" is the outermost orbit
+//   - a gentle breathing pulse on the local disc (3.5s mirror loop)
+//   - legend-row hover sync: hover a legend item, the matching ring
+//     thickens + un-mutes; the others dim. Same in reverse — hover
+//     a ring, the legend row highlights.
 function runTrustRadius() {
   const svg = document.querySelector(".radius-diagram svg");
   if (!svg) return;
@@ -350,12 +455,44 @@ function runTrustRadius() {
       // Restore everything to its static state after animations
       // complete — belt-and-braces. If any animate() promise rejects
       // silently, this still ensures the diagram ends up in its
-      // intended visible state.
+      // intended visible state. Then start the "alive" ambient loops.
       setTimeout(() => {
         trustedCircle.style.strokeDasharray = "";
         trustedCircle.style.strokeDashoffset = "";
         publicCircle.style.strokeDasharray = "3 6";
         publicCircle.style.strokeDashoffset = "0";
+
+        // Slow orbital rotation of the public (outer dashed) ring.
+        // 60s/revolution — slow enough to be unconscious, fast
+        // enough to be perceptible if you look. The transform-
+        // origin is the SVG center (100, 100).
+        publicCircle.style.transformBox = "fill-box";
+        publicCircle.style.transformOrigin = "center";
+        animate(
+          publicCircle,
+          { transform: ["rotate(0deg)", "rotate(360deg)"] },
+          { duration: 60, ease: "linear", repeat: Infinity },
+        );
+
+        // Gentle breathing on the local (inner filled) disc. Scale
+        // 1.0 → 1.05 → 1.0 over 3.5 s. Mirror loop so the eye
+        // catches both directions; signals "this is your home".
+        animate(
+          localCircle,
+          { transform: ["scale(1)", "scale(1.05)", "scale(1)"] },
+          {
+            duration: 3.5,
+            ease: [0.45, 0, 0.55, 1],
+            repeat: Infinity,
+          },
+        );
+
+        // Legend ↔ ring hover sync. Hover a legend item, the
+        // matching ring un-mutes (full opacity + stronger stroke);
+        // the others dim. Same in reverse — hover a ring, the
+        // legend row highlights. Implemented via CSS classes so
+        // the styling lives in style.css.
+        wireRadiusHoverSync(svg);
       }, 1900);
       // label fades up after the disc lands
       if (localLabel) {
@@ -368,6 +505,52 @@ function runTrustRadius() {
     },
     { amount: 0.4 },
   );
+}
+
+/// Bidirectional hover sync between the radius diagram rings and the
+/// legend rows. Hovering either highlights the same trust layer,
+/// dims the other two, so the user can map symbol → meaning at a
+/// glance. The actual styling is in style.css under
+/// `.radius-diagram.is-focused-*` and `.radius-legend.is-focused-*`.
+function wireRadiusHoverSync(svg) {
+  const wrap = svg.closest(".radius-diagram");
+  if (!wrap) return;
+  const legend = wrap.querySelector(".radius-legend");
+  if (!legend) return;
+
+  const layers = ["local", "trusted", "public"];
+
+  function focus(layer) {
+    for (const l of layers) {
+      wrap.classList.toggle(`is-focused-${l}`, l === layer);
+    }
+  }
+  function clearFocus() {
+    for (const l of layers) {
+      wrap.classList.remove(`is-focused-${l}`);
+    }
+  }
+
+  // Diagram side — each <a class="ring ring-X"> wraps its circle.
+  for (const layer of layers) {
+    const ring = svg.querySelector(`.ring-${layer}`);
+    if (ring) {
+      ring.addEventListener("mouseenter", () => focus(layer));
+      ring.addEventListener("mouseleave", clearFocus);
+      ring.addEventListener("focusin", () => focus(layer));
+      ring.addEventListener("focusout", clearFocus);
+    }
+  }
+  // Legend side — match by the legend-key class.
+  const legendItems = legend.querySelectorAll("li");
+  legendItems.forEach((li) => {
+    const key = li.querySelector(".legend-key");
+    if (!key) return;
+    const layer = layers.find((l) => key.classList.contains(`key-${l}`));
+    if (!layer) return;
+    li.addEventListener("mouseenter", () => focus(layer));
+    li.addEventListener("mouseleave", clearFocus);
+  });
 }
 
 // ─── page-nav (left-side section TOC) ────────────────────────────
