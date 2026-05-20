@@ -1,18 +1,61 @@
 // unhosted — motion script
-// Uses Motion (https://motion.dev), the vanilla-JS library by the same author
-// as Framer Motion. Same API mental model; no React/build step required.
 //
-// Progressive enhancement: if this script fails to load or JS is disabled,
-// every element stays visible — we never hide content via CSS that depends
-// on JS to reveal it. See style.css `.motion-armed` rules.
+// Uses Motion (https://motion.dev), the vanilla-JS library by the
+// same author as Framer Motion. Same API mental model; no React /
+// build step required.
 //
-// Respects prefers-reduced-motion: we skip all motion and just reveal.
+// Progressive enhancement: if this script fails to load or JS is
+// disabled, every element stays visible — we never hide content via
+// CSS that depends on JS to reveal it. See style.css `.motion-armed`
+// rules. `prefers-reduced-motion: reduce` short-circuits to a single
+// reveal pass with no animation.
+//
+// What's animated and why (top-of-file index so a reader can find
+// the bit they care about without scrolling):
+//
+//   1. Wordmark         — per-character entrance: blur + Y-offset
+//                         with a tight stagger. The wordmark is the
+//                         brand; the page-load moment should carry
+//                         that weight.
+//   2. Hero lede        — title, badges, sub fade up in sequence.
+//   3. Hero install     — the curl one-liner gets a brief blinking
+//                         caret on first reveal. Visually signals
+//                         "this is a CLI tool" before you read it.
+//   4. Trust-radius     — three concentric rings draw themselves
+//                         from the center outward via
+//                         stroke-dashoffset; the filled center disc
+//                         scales in last with its label.
+//   5. Sticky nav       — once you scroll past the wordmark, a thin
+//                         fixed nav slides down with the brand mark
+//                         + same links + same CTA. Backdrop-blurred.
+//   6. Scroll reveals   — cards / stories / sections rise into view
+//                         on `inView`. Distance and direction vary
+//                         per element type so the whole page doesn't
+//                         move identically — bento cards rise from
+//                         alternating sides; storylines slide in
+//                         from the left; section h2s fade with no
+//                         translate at all (anchor for the eye).
+//   7. Quickstart rail  — fill bar sweeps 0 → 100%, dots light in
+//                         sequence, step cards stagger up.
 
 import {
   animate,
   inView,
   stagger,
 } from "https://cdn.jsdelivr.net/npm/motion@12/+esm";
+
+// Safety net: if the entrance throws or stalls for any reason
+// (Motion CDN unreachable, parse error inside this module, a
+// missing selector), the motion-armed CSS would leave the wordmark
+// + lede invisible. Arm a deadline; if the entrance hasn't disarmed
+// it by then, force-reveal everything.
+const REVEAL_DEADLINE_MS = 1600;
+const safetyTimer = setTimeout(() => {
+  document.documentElement.classList.remove("motion-armed");
+  document.querySelectorAll(".wordmark").forEach((el) => {
+    el.style.visibility = "visible";
+  });
+}, REVEAL_DEADLINE_MS);
 
 const prefersReduced = window.matchMedia(
   "(prefers-reduced-motion: reduce)",
@@ -21,20 +64,61 @@ const prefersReduced = window.matchMedia(
 const root = document.documentElement;
 root.classList.add("motion-armed");
 
-const EASE = [0.22, 1, 0.36, 1]; // a soft "ease-out" curve
+// Soft ease-out used everywhere. Single constant so a tweak in one
+// place re-paces the whole site at once.
+const EASE = [0.22, 1, 0.36, 1];
 
-if (prefersReduced) {
-  // Just reveal everything immediately, no animation.
-  revealAll();
-} else {
-  runEntrance();
-  runScrollIn();
-  runQuickstartRail();
+try {
+  if (prefersReduced) {
+    splitWordmark();           // still split so layout matches, no anim
+    revealAll();
+    initStickyNav();
+  } else {
+    splitWordmark();
+    runEntrance();
+    runHeroInstallCaret();
+    runScrollIn();
+    runTrustRadius();
+    runQuickstartRail();
+    initStickyNav();
+  }
+  clearTimeout(safetyTimer);
+} catch (e) {
+  // Any throw in entrance/setup → fall back to "show everything".
+  // The safety timer will fire shortly anyway; we just speed it up.
+  clearTimeout(safetyTimer);
+  root.classList.remove("motion-armed");
+  document.querySelectorAll(".wordmark").forEach((el) => {
+    el.style.visibility = "visible";
+  });
+  try { initStickyNav(); } catch (_) {}
+  throw e;
+}
+
+// ─── wordmark split ──────────────────────────────────────────────
+// Replace the H1's plain text with one <span> per character so each
+// can animate independently. The H1 keeps its aria-label for screen
+// readers, so we mark the per-char spans aria-hidden and the visual
+// effect is purely cosmetic.
+function splitWordmark() {
+  const h1 = document.querySelector(".wordmark");
+  if (!h1 || h1.dataset.split === "1") return;
+  const text = h1.textContent || "";
+  h1.textContent = "";
+  for (const ch of text) {
+    const span = document.createElement("span");
+    span.className = "wm-char";
+    span.textContent = ch;
+    span.setAttribute("aria-hidden", "true");
+    h1.appendChild(span);
+  }
+  h1.dataset.split = "1";
 }
 
 function revealAll() {
   const all = document.querySelectorAll(
-    ".motion-armed .wordmark, .motion-armed .lede h2, .motion-armed .lede .sub, " +
+    ".motion-armed .wordmark, .motion-armed .wm-char, " +
+      ".motion-armed .lede h2, .motion-armed .lede .sub, " +
       ".motion-armed .lede .badges, .motion-armed .hardware-list li, " +
       ".motion-armed .nav a, .motion-armed .bento .card, .motion-armed .story, " +
       ".motion-armed .next-list li, .motion-armed .steps > li, .motion-armed .mode, " +
@@ -43,49 +127,58 @@ function revealAll() {
   all.forEach((el) => {
     el.style.opacity = "1";
     el.style.transform = "none";
+    el.style.filter = "none";
   });
 }
 
+// ─── entrance (top-of-page, load-time) ───────────────────────────
 function runEntrance() {
-  // Top-of-page elements that animate immediately on load.
-  // Each call is guarded so missing selectors on /docs.html don't error.
+  // Per-character wordmark reveal. Each letter starts shifted down
+  // 14px with a slight blur and rises into place. The stagger is
+  // tight (40 ms) — letters land fast enough that the eye reads
+  // "unhosted" as a unit, not as a typed-out sequence.
   safeAnimate(
-    ".wordmark",
-    { opacity: [0, 1], transform: ["translateY(-12px)", "translateY(0)"] },
-    { duration: 0.7, ease: EASE },
+    ".wm-char",
+    {
+      opacity: [0, 1],
+      transform: ["translateY(14px)", "translateY(0)"],
+      filter: ["blur(8px)", "blur(0)"],
+    },
+    { duration: 0.6, delay: stagger(0.04, { start: 0.05 }), ease: EASE },
   );
 
   safeAnimate(
     ".lede h2",
     { opacity: [0, 1], transform: ["translateY(16px)", "translateY(0)"] },
-    { duration: 0.55, delay: 0.12, ease: EASE },
+    { duration: 0.55, delay: 0.32, ease: EASE },
   );
 
   safeAnimate(
     ".lede .badges",
     { opacity: [0, 1], transform: ["translateY(16px)", "translateY(0)"] },
-    { duration: 0.55, delay: 0.28, ease: EASE },
+    { duration: 0.55, delay: 0.48, ease: EASE },
   );
 
   safeAnimate(
     ".lede .sub",
     { opacity: [0, 1], transform: ["translateY(16px)", "translateY(0)"] },
-    { duration: 0.55, delay: 0.34, ease: EASE },
+    { duration: 0.55, delay: 0.56, ease: EASE },
   );
 
   safeAnimate(
     ".hardware-list li",
     { opacity: [0, 1], transform: ["translateX(8px)", "translateX(0)"] },
-    { duration: 0.45, delay: stagger(0.05, { start: 0.45 }), ease: EASE },
+    { duration: 0.45, delay: stagger(0.05, { start: 0.7 }), ease: EASE },
   );
 
   safeAnimate(
     ".nav a",
     { opacity: [0, 1] },
-    { duration: 0.4, delay: stagger(0.05, { start: 0.55 }), ease: EASE },
+    { duration: 0.4, delay: stagger(0.05, { start: 0.7 }), ease: EASE },
   );
 
-  // /docs.html head
+  // /docs.html head (selector is conditional; safeAnimate no-ops if
+  // the element doesn't exist on the current page).
   safeAnimate(
     ".doc-head .kicker, .doc-head h1, .doc-head .lede",
     { opacity: [0, 1], transform: ["translateY(10px)", "translateY(0)"] },
@@ -93,66 +186,257 @@ function runEntrance() {
   );
 }
 
-function runScrollIn() {
-  // Elements that animate as they enter the viewport.
-  const selectors = [
-    ".bento .card",
-    ".story",
-    ".next-list li",
-    ".steps > li",
-    ".mode",
-    ".doc section h2",
-  ];
+// ─── hero install caret ──────────────────────────────────────────
+// A brief blinking caret next to the curl command on first reveal —
+// just enough to signal "this is a terminal prompt" before you read
+// the URL. The caret element is appended dynamically (not in HTML)
+// because it's purely decorative and we don't want it in the
+// no-JS fallback.
+function runHeroInstallCaret() {
+  const codeEl = document.querySelector(".hero-install-cmd code");
+  if (!codeEl) return;
+  const caret = document.createElement("span");
+  caret.className = "hero-install-caret";
+  caret.setAttribute("aria-hidden", "true");
+  codeEl.appendChild(caret);
+  // Animate it in, blink for ~3 s, then leave it static (avoid the
+  // "this page never stops blinking at me" trap).
+  animate(
+    caret,
+    { opacity: [0, 1, 1, 0, 1, 0, 1] },
+    { duration: 2.8, delay: 1.0, times: [0, 0.1, 0.3, 0.45, 0.6, 0.75, 1] },
+  );
+}
 
-  selectors.forEach((sel) => {
-    document.querySelectorAll(sel).forEach((el) => {
-      inView(
-        el,
-        () => {
-          animate(
-            el,
-            {
-              opacity: [0, 1],
-              transform: ["translateY(14px)", "translateY(0)"],
-            },
-            { duration: 0.5, ease: EASE },
-          );
-        },
-        { amount: 0.15 },
-      );
-    });
+// ─── scroll-in reveals ───────────────────────────────────────────
+// Distinct motion profiles per element type. The point is that
+// scrolling down feels textured, not like one global fade-up. We
+// keep amplitudes small (≤ 24 px) — a tasteful scroll, not a
+// parallax demo.
+function runScrollIn() {
+  // Bento cards alternate which side they enter from — odd cards
+  // slide from the left, even from the right. Cheap to do, very
+  // visible.
+  document.querySelectorAll(".bento .card").forEach((el, i) => {
+    const dx = i % 2 === 0 ? -10 : 10;
+    inView(
+      el,
+      () => {
+        animate(
+          el,
+          {
+            opacity: [0, 1],
+            transform: [
+              `translate(${dx}px, 12px)`,
+              "translate(0, 0)",
+            ],
+          },
+          { duration: 0.55, ease: EASE },
+        );
+      },
+      { amount: 0.15 },
+    );
+  });
+
+  // Story cards (milestones) slide in from the left — they're a
+  // timeline; the motion should read as "moving along".
+  document.querySelectorAll(".story").forEach((el) => {
+    inView(
+      el,
+      () => {
+        animate(
+          el,
+          { opacity: [0, 1], transform: ["translateX(-16px)", "translateX(0)"] },
+          { duration: 0.6, ease: EASE },
+        );
+      },
+      { amount: 0.2 },
+    );
+  });
+
+  // Step cards (.steps > li, .next-list li) — simple rise.
+  document.querySelectorAll(".next-list li, .steps > li, .mode").forEach((el) => {
+    inView(
+      el,
+      () => {
+        animate(
+          el,
+          { opacity: [0, 1], transform: ["translateY(14px)", "translateY(0)"] },
+          { duration: 0.5, ease: EASE },
+        );
+      },
+      { amount: 0.15 },
+    );
+  });
+
+  // Section h2s: pure fade, no translate. The h2 is the anchor for
+  // the eye when you scroll into a new section, so we don't move it.
+  document.querySelectorAll(".doc section h2").forEach((el) => {
+    inView(
+      el,
+      () => {
+        animate(el, { opacity: [0, 1] }, { duration: 0.6, ease: EASE });
+      },
+      { amount: 0.3 },
+    );
   });
 }
 
-function safeAnimate(selector, keyframes, options) {
-  const els = document.querySelectorAll(selector);
-  if (els.length === 0) return;
-  animate(els, keyframes, options);
+// ─── trust-radius rings ──────────────────────────────────────────
+// Three concentric rings centered on (100, 100):
+//   • outer "public":  r = 92, dashed stroke
+//   • middle "trusted": r = 62, solid stroke
+//   • inner "local":   r = 34, filled disc
+// Drawn inside → out so the user reads "this is what you start with,
+// this is what you extend into, this is what's outside". The outer
+// two animate via stroke-dashoffset; the filled center scales in
+// last with its label.
+function runTrustRadius() {
+  const svg = document.querySelector(".radius-diagram svg");
+  if (!svg) return;
+  const trustedCircle = svg.querySelector(".ring-trusted circle");
+  const publicCircle = svg.querySelector(".ring-public circle");
+  const localCircle = svg.querySelector(".ring-local circle");
+  const localLabel = svg.querySelector(".ring-label.inside");
+  if (!trustedCircle || !publicCircle || !localCircle) return;
+
+  // Set up dashoffset = circumference so the stroke starts "empty"
+  // and animates down to 0 ("fully drawn"). The dashed public ring
+  // uses its existing stroke-dasharray (3 6) for the visible look;
+  // we override only during the draw-in transition.
+  const setupDraw = (circle) => {
+    const r = parseFloat(circle.getAttribute("r")) || 0;
+    const C = 2 * Math.PI * r;
+    circle.style.strokeDasharray = String(C);
+    circle.style.strokeDashoffset = String(C);
+    return C;
+  };
+  const trustedC = setupDraw(trustedCircle);
+  const publicC = setupDraw(publicCircle);
+
+  // The local (filled) disc starts at scale 0 with its center as
+  // the transform origin. SVG's transform-origin is finicky across
+  // browsers; setting it explicitly on the element works in Chrome,
+  // Safari, Firefox.
+  localCircle.style.transformBox = "fill-box";
+  localCircle.style.transformOrigin = "center";
+  localCircle.style.transform = "scale(0)";
+  if (localLabel) {
+    localLabel.style.opacity = "0";
+  }
+
+  inView(
+    svg,
+    () => {
+      // local disc pops in first (it's the center; the inside-out
+      // narrative starts here)
+      animate(
+        localCircle,
+        { transform: ["scale(0)", "scale(1)"] },
+        { duration: 0.5, ease: EASE },
+      );
+      // trusted ring draws after the local pop completes
+      animate(
+        trustedCircle,
+        { strokeDashoffset: [trustedC, 0] },
+        { duration: 0.9, delay: 0.35, ease: EASE },
+      );
+      // public ring draws last (and longest — it's biggest)
+      animate(
+        publicCircle,
+        { strokeDashoffset: [publicC, 0] },
+        { duration: 1.1, delay: 0.7, ease: EASE },
+      );
+      // restore the dashed look on the public ring once it's drawn
+      setTimeout(() => {
+        publicCircle.style.strokeDasharray = "3 6";
+        publicCircle.style.strokeDashoffset = "0";
+      }, 1850);
+      // label fades up after the disc lands
+      if (localLabel) {
+        animate(
+          localLabel,
+          { opacity: [0, 1] },
+          { duration: 0.4, delay: 0.6, ease: EASE },
+        );
+      }
+    },
+    { amount: 0.4 },
+  );
 }
 
-/* Quickstart progression — the "sliding 1-2-3" feel.
-   When .quickstart scrolls into view:
-     1. the rail fill grows from 0% to 100% width over 900ms
-     2. the three numbered dots pulse in sequence as the fill passes them
-     3. the three step cards stagger-fade in from below.
-   Each .qs-step also gets a hover handler that emphasizes the matching
-   dot, so the rail stays the index of focus while you read. */
+// ─── sticky nav ──────────────────────────────────────────────────
+// Once the wordmark has scrolled out of view, a thin fixed-position
+// nav slides down. Backdrop-blurred so it reads as "above the
+// content" without being opaque. The trigger is the bottom of the
+// .wordmark-band — when that's above the viewport top, the sticky
+// nav is on. We use IntersectionObserver on a sentinel element so
+// there's no scroll-listener overhead.
+function initStickyNav() {
+  const wordmark = document.querySelector(".wordmark-band");
+  const sticky = document.querySelector(".sticky-nav");
+  if (!wordmark || !sticky) return;
+
+  // Sentinel: a 1px-tall div placed immediately *after* the
+  // wordmark band. When it leaves the top of the viewport, we know
+  // the wordmark is offscreen.
+  const sentinel = document.createElement("div");
+  sentinel.style.position = "absolute";
+  sentinel.style.left = "0";
+  sentinel.style.right = "0";
+  sentinel.style.height = "1px";
+  sentinel.style.pointerEvents = "none";
+  wordmark.after(sentinel);
+
+  const obs = new IntersectionObserver(
+    (entries) => {
+      const e = entries[0];
+      // Sentinel visible = wordmark band still on screen ⇒ sticky off.
+      // Sentinel offscreen above ⇒ sticky on.
+      const past = !e.isIntersecting && e.boundingClientRect.top < 0;
+      sticky.classList.toggle("is-visible", past);
+    },
+    { threshold: 0, rootMargin: "-1px 0px 0px 0px" },
+  );
+  obs.observe(sentinel);
+}
+
+// ─── quickstart rail ─────────────────────────────────────────────
+// Calm fill: a single soft sweep from 0 → 100% over ~1.1 s; dots
+// fade in as the fill passes them; step cards stagger up. Plus the
+// existing hover/click wiring that drives the horizontal carousel.
 function runQuickstartRail() {
   const rail = document.querySelector(".qs-rail");
   const fill = document.querySelector("[data-qs-fill]");
   const dots = Array.from(document.querySelectorAll(".qs-rail-dot"));
   const steps = Array.from(document.querySelectorAll(".qs-step"));
-  if (!rail || !fill || dots.length === 0) return;
+  if (!rail || !fill || dots.length === 0) {
+    // The rail markup was removed in the 2-step quickstart redesign;
+    // step cards still need their entrance.
+    if (steps.length) {
+      steps.forEach((step, i) => {
+        inView(
+          step,
+          () => {
+            animate(
+              step,
+              { opacity: [0, 1], transform: ["translateY(12px)", "translateY(0)"] },
+              { duration: 0.55, delay: i * 0.08, ease: EASE },
+            );
+          },
+          { amount: 0.2 },
+        );
+      });
+    }
+    return;
+  }
 
-  // Hover + click wiring. Steps live on a horizontal scroll-snap
-  // rail (.qs-steps). Clicking a dot scrolls the carousel
-  // *horizontally* to that step rather than jumping the whole
-  // page via the anchor href.
   const railSteps = document.querySelector(".qs-steps");
   steps.forEach((step, i) => {
     const dot = dots[i];
     if (!dot) return;
-    const focus = () => dots.forEach((d, j) => d.classList.toggle("is-active", j === i));
+    const focus = () =>
+      dots.forEach((d, j) => d.classList.toggle("is-active", j === i));
     const blur = () => dots.forEach((d) => d.classList.remove("is-active"));
     step.addEventListener("mouseenter", focus);
     step.addEventListener("mouseleave", blur);
@@ -160,17 +444,11 @@ function runQuickstartRail() {
     step.addEventListener("focusout", blur);
     dot.addEventListener("click", (e) => {
       e.preventDefault();
-      // Pan the carousel container to the step. inline: "start"
-      // keeps the card flush to the left edge of the rail so the
-      // next two are previewed beyond it.
       step.scrollIntoView({ block: "nearest", inline: "start", behavior: "smooth" });
       focus();
     });
   });
 
-  // Live-update which dot is active as the user pans the carousel
-  // (touch, trackpad, arrow keys). The dot whose step is most
-  // centered in the viewport "wins".
   if (railSteps && "IntersectionObserver" in window) {
     const obs = new IntersectionObserver(
       (entries) => {
@@ -194,37 +472,30 @@ function runQuickstartRail() {
     steps.forEach((step) => obs.observe(step));
   }
 
-  // Entrance animation: fill the rail, light the dots in sequence,
-  // stagger the cards. Triggered on first viewport entry.
   inView(
     rail,
     () => {
-      // calm fill: a single soft sweep from 0 → 100% over ~1.1 s.
-      // No elastic curve, no bounce — restrained.
-      animate(
-        fill,
-        { width: ["0%", "100%"] },
-        { duration: 1.1, ease: [0.22, 1, 0.36, 1] },
-      );
-
-      // dots simply fade in as the fill reaches them. No scale-burst.
+      animate(fill, { width: ["0%", "100%"] }, { duration: 1.1, ease: EASE });
       const stops = [0, 0.5, 1];
       dots.forEach((dot, i) => {
         animate(
           dot,
           { opacity: [0.35, 1] },
-          { duration: 0.35, delay: stops[i] * 1.05, ease: [0.22, 1, 0.36, 1] },
+          { duration: 0.35, delay: stops[i] * 1.05, ease: EASE },
         );
       });
-
-      // cards stagger in from below; slightly longer so the eye can
-      // follow each step without feeling rushed.
       animate(
         steps,
         { opacity: [0, 1], transform: ["translateY(12px)", "translateY(0)"] },
-        { duration: 0.55, delay: stagger(0.16, { start: 0.2 }), ease: [0.22, 1, 0.36, 1] },
+        { duration: 0.55, delay: stagger(0.16, { start: 0.2 }), ease: EASE },
       );
     },
     { amount: 0.3 },
   );
+}
+
+function safeAnimate(selector, keyframes, options) {
+  const els = document.querySelectorAll(selector);
+  if (els.length === 0) return;
+  animate(els, keyframes, options);
 }

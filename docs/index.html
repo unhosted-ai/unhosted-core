@@ -38,8 +38,26 @@
   <script type="module" src="motion.js"></script>
   <script type="module" src="theme.js"></script>
 
+  <!-- sticky nav: fixed-position, slides down once the wordmark
+       scrolls past. Always present in the DOM; visibility is
+       toggled by motion.js once the wordmark band leaves view. -->
+  <nav class="sticky-nav" aria-label="sticky navigation">
+    <a class="sticky-nav-brand" href="#top" aria-label="unhosted home">
+      <svg viewBox="0 0 200 200" fill="none" stroke="currentColor" stroke-width="14" stroke-linejoin="round" stroke-linecap="round" width="22" height="22" aria-hidden="true">
+        <path d="M 30 40 L 30 100 Q 30 130 70 130 Q 110 130 110 100 L 110 40"/>
+        <path d="M 130 130 L 130 70 Q 130 40 170 40 L 170 130"/>
+      </svg>
+      <span>unhosted</span>
+    </a>
+    <div class="sticky-nav-links">
+      <a href="docs.html">learn</a>
+      <a href="https://github.com/unhosted-ai/unhosted-core">github</a>
+      <a href="#download" class="nav-cta">get started</a>
+    </div>
+  </nav>
+
   <!-- giant cut-off wordmark + top nav -->
-  <header class="hero">
+  <header class="hero" id="top">
     <div class="wordmark-band">
       <h1 class="wordmark" aria-label="unhosted">unhosted</h1>
     </div>

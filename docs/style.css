@@ -8,9 +8,16 @@
   --fg: #0A0A0A;
   --accent: #FF3B30;
   --mute: #737373;
+  --mute-strong: #555555;
   --line: rgba(10, 10, 10, 0.12);
+  --line-strong: rgba(10, 10, 10, 0.22);
   --card: #FFFFFF;
   --card-line: rgba(10, 10, 10, 0.18);
+  /* surface = "slightly off-bg" panels: install command box,
+     hero-runs-on chips, hero-companion strip, etc. Was previously
+     hard-coded as #efefe9 in component selectors, which left dark
+     mode reading as light cream on light cream. */
+  --surface: #efefe9;
 
   --max: 1320px;
   --pad: 48px;
@@ -22,24 +29,36 @@
   :root:not([data-theme="light"]) {
     --bg: #0A0A0A;
     --fg: #F5F5F0;
+    --mute: #9a9a93;
+    --mute-strong: #c4c4bd;
     --line: rgba(245, 245, 240, 0.10);
+    --line-strong: rgba(245, 245, 240, 0.20);
     --card: #131313;
     --card-line: rgba(245, 245, 240, 0.18);
+    --surface: #1a1a1a;
   }
 }
 :root[data-theme="dark"] {
   --bg: #0A0A0A;
   --fg: #F5F5F0;
+  --mute: #9a9a93;
+  --mute-strong: #c4c4bd;
   --line: rgba(245, 245, 240, 0.10);
+  --line-strong: rgba(245, 245, 240, 0.20);
   --card: #131313;
   --card-line: rgba(245, 245, 240, 0.18);
+  --surface: #1a1a1a;
 }
 :root[data-theme="light"] {
   --bg: #F5F5F0;
   --fg: #0A0A0A;
+  --mute: #737373;
+  --mute-strong: #555555;
   --line: rgba(10, 10, 10, 0.12);
+  --line-strong: rgba(10, 10, 10, 0.22);
   --card: #FFFFFF;
   --card-line: rgba(10, 10, 10, 0.18);
+  --surface: #efefe9;
 }
 
 * {
@@ -1828,7 +1847,15 @@ html { scroll-behavior: smooth; }
    visible by default. See docs/motion.js for the animation orchestration.
    ========================================================================== */
 
-html.motion-armed .wordmark,
+/* Hide the wordmark wrapper until motion.js has split it into per-
+   character spans — otherwise we'd flash the un-split text for a
+   frame before the spans appear and the entrance animation starts.
+   splitWordmark() flips visibility to visible synchronously after
+   creating the spans. */
+html.motion-armed .wordmark { visibility: hidden; }
+html.motion-armed .wordmark[data-split="1"] { visibility: visible; }
+
+html.motion-armed .wm-char,
 html.motion-armed .lede h2,
 html.motion-armed .lede .badges,
 html.motion-armed .lede .sub,
@@ -1851,7 +1878,7 @@ html.motion-armed .doc section h2 {
 html.motion-armed [data-qs-fill] { width: 0; }
 
 @media (prefers-reduced-motion: reduce) {
-  html.motion-armed .wordmark,
+  html.motion-armed .wm-char,
   html.motion-armed .lede h2,
   html.motion-armed .lede .badges,
   html.motion-armed .lede .sub,
@@ -1870,9 +1897,122 @@ html.motion-armed [data-qs-fill] { width: 0; }
   html.motion-armed .doc section h2 {
     opacity: 1;
     transform: none !important;
+    filter: none !important;
     will-change: auto;
   }
   html.motion-armed [data-qs-fill] { width: 100%; }
+}
+
+/* ==========================================================================
+   wordmark per-character spans (injected by motion.js splitWordmark).
+   Inline-block so each glyph can be transformed independently without
+   breaking the surrounding line. Kerning is preserved because each span
+   only contains one character.
+   ========================================================================== */
+.wm-char {
+  display: inline-block;
+  /* Keep the original line metrics so the H1 baseline doesn't shift
+     when motion.js splits the text into spans. */
+  vertical-align: baseline;
+  will-change: transform, opacity, filter;
+}
+
+/* ==========================================================================
+   hero install caret — appended by motion.js after the curl command.
+   A thin block-cursor that briefly blinks on first reveal, then sits
+   static. Decorative only; not in the no-JS markup.
+   ========================================================================== */
+.hero-install-caret {
+  display: inline-block;
+  width: 0.55em;
+  height: 1em;
+  margin-left: 4px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  border-radius: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ==========================================================================
+   sticky nav — fixed-position bar that slides down once the wordmark
+   has scrolled off-screen. Always in the DOM (so layout doesn't reflow
+   when it shows); `is-visible` toggles the slide-in.
+   ========================================================================== */
+.sticky-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px var(--pad);
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  -webkit-backdrop-filter: saturate(140%) blur(14px);
+  backdrop-filter: saturate(140%) blur(14px);
+  border-bottom: 1px solid var(--line);
+  /* Hidden by default — sits just above the viewport, no opacity (so
+     `display: none` isn't needed; pointer-events: none stops the
+     invisible row from intercepting clicks). */
+  transform: translateY(-100%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform .35s cubic-bezier(0.22, 1, 0.36, 1), opacity .35s ease;
+}
+.sticky-nav.is-visible {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+.sticky-nav-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--fg);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+.sticky-nav-brand:hover { color: var(--accent); }
+.sticky-nav-links {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  font-size: 14px;
+}
+.sticky-nav-links a {
+  text-decoration: none;
+  color: var(--fg);
+  opacity: 0.7;
+}
+.sticky-nav-links a:hover {
+  opacity: 1;
+  color: var(--accent);
+}
+.sticky-nav-links .nav-cta {
+  opacity: 1;
+  padding: 6px 14px;
+  background: var(--fg);
+  color: var(--bg);
+  border-radius: 999px;
+  font-weight: 500;
+  font-size: 13px;
+}
+.sticky-nav-links .nav-cta:hover {
+  background: var(--accent);
+  color: var(--bg);
+}
+@media (max-width: 680px) {
+  .sticky-nav { padding: 8px 16px; }
+  .sticky-nav-links { gap: 14px; font-size: 13px; }
+  .sticky-nav-links a:not(.nav-cta) { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sticky-nav { transition: opacity .2s ease; }
+  .sticky-nav.is-visible { transform: none; }
 }
 
 /* ==========================================================================
