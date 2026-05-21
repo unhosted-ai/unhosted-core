@@ -1487,11 +1487,36 @@ async fn run_upgrade(force: bool) -> Result<()> {
         }
     } else {
         // curl -fsSL <url> | sh. Same one-liner as the README.
+        //
+        // We pass UNHOSTED_INSTALL_DIR through to the install script
+        // pointing at the directory the CURRENT unhosted binary lives
+        // in, so a user with `~/.local/bin/unhosted` keeps that layout
+        // and doesn't get prompted for sudo to install over /usr/local.
+        // Without this, install.sh's default of /usr/local/bin would
+        // require a terminal sudo prompt that `unhosted upgrade`
+        // can't satisfy.
+        let install_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()));
         let cmd = format!("curl -fsSL {INSTALL_SH_URL} | sh");
-        let status = std::process::Command::new("sh")
-            .args(["-c", &cmd])
-            .status()
-            .context("running install.sh")?;
+        let mut child = std::process::Command::new("sh");
+        child.args(["-c", &cmd]);
+        if let Some(dir) = install_dir.as_ref() {
+            // Only set the override if the dir is actually writable
+            // by us. If we're at /usr/local/bin (root-owned), let
+            // the script's existing sudo-prompt path run.
+            let writable = std::fs::metadata(dir)
+                .and_then(|m| {
+                    // best-effort: try to create a tempfile name
+                    Ok(m.permissions().readonly() == false)
+                })
+                .unwrap_or(false);
+            if writable {
+                println!("install dir: {} (matching current binary location)", dir.display());
+                child.env("UNHOSTED_INSTALL_DIR", dir);
+            }
+        }
+        let status = child.status().context("running install.sh")?;
         if !status.success() {
             anyhow::bail!("install.sh failed (exit {:?})", status.code());
         }

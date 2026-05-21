@@ -5809,7 +5809,7 @@ dependencies = [
 
 [[package]]
 name = "unhosted-cli"
-version = "0.0.63"
+version = "0.0.64"
 dependencies = [
  "anyhow",
  "clap",
@@ -5824,7 +5824,7 @@ dependencies = [
 
 [[package]]
 name = "unhosted-core"
-version = "0.0.63"
+version = "0.0.64"
 dependencies = [
  "anyhow",
  "axum",
@@ -5858,7 +5858,7 @@ dependencies = [
 
 [[package]]
 name = "unhosted-desktop"
-version = "0.0.63"
+version = "0.0.64"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -5903,7 +5903,7 @@ dependencies = [
 
 [[package]]
 name = "unhosted-relay"
-version = "0.0.63"
+version = "0.0.64"
 dependencies = [
  "anyhow",
  "axum",
