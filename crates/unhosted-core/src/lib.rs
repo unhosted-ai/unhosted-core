@@ -16,6 +16,7 @@ pub mod identity;
 #[cfg(feature = "rail-lightning")]
 pub mod lightning_cfg;
 pub mod memory;
+pub mod metrics;
 pub mod paths;
 pub mod peer;
 pub mod public_mode;
@@ -187,6 +188,10 @@ struct NodeState {
     /// `GET /v1/audit/stream` (SSE) or `GET /v1/audit/recent`.
     /// See [`audit`] module docs for the wire format.
     audit: Arc<audit::AuditBroadcaster>,
+    /// Aggregate metrics (counters + gauges) exposed at
+    /// `GET /metrics` in Prometheus text format. Companion to the
+    /// audit feed: audit emits events, metrics expose rollups.
+    metrics: Arc<metrics::Metrics>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -348,6 +353,7 @@ pub async fn serve(node: Node) -> Result<()> {
         vram_pool: Arc::new(vram_pool::PoolManager::new(vram_pool::probe())),
         rail_registry: Arc::new(rail_registry),
         audit: Arc::new(audit::AuditBroadcaster::new()),
+        metrics: Arc::new(metrics::Metrics::new()),
     };
 
     // CLI-side update check. Desktop users get update prompts via
@@ -448,6 +454,11 @@ pub async fn serve(node: Node) -> Result<()> {
         // events include pubkeys + policy mutations — operator-only).
         .route("/v1/audit/stream", get(audit_stream_handler))
         .route("/v1/audit/recent", get(audit_recent_handler))
+        // Prometheus-format metrics. Auth-gated like /v1/audit
+        // (the counters reveal peer counts + tunnel state).
+        // Conventional path is `/metrics` (not under /v1) per
+        // the Prometheus scrape convention.
+        .route("/metrics", get(metrics_handler))
         // OpenAI-compatible endpoints — any client that speaks OpenAI's HTTP
         // API (Delta, LangChain, LlamaIndex, OpenWebUI, …) can point at
         // http://127.0.0.1:7777 instead of OpenAI / Ollama / llama-server.
@@ -769,6 +780,29 @@ async fn audit_stream_handler(
     Ok(axum::response::Sse::new(stream.boxed())
         .keep_alive(axum::response::sse::KeepAlive::new())
         .into_response())
+}
+
+/// Prometheus-format metrics endpoint. Auth-gated (off-loopback
+/// requires bearer or signed-peer) — the counters expose peer count,
+/// chat volume, and tunnel state, none of which should be available
+/// to anonymous LAN callers. Before returning, we read the current
+/// peer count from the registry into the gauge so a scrape reflects
+/// the live state, not whatever was set on the last pair/unpair.
+async fn metrics_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<axum::response::Response, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    // Sync the peers_paired gauge against the live registry, so the
+    // scrape value reflects out-of-band edits to the registry file.
+    if let Ok(reg) = state.registry.lock() {
+        state.metrics.set_peers_paired(reg.peers.len() as i64);
+    }
+    let body = state.metrics.to_prometheus_text();
+    use axum::response::IntoResponse;
+    Ok(([(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")], body).into_response())
 }
 
 /// CORS policy. Default is local-only — explicit allow-list extends it to
@@ -1241,6 +1275,7 @@ async fn pair_handler(
         // or via the v0.1.0 trusted-pairing flow that ended here).
         direction: "registered".into(),
     });
+    state.metrics.inc_peer_pairs();
 
     let peers = state
         .registry
@@ -2074,6 +2109,18 @@ async fn chat_completions_handler(
         upstream: upstream_for_audit,
         model: model_for_audit,
     });
+    state.metrics.inc_chat_total();
+    state.metrics.inc_chat_active();
+    // Decrement-on-drop guard so the active gauge stays accurate
+    // even if proxy_chat_* panics or returns an error path that
+    // doesn't reach a manual dec. Lives in this scope only.
+    struct ActiveGuard(std::sync::Arc<metrics::Metrics>);
+    impl Drop for ActiveGuard {
+        fn drop(&mut self) {
+            self.0.dec_chat_active();
+        }
+    }
+    let _active_guard = ActiveGuard(state.metrics.clone());
 
     match target {
         Target::Local => proxy_chat_local(&state.node, &state.http, &state.vram_pool, body).await,
@@ -2736,17 +2783,26 @@ async fn tunnel_start_handler(
             // final state's discriminant — `start()` can return any of
             // Starting / Running / Failed depending on what cloudflared
             // managed to do in the brief window before the call returned.
-            let (state_str, url) = match &s {
-                tunnel::TunnelState::Starting { .. } => ("starting".to_string(), String::new()),
-                tunnel::TunnelState::Running { url, .. } => ("live".to_string(), url.clone()),
-                tunnel::TunnelState::Failed { error } => ("failed".to_string(), error.clone()),
-                tunnel::TunnelState::Idle => ("idle".to_string(), String::new()),
+            let (state_str, url, code) = match &s {
+                tunnel::TunnelState::Starting { .. } => {
+                    ("starting".to_string(), String::new(), metrics::TunnelStateCode::Starting)
+                }
+                tunnel::TunnelState::Running { url, .. } => {
+                    ("live".to_string(), url.clone(), metrics::TunnelStateCode::Live)
+                }
+                tunnel::TunnelState::Failed { error } => {
+                    ("failed".to_string(), error.clone(), metrics::TunnelStateCode::Failed)
+                }
+                tunnel::TunnelState::Idle => {
+                    ("idle".to_string(), String::new(), metrics::TunnelStateCode::Off)
+                }
             };
             state.audit.emit(audit::AuditEvent::TunnelStateChanged {
                 ts: audit::AuditEvent::now(),
                 state: state_str,
                 url,
             });
+            state.metrics.record_tunnel_state(code);
             Ok(axum::Json(s))
         }
         Err(e) => {
@@ -2812,6 +2868,7 @@ async fn tunnel_stop_handler(
         state: "stopped".into(),
         url: String::new(),
     });
+    state.metrics.record_tunnel_state(metrics::TunnelStateCode::Off);
     Ok(axum::Json(s))
 }
 
@@ -3006,6 +3063,7 @@ async fn public_mode_policy_put_handler(
         caller: outcome.audit_label(),
         policy: serde_json::to_value(&policy).unwrap_or(serde_json::Value::Null),
     });
+    state.metrics.inc_policy_changes();
     Ok(axum::Json(policy))
 }
 
@@ -3663,6 +3721,7 @@ async fn unpair_handler(
         peer_name: name.clone(),
         peer_pubkey: String::new(),
     });
+    state.metrics.inc_peer_unpairs();
 
     let peers = state
         .registry
