@@ -408,14 +408,33 @@ button:disabled:hover { border-color: var(--line-strong); }
   font-size: 12px;
   color: var(--ok);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
   margin-top: 6px;
   font-weight: 500;
+  line-height: 1.4;
 }
 .privacy-note .lock {
   font-size: 8px;
   color: var(--ok);
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+/* Tunnel ON: this is no longer "all local" — we have to tell the
+   truth. Switch to the accent (warning red) tone the same way the
+   tunnel chip does, so the user sees a coherent "you are exposed"
+   signal across the connection panel. */
+.privacy-note[data-state="on"] {
+  color: var(--accent);
+}
+.privacy-note[data-state="on"] .lock {
+  color: var(--accent);
+}
+.privacy-note[data-state="starting"] {
+  color: var(--mute);
+}
+.privacy-note[data-state="starting"] .lock {
+  color: var(--mute);
 }
 
 .peers-block { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; }

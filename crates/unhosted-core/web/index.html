@@ -177,9 +177,15 @@
           <span id="conn-tunnel-chip-label">local only</span>
         </button>
 
-        <div class="privacy-note">
+        <!-- Privacy line. Adapts to tunnel state via ui.js — it's a
+             lie to say "all local" when the operator has explicitly
+             opened the daemon to the public web. Three states:
+               off       — "all local — nothing leaves this machine."
+               starting  — "tunnel starting — about to be reachable from the public web."
+               on        — "tunnel live — anyone with your bearer-token URL can reach this daemon." -->
+        <div class="privacy-note" id="privacy-note" data-state="off">
           <span class="lock" aria-hidden="true">●</span>
-          all local — nothing leaves this machine.
+          <span id="privacy-note-text">all local — nothing leaves this machine.</span>
         </div>
 
         <details class="pipeline-details">

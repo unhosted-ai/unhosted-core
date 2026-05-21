@@ -2857,14 +2857,20 @@ if (settingsEls.tunnelChip) {
     openSettingsModal("network"),
   );
   const tunnelStatusLine = document.getElementById("tunnel-status-line");
+  const privacyNote = document.getElementById("privacy-note");
+  const privacyNoteText = document.getElementById("privacy-note-text");
   if (tunnelStatusLine) {
     const syncChip = () => {
       const text = (tunnelStatusLine.textContent || "").toLowerCase();
       let state = "off";
       let label = "local only";
+      let privacyMsg =
+        "all local — nothing leaves this machine.";
       if (text.includes("starting") || text.includes("connecting")) {
         state = "starting";
         label = "starting…";
+        privacyMsg =
+          "tunnel starting — about to be reachable from the public web.";
       } else if (
         text.startsWith("on ") ||
         text.includes("live") ||
@@ -2872,11 +2878,15 @@ if (settingsEls.tunnelChip) {
       ) {
         state = "on";
         label = "public";
+        privacyMsg =
+          "tunnel live — anyone with your bearer-token URL can reach this daemon.";
       }
       settingsEls.tunnelChip.dataset.state = state;
       if (settingsEls.tunnelChipLabel) {
         settingsEls.tunnelChipLabel.textContent = label;
       }
+      if (privacyNote) privacyNote.dataset.state = state;
+      if (privacyNoteText) privacyNoteText.textContent = privacyMsg;
     };
     const obs = new MutationObserver(syncChip);
     obs.observe(tunnelStatusLine, { childList: true, characterData: true, subtree: true });
