@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/unhosted-core", "crates/unhosted-cli", "crates/unhosted-desktop", "crates/unhosted-relay"]
 
 [workspace.package]
-version = "0.0.64"
+version = "0.0.65"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/unhosted-ai/unhosted"
@@ -12,7 +12,7 @@ rust-version = "1.75"
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
-tokio-stream = "0.1"
+tokio-stream = { version = "0.1", features = ["sync"] }
 axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", features = ["cors"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }

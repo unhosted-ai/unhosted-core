@@ -5450,6 +5450,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -5809,7 +5810,7 @@ dependencies = [
 
 [[package]]
 name = "unhosted-cli"
-version = "0.0.64"
+version = "0.0.65"
 dependencies = [
  "anyhow",
  "clap",
@@ -5824,7 +5825,7 @@ dependencies = [
 
 [[package]]
 name = "unhosted-core"
-version = "0.0.64"
+version = "0.0.65"
 dependencies = [
  "anyhow",
  "axum",
@@ -5858,7 +5859,7 @@ dependencies = [
 
 [[package]]
 name = "unhosted-desktop"
-version = "0.0.64"
+version = "0.0.65"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -5903,7 +5904,7 @@ dependencies = [
 
 [[package]]
 name = "unhosted-relay"
-version = "0.0.64"
+version = "0.0.65"
 dependencies = [
  "anyhow",
  "axum",

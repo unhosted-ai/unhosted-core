@@ -8,6 +8,7 @@
 //! Peer protocol is the same HTTP API the CLI uses (`POST /v1/run`), so a
 //! peer is just another `unhosted serve` process. No new transport.
 
+pub mod audit;
 pub mod auth;
 pub mod chats;
 pub mod discovery;
@@ -180,6 +181,12 @@ struct NodeState {
     /// slices when their sibling crates land and the operator's policy
     /// names that rail.
     rail_registry: Arc<unhosted_payments_core::RailRegistry>,
+    /// Audit-log broadcaster. Every operation that touches
+    /// authentication, configuration, or peer state emits a
+    /// structured event here. Subscribers read via
+    /// `GET /v1/audit/stream` (SSE) or `GET /v1/audit/recent`.
+    /// See [`audit`] module docs for the wire format.
+    audit: Arc<audit::AuditBroadcaster>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -340,6 +347,7 @@ pub async fn serve(node: Node) -> Result<()> {
         summarize_inflight: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         vram_pool: Arc::new(vram_pool::PoolManager::new(vram_pool::probe())),
         rail_registry: Arc::new(rail_registry),
+        audit: Arc::new(audit::AuditBroadcaster::new()),
     };
 
     // CLI-side update check. Desktop users get update prompts via
@@ -435,6 +443,11 @@ pub async fn serve(node: Node) -> Result<()> {
         .route("/v1/quic/ping", post(quic_ping_handler))
         .route("/v1/identity", get(identity_handler))
         .route("/v1/auth/token", get(auth_token_handler))
+        // Audit feed. SSE stream for live tail + buffered snapshot
+        // endpoint for late subscribers. Both auth-gated (the audit
+        // events include pubkeys + policy mutations — operator-only).
+        .route("/v1/audit/stream", get(audit_stream_handler))
+        .route("/v1/audit/recent", get(audit_recent_handler))
         // OpenAI-compatible endpoints — any client that speaks OpenAI's HTTP
         // API (Delta, LangChain, LlamaIndex, OpenWebUI, …) can point at
         // http://127.0.0.1:7777 instead of OpenAI / Ollama / llama-server.
@@ -696,6 +709,66 @@ async fn auth_token_handler(
     Ok(axum::Json(AuthTokenResponse {
         token: state.local_token.value().to_string(),
     }))
+}
+
+// ─── audit feed ───────────────────────────────────────────────────────
+//
+// SSE stream for the audit log + a recent-snapshot fallback. Both
+// require off-loopback auth (bearer token or signed-peer header);
+// the audit events include pubkeys, policy mutations, and request
+// metadata that must not leak to anonymous LAN callers.
+
+#[derive(serde::Deserialize)]
+struct AuditRecentQuery {
+    limit: Option<usize>,
+}
+
+async fn audit_recent_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    axum::extract::Query(q): axum::extract::Query<AuditRecentQuery>,
+) -> Result<axum::Json<serde_json::Value>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    let limit = q.limit.unwrap_or(100).min(1000);
+    let events = state.audit.recent(limit);
+    Ok(axum::Json(serde_json::json!({ "events": events })))
+}
+
+async fn audit_stream_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<axum::response::Response, StatusCode> {
+    use axum::response::IntoResponse;
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    use futures::stream::StreamExt;
+    use tokio_stream::wrappers::BroadcastStream;
+    // Seed the stream with the buffered recent events so a fresh
+    // subscriber doesn't miss what just happened. Then live-tail
+    // the broadcast via BroadcastStream, which surfaces `Lagged`
+    // as a stream error rather than terminating; we filter those
+    // out so the subscriber doesn't see a hiccup.
+    let initial: Vec<_> = state.audit.recent(50);
+    let rx = state.audit.subscribe();
+    let initial_stream = futures::stream::iter(initial.into_iter());
+    let live_stream = BroadcastStream::new(rx).filter_map(|res| async move {
+        // Drop lagged-skip notifications. Subscribers wanting a fresh
+        // snapshot can reconnect.
+        res.ok()
+    });
+    let stream = initial_stream.chain(live_stream).map(|event| {
+        Ok::<_, std::convert::Infallible>(
+            axum::response::sse::Event::default()
+                .json_data(event)
+                .unwrap_or_else(|_| axum::response::sse::Event::default().data("{}")),
+        )
+    });
+    Ok(axum::response::Sse::new(stream.boxed())
+        .keep_alive(axum::response::sse::KeepAlive::new())
+        .into_response())
 }
 
 /// CORS policy. Default is local-only — explicit allow-list extends it to
@@ -1159,6 +1232,15 @@ async fn pair_handler(
         state.router.replace_peers(&reg.peers);
         tracing::info!(name = %req.name, addr = %req.addr, "peer paired and live");
     }
+    state.audit.emit(audit::AuditEvent::PeerPaired {
+        ts: audit::AuditEvent::now(),
+        peer_name: req.name.clone(),
+        peer_pubkey: req.pubkey.clone().unwrap_or_default(),
+        // `pair_handler` is the catch-all post — the caller already
+        // has the peer's pubkey at this point (either out-of-band
+        // or via the v0.1.0 trusted-pairing flow that ended here).
+        direction: "registered".into(),
+    });
 
     let peers = state
         .registry
@@ -1976,6 +2058,23 @@ async fn chat_completions_handler(
         state.router.next()
     };
 
+    // Best-effort: parse the `model` field for the audit event.
+    // Don't fail the request on a parse error — just emit empty.
+    let model_for_audit = serde_json::from_slice::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|v| v.get("model").and_then(|m| m.as_str()).map(|s| s.to_string()))
+        .unwrap_or_default();
+    let upstream_for_audit = match &target {
+        Target::Local => "local".to_string(),
+        Target::Peer { name, .. } => format!("peer:{name}"),
+    };
+    state.audit.emit(audit::AuditEvent::ChatCompletionStarted {
+        ts: audit::AuditEvent::now(),
+        caller: outcome.audit_label(),
+        upstream: upstream_for_audit,
+        model: model_for_audit,
+    });
+
     match target {
         Target::Local => proxy_chat_local(&state.node, &state.http, &state.vram_pool, body).await,
         Target::Peer { ref name, addr } => match proxy_chat_peer(name, addr, &body).await {
@@ -2632,7 +2731,24 @@ async fn tunnel_start_handler(
     let outcome = state.classify(&headers, Some(remote.ip()), &[]);
     require_auth(&outcome, true)?;
     match state.tunnel.clone().start().await {
-        Ok(s) => Ok(axum::Json(s)),
+        Ok(s) => {
+            // Emit the state transition to the audit feed. We use the
+            // final state's discriminant — `start()` can return any of
+            // Starting / Running / Failed depending on what cloudflared
+            // managed to do in the brief window before the call returned.
+            let (state_str, url) = match &s {
+                tunnel::TunnelState::Starting { .. } => ("starting".to_string(), String::new()),
+                tunnel::TunnelState::Running { url, .. } => ("live".to_string(), url.clone()),
+                tunnel::TunnelState::Failed { error } => ("failed".to_string(), error.clone()),
+                tunnel::TunnelState::Idle => ("idle".to_string(), String::new()),
+            };
+            state.audit.emit(audit::AuditEvent::TunnelStateChanged {
+                ts: audit::AuditEvent::now(),
+                state: state_str,
+                url,
+            });
+            Ok(axum::Json(s))
+        }
         Err(e) => {
             tracing::warn!(error = %e, "tunnel start failed");
             Ok(axum::Json(tunnel::TunnelState::Failed {
@@ -2691,6 +2807,11 @@ async fn tunnel_stop_handler(
         tracing::error!(error = %e, "tunnel stop failed");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+    state.audit.emit(audit::AuditEvent::TunnelStateChanged {
+        ts: audit::AuditEvent::now(),
+        state: "stopped".into(),
+        url: String::new(),
+    });
     Ok(axum::Json(s))
 }
 
@@ -2880,6 +3001,11 @@ async fn public_mode_policy_put_handler(
         tracing::error!(error = %e, "public_mode: save failed");
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
+    state.audit.emit(audit::AuditEvent::PolicyChanged {
+        ts: audit::AuditEvent::now(),
+        caller: outcome.audit_label(),
+        policy: serde_json::to_value(&policy).unwrap_or(serde_json::Value::Null),
+    });
     Ok(axum::Json(policy))
 }
 
@@ -3532,6 +3658,11 @@ async fn unpair_handler(
     if !removed {
         return Err(StatusCode::NOT_FOUND);
     }
+    state.audit.emit(audit::AuditEvent::PeerUnpaired {
+        ts: audit::AuditEvent::now(),
+        peer_name: name.clone(),
+        peer_pubkey: String::new(),
+    });
 
     let peers = state
         .registry

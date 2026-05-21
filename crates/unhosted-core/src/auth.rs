@@ -64,6 +64,19 @@ impl AuthOutcome {
     pub fn is_local_user(&self) -> bool {
         matches!(self, AuthOutcome::Local | AuthOutcome::LoopbackUnauthed)
     }
+
+    /// Short caller label for audit-log emission. We never emit a raw
+    /// bearer token, but a peer's pubkey is fine to include — the
+    /// audit feed is itself auth-gated and pubkeys aren't secrets.
+    pub fn audit_label(&self) -> String {
+        match self {
+            AuthOutcome::Peer(pk) => format!("peer:{pk}"),
+            AuthOutcome::Local => "bearer".into(),
+            AuthOutcome::LoopbackUnauthed => "loopback".into(),
+            AuthOutcome::Rejected(reason) => format!("rejected:{reason}"),
+            AuthOutcome::Missing => "missing".into(),
+        }
+    }
 }
 
 /// Replay defense. Stores `(pubkey, ts, sig_digest)` keys with a TTL.
