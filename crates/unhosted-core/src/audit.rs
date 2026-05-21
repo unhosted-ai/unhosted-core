@@ -105,6 +105,16 @@ pub enum AuditEvent {
         /// SIEM diff alert against the previous PolicyChanged event.
         policy: serde_json::Value,
     },
+    /// A chat completion was blocked by the DLP integration. The
+    /// `reason` mirrors what the DLP endpoint returned (e.g.
+    /// "PII: SSN-pattern matched"). Same caller / model fields as
+    /// ChatCompletionStarted so a SIEM can correlate.
+    DlpBlocked {
+        ts: u64,
+        caller: String,
+        model: String,
+        reason: String,
+    },
     /// The Cloudflare tunnel transitioned from off to starting,
     /// from starting to live, or from live to stopped. Three
     /// sub-states represented by `state`: `starting`, `live`,

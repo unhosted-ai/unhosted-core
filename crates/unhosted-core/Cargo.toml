@@ -57,3 +57,7 @@ default = []
 # the feature off, Lightning quotes return Rejected("rail lightning
 # not configured on this host") — same as before this slice.
 rail-lightning = ["dep:unhosted-payments-lightning"]
+
+[dev-dependencies]
+wiremock = "0.6"
+tokio = { workspace = true }

@@ -12,6 +12,7 @@ pub mod audit;
 pub mod auth;
 pub mod chats;
 pub mod discovery;
+pub mod dlp;
 pub mod identity;
 #[cfg(feature = "rail-lightning")]
 pub mod lightning_cfg;
@@ -192,6 +193,12 @@ struct NodeState {
     /// `GET /metrics` in Prometheus text format. Companion to the
     /// audit feed: audit emits events, metrics expose rollups.
     metrics: Arc<metrics::Metrics>,
+    /// Optional DLP integration. When `Some`, the chat-completions
+    /// handler POSTs each request body to `cfg.endpoint` and
+    /// proceeds only on an `allow` decision. None = no DLP wired;
+    /// chat path runs unchanged. Loaded from
+    /// `~/.config/unhosted/dlp.toml` at startup.
+    dlp: Option<Arc<dlp::DlpConfig>>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -354,6 +361,28 @@ pub async fn serve(node: Node) -> Result<()> {
         rail_registry: Arc::new(rail_registry),
         audit: Arc::new(audit::AuditBroadcaster::new()),
         metrics: Arc::new(metrics::Metrics::new()),
+        // DLP integration is optional. Absent config = no DLP wired;
+        // a present-but-malformed config logs warn-level + skips
+        // (same posture as lightning_cfg) so a typo can't strand
+        // chat completions.
+        dlp: match dlp::load() {
+            Ok(Some(cfg)) => {
+                tracing::info!(
+                    endpoint = %cfg.endpoint,
+                    fail_mode = ?cfg.fail_mode,
+                    "dlp: integration enabled"
+                );
+                Some(Arc::new(cfg))
+            }
+            Ok(None) => {
+                tracing::debug!("dlp: no config file at ~/.config/unhosted/dlp.toml — chat path unchanged");
+                None
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "dlp: config load failed — chat path unchanged");
+                None
+            }
+        },
     };
 
     // CLI-side update check. Desktop users get update prompts via
@@ -2107,10 +2136,45 @@ async fn chat_completions_handler(
         ts: audit::AuditEvent::now(),
         caller: outcome.audit_label(),
         upstream: upstream_for_audit,
-        model: model_for_audit,
+        model: model_for_audit.clone(),
     });
     state.metrics.inc_chat_total();
     state.metrics.inc_chat_active();
+
+    // DLP callout. Runs before forwarding upstream so a blocked
+    // request never reaches the model runtime. Skip silently when
+    // no DLP is configured (the common case).
+    if let Some(cfg) = state.dlp.as_ref() {
+        match dlp::check(&state.http, cfg, &body).await {
+            dlp::DlpDecision::Allow => {}
+            dlp::DlpDecision::Block { reason } => {
+                use axum::response::IntoResponse;
+                state.audit.emit(audit::AuditEvent::DlpBlocked {
+                    ts: audit::AuditEvent::now(),
+                    caller: outcome.audit_label(),
+                    model: model_for_audit,
+                    reason: reason.clone(),
+                });
+                tracing::warn!(reason = %reason, "dlp: chat completion blocked");
+                // 422 Unprocessable Entity is the convention for
+                // "well-formed but refused by policy". Return a
+                // JSON body so OpenAI-compatible clients surface
+                // the reason instead of an opaque error.
+                let body = serde_json::json!({
+                    "error": {
+                        "type": "dlp_policy_violation",
+                        "message": reason,
+                    }
+                });
+                return Ok((
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    body.to_string(),
+                )
+                    .into_response());
+            }
+        }
+    }
     // Decrement-on-drop guard so the active gauge stays accurate
     // even if proxy_chat_* panics or returns an error path that
     // doesn't reach a manual dec. Lives in this scope only.
