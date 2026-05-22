@@ -196,6 +196,7 @@ pub fn known_tools() -> BTreeSet<&'static str> {
     s.insert("list_models");
     s.insert("read_file");
     s.insert("list_dir");
+    s.insert("grep");
     s
 }
 
@@ -466,6 +467,39 @@ fn tool_definitions(allowed: &[String]) -> Vec<ToolDef> {
                         }
                     },
                     "required": ["path"]
+                }),
+            },
+        });
+    }
+    if allow.contains("grep") {
+        out.push(ToolDef {
+            kind: "function",
+            function: ToolFunctionDef {
+                name: "grep",
+                description:
+                    "Search a directory tree (recursively) within an allow-listed root for a \
+                     literal substring. Returns up to 200 matches with file path and line number. \
+                     Pattern is literal text, NOT a regex. Binary / large / deny-listed files are \
+                     skipped. Use for codebase exploration: find function definitions, TODOs, \
+                     error strings, references to a name.",
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "root": {
+                            "type": "string",
+                            "description": "Absolute directory path inside an allow-listed root."
+                        },
+                        "pattern": {
+                            "type": "string",
+                            "description": "Literal substring to search for. Not a regex."
+                        },
+                        "case_insensitive": {
+                            "type": "boolean",
+                            "description": "Match case-insensitively. Default false.",
+                            "default": false
+                        }
+                    },
+                    "required": ["root", "pattern"]
                 }),
             },
         });
@@ -900,6 +934,46 @@ async fn execute_tool(
                 }
                 agent_fs::ReadFileOutcome::Err(e) => {
                     (String::new(), Some(format!("read_file: {}", e.label())))
+                }
+            }
+        }
+        "grep" => {
+            let Some(root) = args.get("root").and_then(|v| v.as_str()) else {
+                return (String::new(), Some("grep: missing `root` argument".into()));
+            };
+            let Some(pattern) = args.get("pattern").and_then(|v| v.as_str()) else {
+                return (
+                    String::new(),
+                    Some("grep: missing `pattern` argument".into()),
+                );
+            };
+            let case_insensitive = args
+                .get("case_insensitive")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            match agent_fs::grep_files(ctx.agent_fs.as_ref(), root, pattern, case_insensitive) {
+                agent_fs::GrepOutcome::Ok {
+                    matches,
+                    files_scanned,
+                    files_skipped,
+                    truncated,
+                } => {
+                    let body = serde_json::json!({
+                        "pattern": pattern,
+                        "case_insensitive": case_insensitive,
+                        "files_scanned": files_scanned,
+                        "files_skipped": files_skipped,
+                        "match_count": matches.len(),
+                        "truncated": truncated,
+                        "matches": matches,
+                    });
+                    (
+                        serde_json::to_string_pretty(&body).unwrap_or_default(),
+                        None,
+                    )
+                }
+                agent_fs::GrepOutcome::Err(e) => {
+                    (String::new(), Some(format!("grep: {}", e.label())))
                 }
             }
         }

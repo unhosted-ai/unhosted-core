@@ -98,6 +98,29 @@ pub enum ListDirOutcome {
     Err(ReadFileError),
 }
 
+/// What `grep_files` returns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GrepOutcome {
+    Ok {
+        matches: Vec<GrepMatch>,
+        files_scanned: usize,
+        files_skipped: usize,
+        truncated: bool,
+    },
+    Err(ReadFileError),
+}
+
+/// One match in one file. `path` is the canonical path (already
+/// proven to be inside the allow-list). `line` is the matched line's
+/// text, truncated to 240 chars so a single very-long-line match
+/// doesn't dominate the response.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct GrepMatch {
+    pub path: String,
+    pub line_number: u32,
+    pub line: String,
+}
+
 /// A single entry in a directory listing. Kind is one of `"file"`,
 /// `"dir"`, `"symlink"`, `"other"`. Size is bytes for files; 0 for
 /// directories and non-file entries.
@@ -112,6 +135,21 @@ pub struct DirEntry {
 /// the first N entries (sorted) with `truncated: true` so the model
 /// knows to use a different strategy.
 pub const LIST_DIR_MAX_ENTRIES: usize = 500;
+
+/// Cap on matches returned by `grep_files`. Stops the walk as soon
+/// as this many matches accumulate — large codebases with a common
+/// pattern can produce thousands of hits, blowing out the model's
+/// context window and the daemon's working set.
+pub const GREP_MAX_MATCHES: usize = 200;
+
+/// Cap on files scanned per `grep_files` call. Hard upper bound on
+/// the walk's blast radius even when matches are sparse.
+pub const GREP_MAX_FILES: usize = 5_000;
+
+/// Per-file size cap for grep_files. Files larger than this are
+/// skipped and counted toward `files_skipped`. Avoids loading a
+/// multi-GB log file or vendored bundle just to scan one line.
+pub const GREP_MAX_FILE_BYTES: usize = 1_048_576; // 1 MiB
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReadFileError {
@@ -372,6 +410,184 @@ pub fn list_dir(cfg: Option<&Arc<AgentFsConfig>>, path: &str) -> ListDirOutcome 
     }
     entries.sort_by(|a, b| a.name.cmp(&b.name));
     ListDirOutcome::Ok { entries, truncated }
+}
+
+/// Substring-search a directory tree for a literal pattern. Same
+/// sandbox model as read_file + list_dir (allow-list root, deny
+/// patterns, symlink refusal). Walks the tree from `root` and
+/// returns matches with line numbers.
+///
+/// Deliberately literal substring, not regex. ReDoS is a real
+/// failure mode for any user-supplied pattern and the codebase-
+/// exploration use case doesn't materially benefit from regex
+/// (most queries are `fn authenticate`, `TODO`, an error string,
+/// etc.). A future `grep_regex` tool could land behind its own ADR
+/// with a regex-engine choice and a timeout.
+pub fn grep_files(
+    cfg: Option<&Arc<AgentFsConfig>>,
+    root: &str,
+    pattern: &str,
+    case_insensitive: bool,
+) -> GrepOutcome {
+    let Some(cfg) = cfg else {
+        return GrepOutcome::Err(ReadFileError::NotConfigured);
+    };
+    if cfg.allow_roots.is_empty() {
+        return GrepOutcome::Err(ReadFileError::NotConfigured);
+    }
+    if pattern.is_empty() {
+        return GrepOutcome::Err(ReadFileError::Io(
+            "grep_files: pattern must not be empty".into(),
+        ));
+    }
+
+    let root_buf = PathBuf::from(root);
+    if !root_buf.is_absolute() {
+        return GrepOutcome::Err(ReadFileError::NotAbsolute);
+    }
+    if !cfg.follow_symlinks {
+        if let Ok(m) = std::fs::symlink_metadata(&root_buf) {
+            if m.file_type().is_symlink() {
+                return GrepOutcome::Err(ReadFileError::SymlinkRefused);
+            }
+        }
+    }
+    let canonical_root = match std::fs::canonicalize(&root_buf) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return GrepOutcome::Err(ReadFileError::NotFound);
+        }
+        Err(e) => return GrepOutcome::Err(ReadFileError::Io(e.to_string())),
+    };
+    // Allow root to be the allow-list root itself OR strictly under it.
+    let under = cfg
+        .allow_roots
+        .iter()
+        .any(|r| &canonical_root == r || is_strictly_under(&canonical_root, r));
+    if !under {
+        return GrepOutcome::Err(ReadFileError::OutsideAllowList);
+    }
+    // Deny-pattern check on the root path. If the operator denied
+    // `secrets/` as a directory name, no descent under it.
+    let lower_root = canonical_root.to_string_lossy().to_lowercase();
+    for pat in &cfg.deny_patterns {
+        if lower_root.contains(&pat.to_lowercase()) {
+            return GrepOutcome::Err(ReadFileError::DenyPattern(pat.clone()));
+        }
+    }
+
+    let needle = if case_insensitive {
+        pattern.to_lowercase()
+    } else {
+        pattern.to_string()
+    };
+
+    let mut matches = Vec::new();
+    let mut files_scanned = 0usize;
+    let mut files_skipped = 0usize;
+    let mut truncated = false;
+    let mut queue: Vec<PathBuf> = vec![canonical_root.clone()];
+
+    while let Some(dir) = queue.pop() {
+        if matches.len() >= GREP_MAX_MATCHES || files_scanned >= GREP_MAX_FILES {
+            truncated = true;
+            break;
+        }
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            if matches.len() >= GREP_MAX_MATCHES || files_scanned >= GREP_MAX_FILES {
+                truncated = true;
+                break;
+            }
+            let path = entry.path();
+            // Deny-pattern check against the entry's path.
+            let lower = path.to_string_lossy().to_lowercase();
+            if cfg
+                .deny_patterns
+                .iter()
+                .any(|p| lower.contains(&p.to_lowercase()))
+            {
+                files_skipped += 1;
+                continue;
+            }
+            let ft = match entry.file_type() {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+            if ft.is_symlink() {
+                // Symlinks under the tree are skipped unless the
+                // operator explicitly opted into follow_symlinks.
+                if !cfg.follow_symlinks {
+                    files_skipped += 1;
+                    continue;
+                }
+            }
+            if ft.is_dir() {
+                queue.push(path);
+                continue;
+            }
+            if !ft.is_file() {
+                continue;
+            }
+            // Size cap.
+            let metadata_size = entry.metadata().map(|m| m.len() as usize).unwrap_or(0);
+            if metadata_size > GREP_MAX_FILE_BYTES {
+                files_skipped += 1;
+                continue;
+            }
+            // Read + search.
+            let bytes = match std::fs::read(&path) {
+                Ok(b) => b,
+                Err(_) => {
+                    files_skipped += 1;
+                    continue;
+                }
+            };
+            let text = match std::str::from_utf8(&bytes) {
+                Ok(t) => t,
+                Err(_) => {
+                    files_skipped += 1;
+                    continue;
+                }
+            };
+            files_scanned += 1;
+            for (idx, line) in text.lines().enumerate() {
+                let hit = if case_insensitive {
+                    line.to_lowercase().contains(&needle)
+                } else {
+                    line.contains(&needle)
+                };
+                if hit {
+                    let trimmed = if line.chars().count() > 240 {
+                        let mut s: String = line.chars().take(240).collect();
+                        s.push('…');
+                        s
+                    } else {
+                        line.to_string()
+                    };
+                    matches.push(GrepMatch {
+                        path: path.to_string_lossy().to_string(),
+                        line_number: (idx as u32) + 1,
+                        line: trimmed,
+                    });
+                    if matches.len() >= GREP_MAX_MATCHES {
+                        truncated = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    GrepOutcome::Ok {
+        matches,
+        files_scanned,
+        files_skipped,
+        truncated,
+    }
 }
 
 /// Strictly-under check that respects the path-separator boundary —
@@ -685,6 +901,160 @@ mod tests {
         assert!(matches!(
             list_dir(None, "/tmp"),
             ListDirOutcome::Err(ReadFileError::NotConfigured)
+        ));
+    }
+
+    // ─── grep_files ─────────────────────────────────────────────
+
+    #[test]
+    fn grep_finds_matches_with_line_numbers() {
+        let (_td, root) = temp_dir();
+        write_file(
+            &root.join("a.rs"),
+            b"fn authenticate(user: &str) {\n  // TODO: implement\n}\n",
+        );
+        write_file(
+            &root.join("b.rs"),
+            b"fn unrelated() {}\nfn authenticate_other() {}\n",
+        );
+        let cfg = cfg_with(vec![root.clone()]);
+        match grep_files(Some(&cfg), root.to_str().unwrap(), "authenticate", false) {
+            GrepOutcome::Ok {
+                matches,
+                files_scanned,
+                files_skipped,
+                truncated,
+            } => {
+                assert!(!truncated);
+                assert_eq!(files_scanned, 2);
+                assert_eq!(files_skipped, 0);
+                assert_eq!(matches.len(), 2);
+                let a = matches.iter().find(|m| m.path.ends_with("a.rs")).unwrap();
+                assert_eq!(a.line_number, 1);
+                assert!(a.line.contains("authenticate"));
+                let b = matches.iter().find(|m| m.path.ends_with("b.rs")).unwrap();
+                assert_eq!(b.line_number, 2);
+            }
+            other => panic!("expected Ok, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn grep_case_insensitive_matches_mixed_case() {
+        let (_td, root) = temp_dir();
+        write_file(
+            &root.join("notes.txt"),
+            b"TODO: ship the thing\ntodo: review later\n",
+        );
+        let cfg = cfg_with(vec![root.clone()]);
+        match grep_files(Some(&cfg), root.to_str().unwrap(), "todo", true) {
+            GrepOutcome::Ok { matches, .. } => {
+                assert_eq!(matches.len(), 2);
+            }
+            other => panic!("expected Ok, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn grep_walks_subdirs() {
+        let (_td, root) = temp_dir();
+        write_file(&root.join("sub").join("nested.rs"), b"fn find_me() {}");
+        let cfg = cfg_with(vec![root.clone()]);
+        match grep_files(Some(&cfg), root.to_str().unwrap(), "find_me", false) {
+            GrepOutcome::Ok { matches, .. } => {
+                assert_eq!(matches.len(), 1);
+                assert!(matches[0].path.contains("nested.rs"));
+            }
+            other => panic!("expected Ok, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn grep_respects_deny_pattern_on_files() {
+        let (_td, root) = temp_dir();
+        write_file(&root.join(".env"), b"API_KEY=findthis");
+        write_file(&root.join("safe.txt"), b"findthis");
+        let cfg = cfg_with(vec![root.clone()]);
+        match grep_files(Some(&cfg), root.to_str().unwrap(), "findthis", false) {
+            GrepOutcome::Ok {
+                matches,
+                files_skipped,
+                ..
+            } => {
+                // Only safe.txt should match; .env is deny-listed.
+                assert_eq!(matches.len(), 1);
+                assert!(matches[0].path.ends_with("safe.txt"));
+                assert!(files_skipped >= 1, ".env should have been skipped");
+            }
+            other => panic!("expected Ok, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn grep_outside_allowlist_rejected() {
+        let (_td, root) = temp_dir();
+        let (_td2, outside) = temp_dir();
+        write_file(&outside.join("file.txt"), b"something");
+        let cfg = cfg_with(vec![root]);
+        let outcome = grep_files(Some(&cfg), outside.to_str().unwrap(), "something", false);
+        assert!(matches!(
+            outcome,
+            GrepOutcome::Err(ReadFileError::OutsideAllowList)
+        ));
+    }
+
+    #[test]
+    fn grep_empty_pattern_rejected() {
+        let (_td, root) = temp_dir();
+        let cfg = cfg_with(vec![root.clone()]);
+        let outcome = grep_files(Some(&cfg), root.to_str().unwrap(), "", false);
+        assert!(matches!(outcome, GrepOutcome::Err(ReadFileError::Io(_))));
+    }
+
+    #[test]
+    fn grep_skips_binary_files() {
+        let (_td, root) = temp_dir();
+        // 0xFF is not valid UTF-8; this file must be skipped.
+        write_file(&root.join("binary.bin"), &[0xFFu8; 64]);
+        write_file(&root.join("text.txt"), b"hello world");
+        let cfg = cfg_with(vec![root.clone()]);
+        match grep_files(Some(&cfg), root.to_str().unwrap(), "hello", false) {
+            GrepOutcome::Ok {
+                matches,
+                files_scanned,
+                files_skipped,
+                ..
+            } => {
+                assert_eq!(matches.len(), 1);
+                assert_eq!(files_scanned, 1);
+                assert!(files_skipped >= 1);
+            }
+            other => panic!("expected Ok, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn grep_long_lines_get_truncated_in_match() {
+        let (_td, root) = temp_dir();
+        let long_line: String = std::iter::repeat('x').take(500).collect();
+        write_file(&root.join("long.txt"), long_line.as_bytes());
+        let cfg = cfg_with(vec![root.clone()]);
+        match grep_files(Some(&cfg), root.to_str().unwrap(), "xxx", false) {
+            GrepOutcome::Ok { matches, .. } => {
+                assert_eq!(matches.len(), 1);
+                // 240 chars + ellipsis = 241 chars in our trimmed line.
+                assert!(matches[0].line.chars().count() <= 241);
+                assert!(matches[0].line.ends_with('…'));
+            }
+            other => panic!("expected Ok, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn grep_missing_config_returns_not_configured() {
+        assert!(matches!(
+            grep_files(None, "/tmp", "x", false),
+            GrepOutcome::Err(ReadFileError::NotConfigured)
         ));
     }
 
