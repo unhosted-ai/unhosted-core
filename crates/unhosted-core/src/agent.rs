@@ -208,6 +208,68 @@ pub fn new_run_id() -> String {
     hex_prefix(&buf, 16)
 }
 
+/// Wall-clock as an ISO-8601 UTC string the model can read directly
+/// without external time-zone knowledge. Format: `YYYY-MM-DDTHH:MM:SSZ`.
+/// Falls back to `"1970-01-01T00:00:00Z"` on clock errors so the
+/// system prompt always has a parseable value.
+///
+/// We compute manually rather than pull `chrono` — the agent runtime
+/// is the only consumer and the formatting requirements are narrow.
+pub fn now_iso8601() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    seconds_to_iso8601(secs)
+}
+
+/// Convert a unix timestamp (seconds since 1970-01-01 UTC) to an
+/// ISO-8601 string. Public + small so it can be unit-tested
+/// against known dates.
+pub fn seconds_to_iso8601(unix_secs: u64) -> String {
+    // Days since 1970-01-01.
+    let total_days = (unix_secs / 86_400) as i64;
+    let secs_of_day = unix_secs % 86_400;
+    let hour = (secs_of_day / 3600) as u32;
+    let minute = ((secs_of_day % 3600) / 60) as u32;
+    let second = (secs_of_day % 60) as u32;
+
+    // Civil-from-days conversion (Howard Hinnant's date algorithm,
+    // public domain). Handles the Gregorian calendar correctly
+    // through year 11000 — far past any plausible use of unhosted.
+    let z = total_days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let y = (yoe as i64) + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let year = if m <= 2 { y + 1 } else { y };
+
+    format!(
+        "{year:04}-{m:02}-{d:02}T{hour:02}:{minute:02}:{second:02}Z"
+    )
+}
+
+/// Compose the agent's system prompt. Exposes `now_iso8601` as a
+/// concrete value so the model has a stable reference point for any
+/// time-sensitive question ("this quarter", "last week", "the most
+/// recent filing"). Without this, models will confidently invent a
+/// date from training-data heuristics.
+pub fn build_system_prompt(max_steps: u32, now: &str) -> String {
+    format!(
+        "You are an agent. Use the provided tools when useful. \
+         When you have a final answer, reply with prose only and no tool calls. \
+         You have at most {max_steps} steps to complete the task.\n\n\
+         The current date and time is {now} (UTC). Treat this as authoritative \
+         when reasoning about anything time-sensitive — quarters, recency of news, \
+         relative ages, deadlines."
+    )
+}
+
 /// Wall-clock guardrail timer. Set at run start; `elapsed_seconds()`
 /// is the current run's age.
 pub struct RunClock {
@@ -494,12 +556,7 @@ pub async fn run_agent(
     let mut messages: Vec<ChatMessage> = vec![
         ChatMessage {
             role: "system".into(),
-            content: Some(format!(
-                "You are an agent. Use the provided tools when useful. \
-                 When you have a final answer, reply with prose only and no tool calls. \
-                 You have at most {} steps to complete the task.",
-                req.max_steps
-            )),
+            content: Some(build_system_prompt(req.max_steps, &now_iso8601())),
             tool_call_id: None,
             tool_calls: Vec::new(),
         },
@@ -956,6 +1013,43 @@ mod tests {
         assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
         // Cryptographic random — two consecutive ids should not be equal.
         assert_ne!(new_run_id(), new_run_id());
+    }
+
+    #[test]
+    fn seconds_to_iso8601_known_dates() {
+        // Unix epoch.
+        assert_eq!(seconds_to_iso8601(0), "1970-01-01T00:00:00Z");
+        // 2020-01-01 00:00:00 UTC = 1_577_836_800.
+        assert_eq!(seconds_to_iso8601(1_577_836_800), "2020-01-01T00:00:00Z");
+        // 2024-02-29 12:34:56 UTC (leap year) = 1_709_210_096.
+        assert_eq!(seconds_to_iso8601(1_709_210_096), "2024-02-29T12:34:56Z");
+        // 2026-05-21 00:00:00 UTC (the date this code was written) =
+        // 1_779_321_600. (56 yr * 365 days + 14 leap days = 20454
+        // days from 1970-01-01 to 2026-01-01, plus 140 days into 2026.)
+        assert_eq!(seconds_to_iso8601(1_779_321_600), "2026-05-21T00:00:00Z");
+    }
+
+    #[test]
+    fn now_iso8601_is_well_formed() {
+        let now = now_iso8601();
+        // YYYY-MM-DDTHH:MM:SSZ → 20 characters exactly.
+        assert_eq!(now.len(), 20, "unexpected ISO-8601 length: {now}");
+        // First four chars are the year, must be plausible. Tests are
+        // not time-traveling agents, so 2020..2200 is fine.
+        let year: u32 = now[..4].parse().expect("year should parse");
+        assert!((2020..2200).contains(&year), "year out of plausible range: {year}");
+        assert!(now.ends_with('Z'));
+    }
+
+    #[test]
+    fn system_prompt_carries_now() {
+        let prompt = build_system_prompt(8, "2026-05-21T03:14:15Z");
+        assert!(prompt.contains("2026-05-21T03:14:15Z"));
+        assert!(prompt.contains("at most 8 steps"));
+        // The "authoritative" framing must survive any future edits
+        // to the prompt — that phrase is load-bearing for models
+        // that would otherwise prefer their training-data prior.
+        assert!(prompt.contains("authoritative"));
     }
 
     #[test]
