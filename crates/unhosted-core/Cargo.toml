@@ -64,3 +64,4 @@ rail-lightning = ["dep:unhosted-payments-lightning"]
 [dev-dependencies]
 wiremock = "0.6"
 tokio = { workspace = true }
+tempfile = "3"

@@ -9,6 +9,7 @@
 //! peer is just another `unhosted serve` process. No new transport.
 
 pub mod agent;
+pub mod agent_fs;
 pub mod audit;
 pub mod auth;
 pub mod chats;
@@ -200,6 +201,12 @@ struct NodeState {
     /// chat path runs unchanged. Loaded from
     /// `~/.config/unhosted/dlp.toml` at startup.
     dlp: Option<Arc<dlp::DlpConfig>>,
+    /// Optional agent-filesystem sandbox config (ADR-0013). When
+    /// `Some` AND the operator has provided allow-list roots, the
+    /// agent's `read_file` tool can read text files inside those
+    /// roots. When `None`, `read_file` returns `NotConfigured` for
+    /// every call. Loaded from `~/.config/unhosted/agent-fs.toml`.
+    agent_fs: Option<Arc<agent_fs::AgentFsConfig>>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -381,6 +388,31 @@ pub async fn serve(node: Node) -> Result<()> {
             }
             Err(e) => {
                 tracing::warn!(error = %e, "dlp: config load failed — chat path unchanged");
+                None
+            }
+        },
+        // Agent filesystem sandbox (ADR-0013). Same posture as DLP:
+        // absent config = no roots = `read_file` returns
+        // NotConfigured. A present-but-broken config logs warn-level
+        // and stays None so a typo can't strand the daemon.
+        agent_fs: match agent_fs::load() {
+            Ok(Some(cfg)) => {
+                tracing::info!(
+                    roots = ?cfg.allow_roots,
+                    max_bytes = cfg.max_bytes,
+                    follow_symlinks = cfg.follow_symlinks,
+                    "agent_fs: read_file enabled"
+                );
+                Some(Arc::new(cfg))
+            }
+            Ok(None) => {
+                tracing::debug!(
+                    "agent_fs: no config file at ~/.config/unhosted/agent-fs.toml — read_file disabled"
+                );
+                None
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "agent_fs: config load failed — read_file disabled");
                 None
             }
         },
@@ -872,6 +904,7 @@ async fn agents_run_handler(
         audit: state.audit.clone(),
         metrics: state.metrics.clone(),
         dlp: state.dlp.clone(),
+        agent_fs: state.agent_fs.clone(),
         caller_label: outcome.audit_label(),
     };
     let resp = agent::run_agent(&ctx, req).await;

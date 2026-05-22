@@ -46,6 +46,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::agent_fs::{self, AgentFsConfig};
 use crate::audit::{AuditBroadcaster, AuditEvent};
 use crate::dlp::{self, DlpConfig, DlpDecision};
 use crate::metrics::{AgentStopReason, Metrics};
@@ -193,6 +194,7 @@ pub fn known_tools() -> BTreeSet<&'static str> {
     s.insert("web_fetch");
     s.insert("search_memory");
     s.insert("list_models");
+    s.insert("read_file");
     s
 }
 
@@ -361,6 +363,29 @@ fn tool_definitions(allowed: &[String]) -> Vec<ToolDef> {
             },
         });
     }
+    if allow.contains("read_file") {
+        out.push(ToolDef {
+            kind: "function",
+            function: ToolFunctionDef {
+                name: "read_file",
+                description:
+                    "Read a UTF-8 text file from the operator's allow-listed roots. The path must \
+                     be absolute and inside one of the operator's configured roots; paths outside \
+                     the sandbox or matching deny patterns (.env, id_rsa, credentials, etc.) are \
+                     refused.",
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Absolute path inside one of the operator's allow-listed roots."
+                        }
+                    },
+                    "required": ["path"]
+                }),
+            },
+        });
+    }
     out
 }
 
@@ -375,6 +400,7 @@ pub struct RunContext {
     pub audit: Arc<AuditBroadcaster>,
     pub metrics: Arc<Metrics>,
     pub dlp: Option<Arc<DlpConfig>>,
+    pub agent_fs: Option<Arc<AgentFsConfig>>,
     pub caller_label: String,
 }
 
@@ -773,6 +799,33 @@ async fn execute_tool(
                 None,
             )
         }
+        "read_file" => {
+            let Some(path) = args.get("path").and_then(|v| v.as_str()) else {
+                return (
+                    String::new(),
+                    Some("read_file: missing `path` argument".into()),
+                );
+            };
+            match agent_fs::read_file(ctx.agent_fs.as_ref(), path) {
+                agent_fs::ReadFileOutcome::Ok {
+                    content,
+                    bytes_read,
+                    truncated,
+                } => {
+                    let prefix = if truncated {
+                        format!(
+                            "(truncated to {bytes_read} bytes; file is larger than the configured cap)\n"
+                        )
+                    } else {
+                        String::new()
+                    };
+                    (format!("{prefix}{content}"), None)
+                }
+                agent_fs::ReadFileOutcome::Err(e) => {
+                    (String::new(), Some(format!("read_file: {}", e.label())))
+                }
+            }
+        }
         "list_models" => {
             // Best-effort: probe /v1/models on the configured
             // upstream. Avoids re-implementing the daemon's
@@ -865,9 +918,17 @@ mod tests {
         assert!(t.contains("web_fetch"));
         assert!(t.contains("search_memory"));
         assert!(t.contains("list_models"));
-        // Slice 1 must NOT include filesystem/shell/MCP-as-tool.
-        assert!(!t.contains("read_file"));
+    }
+
+    #[test]
+    fn known_tools_includes_read_file_in_slice_4a() {
+        let t = known_tools();
+        assert!(t.contains("read_file"));
+        // Slice 4a must NOT include the destructive / wider-blast-
+        // radius tools — those land in subsequent ADRs.
+        assert!(!t.contains("write_file"));
         assert!(!t.contains("run_command"));
+        assert!(!t.contains("list_dir"));
     }
 
     #[test]
@@ -919,6 +980,7 @@ mod tests {
             audit: Arc::new(crate::audit::AuditBroadcaster::new()),
             metrics: Arc::new(crate::metrics::Metrics::new()),
             dlp: None,
+            agent_fs: None,
             caller_label: "test".into(),
         }
     }

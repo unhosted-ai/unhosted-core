@@ -579,7 +579,7 @@ your prompt
           <figcaption class="figure-caption">fig. agent runtime — the model decides whether to call a tool or stop. the daemon executes tools, feeds results back as <code>role:"tool"</code> messages, and re-prompts. caller never sees the loop.</figcaption>
         </figure>
 
-        <h5 class="hiw-h5">tools the model may call (slice 1)</h5>
+        <h5 class="hiw-h5">tools the model may call</h5>
         <div class="hiw-runtime-grid">
           <div class="hiw-rt">
             <span class="hiw-rt-name">web_fetch</span>
@@ -596,8 +596,13 @@ your prompt
             <span class="hiw-rt-port">read-only</span>
             <p>enumerate the models the daemon's configured upstreams claim to serve. lets the agent route a follow-up call to a different model without the caller pre-listing them.</p>
           </div>
+          <div class="hiw-rt">
+            <span class="hiw-rt-name">read_file</span>
+            <span class="hiw-rt-port">sandboxed</span>
+            <p>read a UTF-8 text file from operator-allow-listed roots. default config is empty — no reads allowed until the operator drops an <code>agent-fs.toml</code> in place. case-insensitive deny patterns (<code>.env</code>, <code>id_rsa</code>, <code>credentials</code>, …), 512 KiB size cap, no symlinks unless explicitly enabled. <a href="https://github.com/unhosted-ai/unhosted-core/blob/main/design/0013-agent-tool-read-file.md">ADR-0013</a>.</p>
+          </div>
         </div>
-        <p class="hiw-callout"><strong>blast-radius posture.</strong> slice 1 tools are read-only by construction. filesystem (<code>read_file</code>), shell (<code>run_command</code>), and MCP-as-tool (let the agent call MCP tools exposed by <a href="https://github.com/unhosted-ai/unhosted-plugins">unhosted-plugins</a>) each warrant their own ADR before shipping, because each expands the blast radius and needs sandboxing analysis. the registry lives in the daemon — operators wanting to permanently disable a tool patch the registry in code.</p>
+        <p class="hiw-callout"><strong>blast-radius posture.</strong> the four shipped tools are read-only by construction. shell (<code>run_command</code>), filesystem write (<code>write_file</code>), directory listing (<code>list_dir</code>), and MCP-as-tool each warrant their own ADR before shipping, because each expands the blast radius and needs sandboxing analysis. the registry lives in the daemon — operators wanting to permanently disable a tool patch the registry in code.</p>
 
         <h5 class="hiw-h5">try it from the CLI</h5>
         <pre class="hiw-diagram">$ unhosted agent run "summarize https://example.com in one sentence" --tools web_fetch

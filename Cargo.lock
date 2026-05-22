@@ -5848,7 +5848,7 @@ dependencies = [
 
 [[package]]
 name = "unhosted-cli"
-version = "0.0.70"
+version = "0.0.71"
 dependencies = [
  "anyhow",
  "clap",
@@ -5863,7 +5863,7 @@ dependencies = [
 
 [[package]]
 name = "unhosted-core"
-version = "0.0.70"
+version = "0.0.71"
 dependencies = [
  "anyhow",
  "axum",
@@ -5885,6 +5885,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite 0.27.0",
@@ -5899,7 +5900,7 @@ dependencies = [
 
 [[package]]
 name = "unhosted-desktop"
-version = "0.0.70"
+version = "0.0.71"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -5944,7 +5945,7 @@ dependencies = [
 
 [[package]]
 name = "unhosted-relay"
-version = "0.0.70"
+version = "0.0.71"
 dependencies = [
  "anyhow",
  "axum",
