@@ -1,0 +1,40 @@
+#!/bin/sh
+# pre-commit — runs `cargo fmt --check` so commits that fail the
+# Rust CI's fmt step never leave the developer's machine. The CI
+# loop where every push triggered a notification because of
+# wrap-at-100-vs-80 disagreement ate hours of inbox attention; this
+# hook makes that physically impossible.
+#
+# Install once:
+#   git config core.hooksPath scripts/git-hooks
+#
+# Bypass for emergencies:
+#   git commit --no-verify
+#
+# Performance: cargo fmt --check is a few-hundred-ms parse pass.
+# No build, no test. Adds no perceptible delay to typical commits.
+
+set -e
+
+# Only run if we're inside a Cargo workspace. The hook ships in
+# every repo that uses scripts/git-hooks; not all are Rust.
+if [ ! -f Cargo.toml ]; then
+    exit 0
+fi
+
+# `cargo fmt --check` exits non-zero if any file would be reformatted.
+# Output the diff so the developer can see what needs fixing.
+if ! cargo fmt --all -- --check; then
+    echo
+    echo "  Rust formatting is out of sync. Run:"
+    echo
+    echo "    cargo fmt --all"
+    echo
+    echo "  ...stage the changes, and re-commit."
+    echo
+    echo "  To bypass this check just this once:"
+    echo
+    echo "    git commit --no-verify"
+    echo
+    exit 1
+fi

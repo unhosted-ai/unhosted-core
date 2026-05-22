@@ -1,8 +1,11 @@
 name: Docker
 
 on:
+  # Tag-only. Every push to main was previously triggering a fresh
+  # multi-arch image build whose only meaningful output was an extra
+  # notification — the image only needs rebuilding when a version
+  # ships. Aligns this workflow's cadence with release.yml.
   push:
-    branches: [main]
     tags:
       - 'v*.*.*'
   workflow_dispatch:
