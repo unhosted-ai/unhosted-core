@@ -138,6 +138,18 @@ pub enum AuditEvent {
         steps_used: u32,
         tokens_used: u32,
     },
+    /// The agent recorded a structured citation via the `cite`
+    /// tool. `claim_hash` is a SHA-256 prefix of the claim text;
+    /// the full claim + source_url is in the run response and (at
+    /// debug level) the tracing output. The audit feed keeps only
+    /// the hash so the SIEM doesn't accumulate prompt content.
+    AgentCitation {
+        ts: u64,
+        run_id: String,
+        step: u32,
+        claim_hash: String,
+        source_url: String,
+    },
     /// A chat completion was blocked by the DLP integration. The
     /// `reason` mirrors what the DLP endpoint returned (e.g.
     /// "PII: SSN-pattern matched"). Same caller / model fields as

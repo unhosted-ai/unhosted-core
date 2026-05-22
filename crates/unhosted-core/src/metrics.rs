@@ -73,6 +73,11 @@ pub struct Metrics {
     pub agent_steps_total: AtomicU64,
     /// Total tool invocations across all agent runs.
     pub agent_tool_calls_total: AtomicU64,
+    /// Citations emitted by the agent via the `cite` tool.
+    /// Operators tracking research-quality runs can alert when this
+    /// is consistently zero on prompts that should have been
+    /// source-backed.
+    pub agent_citations_total: AtomicU64,
     /// Agent runs that terminated via the model's final answer.
     pub agent_runs_stopped_final_answer: AtomicU64,
     /// Agent runs that hit max_steps before producing a final answer.
@@ -107,6 +112,7 @@ impl Metrics {
             agent_runs_total: AtomicU64::new(0),
             agent_steps_total: AtomicU64::new(0),
             agent_tool_calls_total: AtomicU64::new(0),
+            agent_citations_total: AtomicU64::new(0),
             agent_runs_stopped_final_answer: AtomicU64::new(0),
             agent_runs_stopped_max_steps: AtomicU64::new(0),
             agent_runs_stopped_max_tokens: AtomicU64::new(0),
@@ -155,6 +161,9 @@ impl Metrics {
     }
     pub fn inc_agent_tool_calls(&self) {
         self.agent_tool_calls_total.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn inc_agent_citations(&self) {
+        self.agent_citations_total.fetch_add(1, Ordering::Relaxed);
     }
     pub fn inc_agent_stop(&self, reason: AgentStopReason) {
         match reason {
@@ -292,6 +301,13 @@ impl Metrics {
         out.push_str(&format!(
             "unhosted_agent_tool_calls_total {}\n",
             self.agent_tool_calls_total.load(Ordering::Relaxed)
+        ));
+
+        out.push_str("# HELP unhosted_agent_citations_total Citations emitted by the agent via the cite tool.\n");
+        out.push_str("# TYPE unhosted_agent_citations_total counter\n");
+        out.push_str(&format!(
+            "unhosted_agent_citations_total {}\n",
+            self.agent_citations_total.load(Ordering::Relaxed)
         ));
 
         out.push_str("# HELP unhosted_agent_runs_stopped_by Agent runs by stop reason.\n");

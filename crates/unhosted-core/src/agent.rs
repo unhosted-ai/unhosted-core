@@ -125,6 +125,39 @@ pub struct AgentRunResponse {
     pub stopped_because: StoppedBecause,
     pub tokens_used: u32,
     pub run_id: String,
+    /// Citations the agent emitted via the `cite` tool. Empty when
+    /// the agent didn't call `cite`, or wasn't allow-listed it. UI
+    /// callers render this as a footnote list under the final
+    /// answer.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub citations: Vec<Citation>,
+}
+
+/// A structured citation recorded by the agent via the `cite` tool.
+/// Lets downstream code (the chat UI, a research-doc generator,
+/// compliance auditor) render proper footnotes instead of trusting
+/// the model's inline prose to be accurate about sources.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Citation {
+    /// The step on which the agent emitted this citation. Lets a
+    /// renderer link the footnote back to the step where the source
+    /// was fetched.
+    pub step: u32,
+    /// The model's paraphrase of what the source supports. Free-form
+    /// short text.
+    pub claim: String,
+    /// The URL or file path the model is citing as authoritative.
+    /// Free-form — we don't validate; downstream renderers do.
+    pub source_url: String,
+    /// ISO-8601 UTC timestamp of when the source was retrieved.
+    /// Auto-filled with the daemon's wall clock when the model
+    /// omits it. Critical for time-sensitive citations (regulatory
+    /// filings, news, etc.) where "as of when" is part of the claim.
+    pub retrieved_at: String,
+    /// Optional verbatim excerpt from the source. Truncated to 480
+    /// chars by the daemon to keep the response bounded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quote: Option<String>,
 }
 
 /// Per-step record, returned to the caller. `args_hash` /
@@ -197,6 +230,7 @@ pub fn known_tools() -> BTreeSet<&'static str> {
     s.insert("read_file");
     s.insert("list_dir");
     s.insert("grep");
+    s.insert("cite");
     s
 }
 
@@ -471,6 +505,44 @@ fn tool_definitions(allowed: &[String]) -> Vec<ToolDef> {
             },
         });
     }
+    if allow.contains("cite") {
+        out.push(ToolDef {
+            kind: "function",
+            function: ToolFunctionDef {
+                name: "cite",
+                description:
+                    "Record a structured citation for a claim you're about to make in your \
+                     final answer. Call this once per non-trivial factual claim that depends on a \
+                     `web_fetch` or `read_file` result. The claim, source URL, optional verbatim \
+                     quote, and retrieval timestamp are recorded as part of the run's response so \
+                     downstream renderers can show footnotes. This tool does NOT verify the \
+                     source — it records what you tell it. Be honest about what each source actually \
+                     supports.",
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "claim": {
+                            "type": "string",
+                            "description": "Short paraphrase of what this source supports."
+                        },
+                        "source_url": {
+                            "type": "string",
+                            "description": "The URL or absolute file path you fetched / read."
+                        },
+                        "quote": {
+                            "type": "string",
+                            "description": "Optional verbatim excerpt (truncated to 480 chars)."
+                        },
+                        "retrieved_at": {
+                            "type": "string",
+                            "description": "Optional ISO-8601 UTC timestamp; daemon auto-fills if omitted."
+                        }
+                    },
+                    "required": ["claim", "source_url"]
+                }),
+            },
+        });
+    }
     if allow.contains("grep") {
         out.push(ToolDef {
             kind: "function",
@@ -574,6 +646,7 @@ pub async fn run_agent(ctx: &RunContext, req: AgentRunRequest) -> AgentRunRespon
             stopped_because: stopped,
             tokens_used: 0,
             run_id,
+            citations: vec![],
         };
     }
 
@@ -598,6 +671,7 @@ pub async fn run_agent(ctx: &RunContext, req: AgentRunRequest) -> AgentRunRespon
                     stopped_because: StoppedBecause::DlpBlocked,
                     tokens_used: 0,
                     run_id,
+                    citations: vec![],
                 };
             }
         }
@@ -619,6 +693,7 @@ pub async fn run_agent(ctx: &RunContext, req: AgentRunRequest) -> AgentRunRespon
         },
     ];
     let mut step_records: Vec<StepRecord> = Vec::new();
+    let mut citations: Vec<Citation> = Vec::new();
     let mut tokens_used: u32 = 0;
 
     for step in 0..req.max_steps {
@@ -627,6 +702,7 @@ pub async fn run_agent(ctx: &RunContext, req: AgentRunRequest) -> AgentRunRespon
                 ctx,
                 run_id,
                 step_records,
+                citations,
                 tokens_used,
                 StoppedBecause::MaxSeconds,
                 "stopped: max_seconds exceeded".into(),
@@ -637,6 +713,7 @@ pub async fn run_agent(ctx: &RunContext, req: AgentRunRequest) -> AgentRunRespon
                 ctx,
                 run_id,
                 step_records,
+                citations,
                 tokens_used,
                 StoppedBecause::MaxTokens,
                 "stopped: max_tokens exceeded".into(),
@@ -665,6 +742,7 @@ pub async fn run_agent(ctx: &RunContext, req: AgentRunRequest) -> AgentRunRespon
                     ctx,
                     run_id,
                     step_records,
+                    citations,
                     tokens_used,
                     StoppedBecause::ToolError,
                     format!("upstream chat error: {e}"),
@@ -680,6 +758,7 @@ pub async fn run_agent(ctx: &RunContext, req: AgentRunRequest) -> AgentRunRespon
                 ctx,
                 run_id,
                 step_records,
+                citations,
                 tokens_used,
                 StoppedBecause::ToolError,
                 "upstream returned no choices".into(),
@@ -702,6 +781,7 @@ pub async fn run_agent(ctx: &RunContext, req: AgentRunRequest) -> AgentRunRespon
                 ctx,
                 run_id,
                 step_records,
+                citations,
                 tokens_used,
                 StoppedBecause::FinalAnswer,
                 assistant_content,
@@ -731,7 +811,35 @@ pub async fn run_agent(ctx: &RunContext, req: AgentRunRequest) -> AgentRunRespon
             let args_value: serde_json::Value =
                 serde_json::from_str(&call.function.arguments).unwrap_or(serde_json::Value::Null);
             let args_hash = short_hash(&args_value);
-            let (result_text, error) = execute_tool(&call.function.name, &args_value, ctx).await;
+
+            // `cite` is intercepted here — it doesn't go through
+            // execute_tool because it's purely declarative (records
+            // a citation in the run's response) rather than fetching
+            // anything. We parse the args, push to citations,
+            // emit an AgentCitation audit event, and feed back an
+            // acknowledgment so the model continues.
+            let (result_text, error) = if call.function.name == "cite" {
+                match parse_citation(&args_value, step) {
+                    Ok(citation) => {
+                        ctx.metrics.inc_agent_citations();
+                        ctx.audit.emit(AuditEvent::AgentCitation {
+                            ts: AuditEvent::now(),
+                            run_id: run_id.clone(),
+                            step,
+                            claim_hash: short_hash(&serde_json::Value::String(
+                                citation.claim.clone(),
+                            )),
+                            source_url: citation.source_url.clone(),
+                        });
+                        citations.push(citation);
+                        (format!("citation #{} recorded", citations.len()), None)
+                    }
+                    Err(reason) => (String::new(), Some(format!("cite: {reason}"))),
+                }
+            } else {
+                execute_tool(&call.function.name, &args_value, ctx).await
+            };
+
             ctx.audit.emit(AuditEvent::AgentToolCall {
                 ts: AuditEvent::now(),
                 run_id: run_id.clone(),
@@ -760,6 +868,7 @@ pub async fn run_agent(ctx: &RunContext, req: AgentRunRequest) -> AgentRunRespon
                             ctx,
                             run_id,
                             step_records,
+                            citations,
                             tokens_used,
                             StoppedBecause::DlpBlocked,
                             format!("tool result blocked by dlp: {reason}"),
@@ -783,16 +892,55 @@ pub async fn run_agent(ctx: &RunContext, req: AgentRunRequest) -> AgentRunRespon
         ctx,
         run_id,
         step_records,
+        citations,
         tokens_used,
         StoppedBecause::MaxSteps,
         "stopped: max_steps reached without a final answer".into(),
     )
 }
 
+/// Parse a `cite` tool call's args into a `Citation`. Errors with a
+/// model-readable string so the agent can see what was wrong and
+/// retry.
+fn parse_citation(args: &serde_json::Value, step: u32) -> Result<Citation, String> {
+    let claim = args
+        .get("claim")
+        .and_then(|v| v.as_str())
+        .ok_or("missing `claim` (string)")?
+        .to_string();
+    let source_url = args
+        .get("source_url")
+        .and_then(|v| v.as_str())
+        .ok_or("missing `source_url` (string)")?
+        .to_string();
+    let retrieved_at = args
+        .get("retrieved_at")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(now_iso8601);
+    let quote = args.get("quote").and_then(|v| v.as_str()).map(|s| {
+        if s.chars().count() > 480 {
+            let mut truncated: String = s.chars().take(480).collect();
+            truncated.push('…');
+            truncated
+        } else {
+            s.to_string()
+        }
+    });
+    Ok(Citation {
+        step,
+        claim,
+        source_url,
+        retrieved_at,
+        quote,
+    })
+}
+
 fn finish(
     ctx: &RunContext,
     run_id: String,
     steps: Vec<StepRecord>,
+    citations: Vec<Citation>,
     tokens_used: u32,
     stopped: StoppedBecause,
     final_answer: String,
@@ -831,6 +979,7 @@ fn finish(
         stopped_because: stopped,
         tokens_used,
         run_id,
+        citations,
     }
 }
 
@@ -1111,6 +1260,210 @@ mod tests {
     #[test]
     fn known_tools_includes_list_dir_in_slice_4b() {
         assert!(known_tools().contains("list_dir"));
+    }
+
+    #[test]
+    fn known_tools_includes_grep_and_cite() {
+        let t = known_tools();
+        assert!(t.contains("grep"));
+        assert!(t.contains("cite"));
+    }
+
+    #[test]
+    fn parse_citation_happy_path() {
+        let args = serde_json::json!({
+            "claim": "X happened",
+            "source_url": "https://example.com/source",
+            "retrieved_at": "2026-05-22T00:00:00Z",
+            "quote": "X happened on this date."
+        });
+        let c = parse_citation(&args, 3).unwrap();
+        assert_eq!(c.step, 3);
+        assert_eq!(c.claim, "X happened");
+        assert_eq!(c.source_url, "https://example.com/source");
+        assert_eq!(c.retrieved_at, "2026-05-22T00:00:00Z");
+        assert_eq!(c.quote.as_deref(), Some("X happened on this date."));
+    }
+
+    #[test]
+    fn parse_citation_missing_claim_returns_error() {
+        let args = serde_json::json!({ "source_url": "https://example.com" });
+        let err = parse_citation(&args, 0).unwrap_err();
+        assert!(err.contains("claim"));
+    }
+
+    #[test]
+    fn parse_citation_missing_source_returns_error() {
+        let args = serde_json::json!({ "claim": "X" });
+        let err = parse_citation(&args, 0).unwrap_err();
+        assert!(err.contains("source_url"));
+    }
+
+    #[test]
+    fn parse_citation_autofills_retrieved_at_when_omitted() {
+        let args = serde_json::json!({
+            "claim": "X",
+            "source_url": "https://example.com"
+        });
+        let c = parse_citation(&args, 0).unwrap();
+        // ISO-8601 well-formed → 20 chars ending in Z.
+        assert_eq!(c.retrieved_at.len(), 20);
+        assert!(c.retrieved_at.ends_with('Z'));
+    }
+
+    #[test]
+    fn parse_citation_truncates_long_quote() {
+        let long_quote: String = std::iter::repeat('q').take(800).collect();
+        let args = serde_json::json!({
+            "claim": "X",
+            "source_url": "https://example.com",
+            "quote": long_quote
+        });
+        let c = parse_citation(&args, 0).unwrap();
+        let q = c.quote.unwrap();
+        assert!(q.chars().count() <= 481);
+        assert!(q.ends_with('…'));
+    }
+
+    #[tokio::test]
+    async fn run_accumulates_citations_across_steps() {
+        let server = MockServer::start().await;
+        // Step 1: model emits two cite tool calls.
+        let citation_calls = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [
+                        {
+                            "id": "c1",
+                            "type": "function",
+                            "function": {
+                                "name": "cite",
+                                "arguments": "{\"claim\":\"first\",\"source_url\":\"https://a.example\"}"
+                            }
+                        },
+                        {
+                            "id": "c2",
+                            "type": "function",
+                            "function": {
+                                "name": "cite",
+                                "arguments": "{\"claim\":\"second\",\"source_url\":\"https://b.example\",\"quote\":\"verbatim\"}"
+                            }
+                        }
+                    ]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": { "total_tokens": 50, "completion_tokens": 20 }
+        });
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(citation_calls))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        // Step 2: model produces a final answer that references both.
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(final_answer_response("Done. See sources [1] and [2].")),
+            )
+            .mount(&server)
+            .await;
+
+        let ctx = ctx_for_test(&server.uri());
+        let resp = run_agent(
+            &ctx,
+            AgentRunRequest {
+                goal: "Research X and cite your sources.".into(),
+                tools: vec!["cite".into()],
+                max_steps: 4,
+                max_tokens: 1024,
+                max_seconds: 10,
+                max_tool_calls_per_step: 4,
+                model: "test-model".into(),
+            },
+        )
+        .await;
+
+        assert_eq!(resp.stopped_because, StoppedBecause::FinalAnswer);
+        assert_eq!(resp.citations.len(), 2);
+        assert_eq!(resp.citations[0].claim, "first");
+        assert_eq!(resp.citations[0].source_url, "https://a.example");
+        assert_eq!(resp.citations[0].step, 0);
+        assert_eq!(resp.citations[1].claim, "second");
+        assert_eq!(resp.citations[1].quote.as_deref(), Some("verbatim"));
+    }
+
+    #[tokio::test]
+    async fn cite_emits_audit_event_and_increments_metric() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "c1",
+                            "type": "function",
+                            "function": {
+                                "name": "cite",
+                                "arguments": "{\"claim\":\"checked\",\"source_url\":\"https://example.com\"}"
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }],
+                "usage": { "total_tokens": 40, "completion_tokens": 12 }
+            })))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(final_answer_response("done")))
+            .mount(&server)
+            .await;
+
+        let ctx = ctx_for_test(&server.uri());
+        let metrics = ctx.metrics.clone();
+        let mut rx = ctx.audit.subscribe();
+        let _ = run_agent(
+            &ctx,
+            AgentRunRequest {
+                goal: "x".into(),
+                tools: vec!["cite".into()],
+                max_steps: 4,
+                max_tokens: 1024,
+                max_seconds: 10,
+                max_tool_calls_per_step: 4,
+                model: "test-model".into(),
+            },
+        )
+        .await;
+
+        use std::sync::atomic::Ordering;
+        assert_eq!(metrics.agent_citations_total.load(Ordering::Relaxed), 1);
+
+        let mut saw_citation = false;
+        for _ in 0..6 {
+            match tokio::time::timeout(std::time::Duration::from_millis(20), rx.recv()).await {
+                Ok(Ok(event)) => {
+                    if let Ok(json) = serde_json::to_value(&event) {
+                        if json.get("kind").and_then(|v| v.as_str()) == Some("agent_citation") {
+                            saw_citation = true;
+                            break;
+                        }
+                    }
+                }
+                _ => break,
+            }
+        }
+        assert!(saw_citation, "expected an agent_citation audit event");
     }
 
     #[test]
