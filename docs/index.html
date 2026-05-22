@@ -49,6 +49,7 @@
     <a href="#quickstart" data-section="quickstart"><span class="dot"></span><span class="lbl">quickstart</span></a>
     <a href="#modes" data-section="modes"><span class="dot"></span><span class="lbl">trust radius</span></a>
     <a href="#how" data-section="how"><span class="dot"></span><span class="lbl">how it works</span></a>
+    <a href="#agent-runtime" data-section="agent-runtime"><span class="dot"></span><span class="lbl">agent runtime</span></a>
     <a href="#status" data-section="status"><span class="dot"></span><span class="lbl">status</span></a>
     <a href="#network" data-section="network"><span class="dot"></span><span class="lbl">network &amp; security</span></a>
     <a href="#download" data-section="download"><span class="dot"></span><span class="lbl">download</span></a>
@@ -534,6 +535,86 @@ your prompt
           </div>
         </div>
         <p class="hiw-callout"><strong>auto-detection.</strong> at <code>unhosted serve</code> startup the daemon probes all three on their default localhost ports. if nothing answers, it prints os-specific install hints (homebrew on macos, the ollama curl script on linux, lmstudio.ai on windows). run <code>unhosted doctor</code> any time to see the same report.</p>
+      </div>
+    </div>
+
+    <!-- piece 6: the agent runtime (in-core, ADR-0012) -->
+    <div class="hiw-block" id="agent-runtime">
+      <div class="hiw-num">06</div>
+      <div class="hiw-body">
+        <h4>the agent runtime — when the model needs to act, not just answer</h4>
+        <p>a plain chat completion is one round trip: prompt in, tokens out, the model is a passenger. the agent runtime turns the model into a driver. you give it a goal and an allow-list of tools; the daemon runs a tool-call loop on its behalf — execute, observe, re-prompt — until it produces a final answer or hits a guardrail. every step is audited; every tool call inherits the same DLP, auth, and sanctions guarantees a regular chat does.</p>
+        <figure class="hiw-figure">
+          <pre class="hiw-diagram">
+        ┌────────────────────────────────────────────────────┐
+        │  POST /v1/agents/run                               │
+        │    { goal, tools, max_steps, max_tokens, ... }     │
+        └──────────────────────┬─────────────────────────────┘
+                               │
+                               ▼
+              ┌─────────────────────────────────┐
+              │           model turn            │
+              │  (chat completion with tools)   │
+              └──────┬───────────────┬──────────┘
+                     │               │
+        final answer │               │ tool_calls
+                     ▼               ▼
+            ┌────────────┐    ┌──────────────────────┐
+            │  return    │    │  execute each tool   │
+            │  to caller │    │  • web_fetch         │
+            └────────────┘    │  • search_memory     │
+                              │  • list_models       │
+                              └─────────┬────────────┘
+                                        │ role:"tool" messages
+                                        ▼
+                                   loop again
+                                        │
+                                        ▼
+                              guardrails enforced each turn:
+                                max_steps        (default 8, cap 32)
+                                max_tokens       (default 4096, cap 32k)
+                                max_seconds      (default 60, cap 600)
+                                tool_calls/step  (default 4, cap 8)
+          </pre>
+          <figcaption class="figure-caption">fig. agent runtime — the model decides whether to call a tool or stop. the daemon executes tools, feeds results back as <code>role:"tool"</code> messages, and re-prompts. caller never sees the loop.</figcaption>
+        </figure>
+
+        <h5 class="hiw-h5">tools the model may call (slice 1)</h5>
+        <div class="hiw-runtime-grid">
+          <div class="hiw-rt">
+            <span class="hiw-rt-name">web_fetch</span>
+            <span class="hiw-rt-port">read-only</span>
+            <p>fetch a URL, return its plain-text body. private IPs (10/8, 172.16/12, 192.168/16, link-local, loopback) are blocked at the SSRF layer the same way the standalone <code>/v1/web-fetch</code> endpoint blocks them.</p>
+          </div>
+          <div class="hiw-rt">
+            <span class="hiw-rt-name">search_memory</span>
+            <span class="hiw-rt-port">read-only</span>
+            <p>query the daemon's private-memory store for relevant summaries of past chats. surfaces the same recall channel the chat UI uses passively, but routes it through the model's reasoning.</p>
+          </div>
+          <div class="hiw-rt">
+            <span class="hiw-rt-name">list_models</span>
+            <span class="hiw-rt-port">read-only</span>
+            <p>enumerate the models the daemon's configured upstreams claim to serve. lets the agent route a follow-up call to a different model without the caller pre-listing them.</p>
+          </div>
+        </div>
+        <p class="hiw-callout"><strong>blast-radius posture.</strong> slice 1 tools are read-only by construction. filesystem (<code>read_file</code>), shell (<code>run_command</code>), and MCP-as-tool (let the agent call MCP tools exposed by <a href="https://github.com/unhosted-ai/unhosted-plugins">unhosted-plugins</a>) each warrant their own ADR before shipping, because each expands the blast radius and needs sandboxing analysis. the registry lives in the daemon — operators wanting to permanently disable a tool patch the registry in code.</p>
+
+        <h5 class="hiw-h5">try it from the CLI</h5>
+        <pre class="hiw-diagram">$ unhosted agent run "summarize https://example.com in one sentence" --tools web_fetch
+
+agent run → http://127.0.0.1:7777/v1/agents/run
+  goal:    summarize https://example.com in one sentence
+  tools:   web_fetch
+  caps:    8 steps · 4096 tokens · 60s · model=auto
+
+  [step 0] model: (1 tool call)
+  [step 0] tool web_fetch  args#abc123…  4823 chars  ok
+  [step 1] model: example.com is a single-page reserved-domain placeholder maintained by IANA…
+
+stopped: final_answer   tokens: 234   run: 7f3c91a2…
+
+example.com is a single-page reserved-domain placeholder maintained by IANA for use in documentation and illustrative examples.
+</pre>
       </div>
     </div>
 

@@ -913,6 +913,14 @@ hr.divider {
   margin: 12px 0 0;
   line-height: 1.55;
 }
+/* Sub-section header inside a hiw-block. Used for "tools the model
+   may call" / "try it from the CLI" inside the agent-runtime piece. */
+.hiw-h5 {
+  font-size: 14.5px;
+  font-weight: 600;
+  margin: 24px 0 10px;
+  letter-spacing: -0.01em;
+}
 .hiw-cta {
   display: flex;
   gap: 12px;

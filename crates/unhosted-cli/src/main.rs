@@ -172,6 +172,53 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
+    /// Agent runtime (ADR-0012). Drive the model in a tool-call loop
+    /// against the configured upstream. The model uses the tools the
+    /// caller allow-lists and either reaches a final answer or hits
+    /// a guardrail (max_steps / max_tokens / max_seconds).
+    Agent {
+        #[command(subcommand)]
+        action: AgentAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum AgentAction {
+    /// Run an agent against a user-supplied goal. Prints the step
+    /// trace to stdout as the run progresses, then the final answer.
+    Run {
+        /// The goal the agent should achieve. Wrap in quotes.
+        goal: String,
+        /// Comma-separated allow-list of tools the model may call.
+        /// Slice-1 registry: `web_fetch`, `search_memory`,
+        /// `list_models`. The daemon never injects a tool the caller
+        /// didn't list.
+        #[arg(long, value_delimiter = ',', default_value = "web_fetch")]
+        tools: Vec<String>,
+        /// Maximum tool-call loop iterations. Clamped to 32 by the
+        /// daemon's hard limit.
+        #[arg(long, default_value_t = 8)]
+        max_steps: u32,
+        /// Cumulative token budget across all steps. Clamped to
+        /// 32 768 by the daemon's hard limit.
+        #[arg(long, default_value_t = 4096)]
+        max_tokens: u32,
+        /// Wall-clock budget in seconds. Clamped to 600 by the
+        /// daemon's hard limit.
+        #[arg(long, default_value_t = 60)]
+        max_seconds: u32,
+        /// Daemon URL.
+        #[arg(long, default_value_t = format!("http://{}", DEFAULT_NODE_ADDR))]
+        node: String,
+        /// Model id. `"auto"` (default) routes through the daemon's
+        /// configured upstream selection.
+        #[arg(long, default_value = "auto")]
+        model: String,
+        /// Print the raw JSON response instead of the pretty trace.
+        /// Useful for piping into `jq` or for scripts.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// Where the daemon is reachable from the host app. Defaults to
@@ -422,6 +469,9 @@ async fn main() -> Result<()> {
         }
         Command::Upgrade { force } => {
             run_upgrade(force).await?;
+        }
+        Command::Agent { action } => {
+            run_agent_action(action).await?;
         }
     }
 
@@ -1419,6 +1469,182 @@ fn init_tracing() {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("unhosted_core=info,unhosted_cli=info"));
     fmt().with_env_filter(filter).with_target(false).init();
+}
+
+// ─── agent ────────────────────────────────────────────────────────
+// Drive an agent run from the CLI. Posts to /v1/agents/run, then
+// either pretty-prints the step trace or dumps the raw JSON. Same
+// auth model as any other daemon request — loopback bypasses the
+// bearer; off-loopback uses ~/.config/unhosted/local-token.txt
+// (the standard CLI auth path the daemon already supports for
+// the desktop shell).
+
+async fn run_agent_action(action: AgentAction) -> Result<()> {
+    match action {
+        AgentAction::Run {
+            goal,
+            tools,
+            max_steps,
+            max_tokens,
+            max_seconds,
+            node,
+            model,
+            json,
+        } => {
+            run_agent_remote(goal, tools, max_steps, max_tokens, max_seconds, &node, &model, json)
+                .await
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_agent_remote(
+    goal: String,
+    tools: Vec<String>,
+    max_steps: u32,
+    max_tokens: u32,
+    max_seconds: u32,
+    node: &str,
+    model: &str,
+    json: bool,
+) -> Result<()> {
+    let body = serde_json::json!({
+        "goal": goal,
+        "tools": tools,
+        "max_steps": max_steps,
+        "max_tokens": max_tokens,
+        "max_seconds": max_seconds,
+        "model": model,
+    });
+    let url = format!("{}/v1/agents/run", node.trim_end_matches('/'));
+
+    // Echo what we're about to do before the request so a user
+    // watching the terminal sees something even before the daemon
+    // responds. Looks like the existing `unhosted run` echo line.
+    eprintln!("agent run → {url}");
+    eprintln!("  goal:    {}", trim_for_display(&goal, 120));
+    eprintln!(
+        "  tools:   {}",
+        if tools.is_empty() {
+            "(none)".to_string()
+        } else {
+            tools.join(", ")
+        }
+    );
+    eprintln!(
+        "  caps:    {max_steps} steps · {max_tokens} tokens · {max_seconds}s · model={model}"
+    );
+    eprintln!();
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .with_context(|| format!("POST {url}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("daemon returned {status}: {text}");
+    }
+    let raw: serde_json::Value = resp.json().await.context("parsing /v1/agents/run response")?;
+    if json {
+        // Raw JSON mode: pipeable into jq.
+        let pretty = serde_json::to_string_pretty(&raw)?;
+        println!("{pretty}");
+        return Ok(());
+    }
+    print_agent_run_trace(&raw);
+    // Exit non-zero if the run didn't reach a final answer. Lets
+    // shell scripts detect failure without parsing the JSON.
+    let stopped = raw
+        .get("stopped_because")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if stopped != "final_answer" {
+        std::process::exit(2);
+    }
+    Ok(())
+}
+
+fn print_agent_run_trace(resp: &serde_json::Value) {
+    let run_id = resp.get("run_id").and_then(|v| v.as_str()).unwrap_or("?");
+    let stopped = resp
+        .get("stopped_because")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+    let tokens = resp.get("tokens_used").and_then(|v| v.as_u64()).unwrap_or(0);
+    let steps = resp.get("steps").and_then(|v| v.as_array());
+
+    if let Some(steps) = steps {
+        for step in steps {
+            let kind = step.get("kind").and_then(|v| v.as_str()).unwrap_or("?");
+            let step_n = step.get("step").and_then(|v| v.as_u64()).unwrap_or(0);
+            match kind {
+                "model_message" => {
+                    let content = step
+                        .get("content")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let tcm = step
+                        .get("tool_calls_made")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    if content.is_empty() {
+                        println!("  [step {step_n}] model: ({tcm} tool call{})", if tcm == 1 { "" } else { "s" });
+                    } else {
+                        println!("  [step {step_n}] model: {}", trim_for_display(content, 200));
+                    }
+                }
+                "tool_call" => {
+                    let tool = step.get("tool").and_then(|v| v.as_str()).unwrap_or("?");
+                    let args_hash = step
+                        .get("args_hash")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let chars = step
+                        .get("result_chars")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let err = step.get("error").and_then(|v| v.as_str());
+                    match err {
+                        Some(e) => println!(
+                            "  [step {step_n}] tool {tool}  args#{args_hash}  ERROR  {}",
+                            trim_for_display(e, 120)
+                        ),
+                        None => println!(
+                            "  [step {step_n}] tool {tool}  args#{args_hash}  {chars} chars  ok"
+                        ),
+                    }
+                }
+                other => {
+                    println!("  [step {step_n}] {other}");
+                }
+            }
+        }
+    }
+    println!();
+    println!("stopped: {stopped}   tokens: {tokens}   run: {run_id}");
+    println!();
+    let final_answer = resp
+        .get("final_answer")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if !final_answer.is_empty() {
+        println!("{final_answer}");
+    }
+}
+
+fn trim_for_display(s: &str, max: usize) -> String {
+    let one_line = s.replace('\n', " ").replace('\r', " ");
+    if one_line.chars().count() <= max {
+        one_line
+    } else {
+        let truncated: String = one_line.chars().take(max).collect();
+        format!("{truncated}…")
+    }
 }
 
 // ─── upgrade ──────────────────────────────────────────────────────────
