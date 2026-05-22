@@ -40,6 +40,8 @@ Unhosted pools the computers you already own — and, optionally, the computers 
 
 Run Llama 70B across a MacBook and a 4090. Run smaller models on a Pi mesh. Your hardware. Your model. Your data.
 
+The canonical target workloads — codebase exploration, personal research, regulatory monitoring, internal knowledge bases, personal finance, plus a tier of commercial-tier-gated cases (healthcare, legal) — are documented in [USE_CASES.md](./USE_CASES.md). The agent-runtime tool roadmap is derived from that list.
+
 ## Trust radius
 
 Unhosted has three modes. You decide how far the radius goes.
