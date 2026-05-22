@@ -2,6 +2,11 @@
 .claude/settings.local.json
 .claude/memory/
 .claude/todos/
+.claude/scheduled_tasks.lock
+
+# Compiled scripts. Source-of-truth is the .swift file; the
+# compiled binary is platform-specific and shouldn't ship in the repo.
+scripts/shotter
 
 # macOS
 .DS_Store
