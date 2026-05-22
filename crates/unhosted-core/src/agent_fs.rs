@@ -693,7 +693,7 @@ pub async fn git_log(
         ));
     }
 
-    let capped = max_entries.min(GIT_LOG_MAX_ENTRIES).max(1);
+    let capped = max_entries.clamp(1, GIT_LOG_MAX_ENTRIES);
 
     let mut cmd = tokio::process::Command::new("git");
     cmd.arg("log")
@@ -1230,7 +1230,7 @@ mod tests {
     #[test]
     fn grep_long_lines_get_truncated_in_match() {
         let (_td, root) = temp_dir();
-        let long_line: String = std::iter::repeat('x').take(500).collect();
+        let long_line: String = "x".repeat(500);
         write_file(&root.join("long.txt"), long_line.as_bytes());
         let cfg = cfg_with(vec![root.clone()]);
         match grep_files(Some(&cfg), root.to_str().unwrap(), "xxx", false) {

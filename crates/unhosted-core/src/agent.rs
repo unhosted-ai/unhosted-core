@@ -106,13 +106,12 @@ impl AgentRunRequest {
     /// behavior: clamping is silent — the response's actual caps are
     /// the post-clamp values, not the request body's.
     pub fn clamped(mut self) -> Self {
-        self.max_steps = self.max_steps.min(HARD_MAX_STEPS).max(1);
-        self.max_tokens = self.max_tokens.min(HARD_MAX_TOKENS).max(64);
-        self.max_seconds = self.max_seconds.min(HARD_MAX_SECONDS).max(1);
+        self.max_steps = self.max_steps.clamp(1, HARD_MAX_STEPS);
+        self.max_tokens = self.max_tokens.clamp(64, HARD_MAX_TOKENS);
+        self.max_seconds = self.max_seconds.clamp(1, HARD_MAX_SECONDS);
         self.max_tool_calls_per_step = self
             .max_tool_calls_per_step
-            .min(HARD_MAX_TOOL_CALLS_PER_STEP)
-            .max(1);
+            .clamp(1, HARD_MAX_TOOL_CALLS_PER_STEP);
         self
     }
 }
@@ -755,9 +754,7 @@ pub async fn run_agent(ctx: &RunContext, req: AgentRunRequest) -> AgentRunRespon
         }
 
         ctx.metrics.inc_agent_steps();
-        let per_step_tokens = (req.max_tokens.saturating_sub(tokens_used))
-            .min(1024)
-            .max(64);
+        let per_step_tokens = req.max_tokens.saturating_sub(tokens_used).clamp(64, 1024);
         let chat_req = ChatCompletionRequest {
             model: &req.model,
             messages: &messages,
@@ -1379,7 +1376,7 @@ mod tests {
 
     #[test]
     fn parse_citation_truncates_long_quote() {
-        let long_quote: String = std::iter::repeat('q').take(800).collect();
+        let long_quote: String = "q".repeat(800);
         let args = serde_json::json!({
             "claim": "X",
             "source_url": "https://example.com",

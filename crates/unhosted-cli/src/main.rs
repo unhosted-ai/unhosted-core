@@ -1653,7 +1653,7 @@ fn print_agent_run_trace(resp: &serde_json::Value) {
 }
 
 fn trim_for_display(s: &str, max: usize) -> String {
-    let one_line = s.replace('\n', " ").replace('\r', " ");
+    let one_line = s.replace(['\n', '\r'], " ");
     if one_line.chars().count() <= max {
         one_line
     } else {
@@ -1747,10 +1747,7 @@ async fn run_upgrade(force: bool) -> Result<()> {
             // by us. If we're at /usr/local/bin (root-owned), let
             // the script's existing sudo-prompt path run.
             let writable = std::fs::metadata(dir)
-                .and_then(|m| {
-                    // best-effort: try to create a tempfile name
-                    Ok(m.permissions().readonly() == false)
-                })
+                .map(|m| !m.permissions().readonly())
                 .unwrap_or(false);
             if writable {
                 println!(

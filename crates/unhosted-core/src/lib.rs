@@ -834,7 +834,7 @@ async fn audit_stream_handler(
     // out so the subscriber doesn't see a hiccup.
     let initial: Vec<_> = state.audit.recent(50);
     let rx = state.audit.subscribe();
-    let initial_stream = futures::stream::iter(initial.into_iter());
+    let initial_stream = futures::stream::iter(initial);
     let live_stream = BroadcastStream::new(rx).filter_map(|res| async move {
         // Drop lagged-skip notifications. Subscribers wanting a fresh
         // snapshot can reconnect.

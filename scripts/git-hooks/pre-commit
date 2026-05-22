@@ -1,9 +1,10 @@
 #!/bin/sh
-# pre-commit — runs `cargo fmt --check` so commits that fail the
-# Rust CI's fmt step never leave the developer's machine. The CI
-# loop where every push triggered a notification because of
-# wrap-at-100-vs-80 disagreement ate hours of inbox attention; this
-# hook makes that physically impossible.
+# pre-commit — runs `cargo fmt --check` AND `cargo clippy` so commits
+# that fail the Rust CI's lint gates never leave the developer's
+# machine. The CI loop where every push triggered a notification
+# because of wrap-at-100-vs-80 disagreement (or a clippy lint the
+# author didn't run locally) ate hours of inbox attention; this hook
+# makes that physically impossible.
 #
 # Install once:
 #   git config core.hooksPath scripts/git-hooks
@@ -11,8 +12,9 @@
 # Bypass for emergencies:
 #   git commit --no-verify
 #
-# Performance: cargo fmt --check is a few-hundred-ms parse pass.
-# No build, no test. Adds no perceptible delay to typical commits.
+# Performance: fmt is a few-hundred-ms parse pass. Clippy on an
+# incremental build is a few seconds. CLIPPY can be skipped via
+# `UNHOSTED_SKIP_CLIPPY=1 git commit` for rapid-fire WIP commits.
 
 set -e
 
@@ -23,7 +25,6 @@ if [ ! -f Cargo.toml ]; then
 fi
 
 # `cargo fmt --check` exits non-zero if any file would be reformatted.
-# Output the diff so the developer can see what needs fixing.
 if ! cargo fmt --all -- --check; then
     echo
     echo "  Rust formatting is out of sync. Run:"
@@ -37,4 +38,20 @@ if ! cargo fmt --all -- --check; then
     echo "    git commit --no-verify"
     echo
     exit 1
+fi
+
+# Clippy — same gate as CI (`-D warnings`). Skipped if the env var
+# is set so noisy work-in-progress commits don't pay a 5-10s cost.
+if [ -z "${UNHOSTED_SKIP_CLIPPY:-}" ]; then
+    if ! cargo clippy --all-targets --all-features -- -D warnings; then
+        echo
+        echo "  Clippy found warnings/errors. CI runs with -D warnings"
+        echo "  and will reject these. Fix locally before pushing."
+        echo
+        echo "  To skip clippy on a WIP commit (fmt still enforced):"
+        echo
+        echo "    UNHOSTED_SKIP_CLIPPY=1 git commit ..."
+        echo
+        exit 1
+    fi
 fi
