@@ -601,6 +601,11 @@ your prompt
             <span class="hiw-rt-port">sandboxed</span>
             <p>read a UTF-8 text file from operator-allow-listed roots. default config is empty — no reads allowed until the operator drops an <code>agent-fs.toml</code> in place. case-insensitive deny patterns (<code>.env</code>, <code>id_rsa</code>, <code>credentials</code>, …), 512 KiB size cap, no symlinks unless explicitly enabled. <a href="https://github.com/unhosted-ai/unhosted-core/blob/main/design/0013-agent-tool-read-file.md">ADR-0013</a>.</p>
           </div>
+          <div class="hiw-rt">
+            <span class="hiw-rt-name">list_dir</span>
+            <span class="hiw-rt-port">sandboxed</span>
+            <p>list a directory's entries inside the allow-list. returns sorted file + dir entries with kind and size, capped at 500. shares the <code>agent-fs.toml</code> sandbox with <code>read_file</code>. critical companion tool for "explore this codebase" agent loops.</p>
+          </div>
         </div>
         <p class="hiw-callout"><strong>blast-radius posture.</strong> the four shipped tools are read-only by construction. shell (<code>run_command</code>), filesystem write (<code>write_file</code>), directory listing (<code>list_dir</code>), and MCP-as-tool each warrant their own ADR before shipping, because each expands the blast radius and needs sandboxing analysis. the registry lives in the daemon — operators wanting to permanently disable a tool patch the registry in code.</p>
 

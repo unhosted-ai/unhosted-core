@@ -195,6 +195,7 @@ pub fn known_tools() -> BTreeSet<&'static str> {
     s.insert("search_memory");
     s.insert("list_models");
     s.insert("read_file");
+    s.insert("list_dir");
     s
 }
 
@@ -441,6 +442,29 @@ fn tool_definitions(allowed: &[String]) -> Vec<ToolDef> {
                         "path": {
                             "type": "string",
                             "description": "Absolute path inside one of the operator's allow-listed roots."
+                        }
+                    },
+                    "required": ["path"]
+                }),
+            },
+        });
+    }
+    if allow.contains("list_dir") {
+        out.push(ToolDef {
+            kind: "function",
+            function: ToolFunctionDef {
+                name: "list_dir",
+                description:
+                    "List the entries of a directory within the operator's allow-listed roots. \
+                     Returns sorted entries with kind (file/dir/symlink) and size for files. \
+                     Capped at 500 entries; larger directories return the first 500 with a \
+                     truncated flag.",
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Absolute directory path inside an allow-listed root."
                         }
                     },
                     "required": ["path"]
@@ -883,6 +907,34 @@ async fn execute_tool(
                 }
             }
         }
+        "list_dir" => {
+            let Some(path) = args.get("path").and_then(|v| v.as_str()) else {
+                return (
+                    String::new(),
+                    Some("list_dir: missing `path` argument".into()),
+                );
+            };
+            match agent_fs::list_dir(ctx.agent_fs.as_ref(), path) {
+                agent_fs::ListDirOutcome::Ok { entries, truncated } => {
+                    // Render as JSON so the model can parse / filter
+                    // it deterministically. Including the kind +
+                    // size in every row.
+                    let body = serde_json::json!({
+                        "path": path,
+                        "truncated": truncated,
+                        "count": entries.len(),
+                        "entries": entries,
+                    });
+                    (
+                        serde_json::to_string_pretty(&body).unwrap_or_default(),
+                        None,
+                    )
+                }
+                agent_fs::ListDirOutcome::Err(e) => {
+                    (String::new(), Some(format!("list_dir: {}", e.label())))
+                }
+            }
+        }
         "list_models" => {
             // Best-effort: probe /v1/models on the configured
             // upstream. Avoids re-implementing the daemon's
@@ -981,11 +1033,15 @@ mod tests {
     fn known_tools_includes_read_file_in_slice_4a() {
         let t = known_tools();
         assert!(t.contains("read_file"));
-        // Slice 4a must NOT include the destructive / wider-blast-
+        // Slice 4a/4b must NOT include the destructive / wider-blast-
         // radius tools — those land in subsequent ADRs.
         assert!(!t.contains("write_file"));
         assert!(!t.contains("run_command"));
-        assert!(!t.contains("list_dir"));
+    }
+
+    #[test]
+    fn known_tools_includes_list_dir_in_slice_4b() {
+        assert!(known_tools().contains("list_dir"));
     }
 
     #[test]

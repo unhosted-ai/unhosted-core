@@ -88,6 +88,31 @@ pub enum ReadFileOutcome {
     Err(ReadFileError),
 }
 
+/// What `list_dir` returns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ListDirOutcome {
+    Ok {
+        entries: Vec<DirEntry>,
+        truncated: bool,
+    },
+    Err(ReadFileError),
+}
+
+/// A single entry in a directory listing. Kind is one of `"file"`,
+/// `"dir"`, `"symlink"`, `"other"`. Size is bytes for files; 0 for
+/// directories and non-file entries.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct DirEntry {
+    pub name: String,
+    pub kind: &'static str,
+    pub size: u64,
+}
+
+/// Cap on entries returned by `list_dir`. Larger directories return
+/// the first N entries (sorted) with `truncated: true` so the model
+/// knows to use a different strategy.
+pub const LIST_DIR_MAX_ENTRIES: usize = 500;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReadFileError {
     NotConfigured,
@@ -253,6 +278,92 @@ pub fn read_file(cfg: Option<&Arc<AgentFsConfig>>, path: &str) -> ReadFileOutcom
         bytes_read,
         truncated,
     }
+}
+
+/// List a directory's entries per the sandbox policy. Reuses the
+/// allow-list / deny-pattern / symlink machinery from `read_file`;
+/// returns at most `LIST_DIR_MAX_ENTRIES` entries sorted by name.
+pub fn list_dir(cfg: Option<&Arc<AgentFsConfig>>, path: &str) -> ListDirOutcome {
+    let Some(cfg) = cfg else {
+        return ListDirOutcome::Err(ReadFileError::NotConfigured);
+    };
+    if cfg.allow_roots.is_empty() {
+        return ListDirOutcome::Err(ReadFileError::NotConfigured);
+    }
+
+    let path_buf = PathBuf::from(path);
+    if !path_buf.is_absolute() {
+        return ListDirOutcome::Err(ReadFileError::NotAbsolute);
+    }
+
+    if !cfg.follow_symlinks {
+        match std::fs::symlink_metadata(&path_buf) {
+            Ok(m) if m.file_type().is_symlink() => {
+                return ListDirOutcome::Err(ReadFileError::SymlinkRefused);
+            }
+            _ => {}
+        }
+    }
+
+    let canonical = match std::fs::canonicalize(&path_buf) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return ListDirOutcome::Err(ReadFileError::NotFound);
+        }
+        Err(e) => return ListDirOutcome::Err(ReadFileError::Io(e.to_string())),
+    };
+
+    if !cfg.allow_roots.iter().any(|root| is_strictly_under(&canonical, root)) {
+        // Special case: listing the root *itself* is allowed when the
+        // root equals canonical. `is_strictly_under` rejects equality
+        // (it's for files inside a root), so we explicitly admit the
+        // root-itself case here.
+        if !cfg.allow_roots.iter().any(|root| &canonical == root) {
+            return ListDirOutcome::Err(ReadFileError::OutsideAllowList);
+        }
+    }
+
+    let lower = canonical.to_string_lossy().to_lowercase();
+    for pat in &cfg.deny_patterns {
+        if lower.contains(&pat.to_lowercase()) {
+            return ListDirOutcome::Err(ReadFileError::DenyPattern(pat.clone()));
+        }
+    }
+
+    let metadata = match std::fs::metadata(&canonical) {
+        Ok(m) => m,
+        Err(e) => return ListDirOutcome::Err(ReadFileError::Io(e.to_string())),
+    };
+    if !metadata.is_dir() {
+        return ListDirOutcome::Err(ReadFileError::Io("not a directory".into()));
+    }
+
+    let read = match std::fs::read_dir(&canonical) {
+        Ok(r) => r,
+        Err(e) => return ListDirOutcome::Err(ReadFileError::Io(e.to_string())),
+    };
+
+    let mut entries = Vec::new();
+    let mut truncated = false;
+    for entry in read.flatten() {
+        if entries.len() >= LIST_DIR_MAX_ENTRIES {
+            truncated = true;
+            break;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        let (kind, size) = match entry.file_type() {
+            Ok(ft) if ft.is_dir() => ("dir", 0u64),
+            Ok(ft) if ft.is_file() => {
+                let sz = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                ("file", sz)
+            }
+            Ok(ft) if ft.is_symlink() => ("symlink", 0u64),
+            _ => ("other", 0u64),
+        };
+        entries.push(DirEntry { name, kind, size });
+    }
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    ListDirOutcome::Ok { entries, truncated }
 }
 
 /// Strictly-under check that respects the path-separator boundary —
@@ -453,6 +564,93 @@ mod tests {
         let cfg = cfg_with(vec![root]);
         let outcome = read_file(Some(&cfg), bin.to_str().unwrap());
         assert!(matches!(outcome, ReadFileOutcome::Err(ReadFileError::NotUtf8)));
+    }
+
+    #[test]
+    fn list_dir_returns_sorted_entries() {
+        let (_td, root) = temp_dir();
+        write_file(&root.join("z.txt"), b"x");
+        write_file(&root.join("a.txt"), b"x");
+        write_file(&root.join("m.txt"), b"x");
+        fs::create_dir_all(root.join("sub")).unwrap();
+        let cfg = cfg_with(vec![root.clone()]);
+        match list_dir(Some(&cfg), root.to_str().unwrap()) {
+            ListDirOutcome::Ok { entries, truncated } => {
+                assert!(!truncated);
+                let names: Vec<_> = entries.iter().map(|e| e.name.clone()).collect();
+                assert_eq!(names, vec!["a.txt", "m.txt", "sub", "z.txt"]);
+                let sub = entries.iter().find(|e| e.name == "sub").unwrap();
+                assert_eq!(sub.kind, "dir");
+                let a = entries.iter().find(|e| e.name == "a.txt").unwrap();
+                assert_eq!(a.kind, "file");
+                assert_eq!(a.size, 1);
+            }
+            other => panic!("expected Ok, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn list_dir_rejects_path_outside_allowlist() {
+        let (_td, root) = temp_dir();
+        let (_td2, outside) = temp_dir();
+        let cfg = cfg_with(vec![root]);
+        let outcome = list_dir(Some(&cfg), outside.to_str().unwrap());
+        assert!(matches!(outcome, ListDirOutcome::Err(ReadFileError::OutsideAllowList)));
+    }
+
+    #[test]
+    fn list_dir_truncates_at_cap() {
+        let (_td, root) = temp_dir();
+        // Create more than the cap.
+        for i in 0..LIST_DIR_MAX_ENTRIES + 5 {
+            write_file(&root.join(format!("file_{i:04}.txt")), b"x");
+        }
+        let cfg = cfg_with(vec![root.clone()]);
+        match list_dir(Some(&cfg), root.to_str().unwrap()) {
+            ListDirOutcome::Ok { entries, truncated } => {
+                assert!(truncated);
+                assert_eq!(entries.len(), LIST_DIR_MAX_ENTRIES);
+            }
+            other => panic!("expected Ok, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn list_dir_root_itself_is_listable() {
+        // is_strictly_under rejects equality; the impl admits root
+        // equality as a special case. This test guards that branch.
+        let (_td, root) = temp_dir();
+        write_file(&root.join("inside.txt"), b"x");
+        let cfg = cfg_with(vec![root.clone()]);
+        match list_dir(Some(&cfg), root.to_str().unwrap()) {
+            ListDirOutcome::Ok { entries, .. } => {
+                assert_eq!(entries.len(), 1);
+                assert_eq!(entries[0].name, "inside.txt");
+            }
+            other => panic!("expected Ok, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn list_dir_on_file_returns_error() {
+        let (_td, root) = temp_dir();
+        let file = root.join("not-a-dir.txt");
+        write_file(&file, b"x");
+        let cfg = cfg_with(vec![root]);
+        match list_dir(Some(&cfg), file.to_str().unwrap()) {
+            ListDirOutcome::Err(ReadFileError::Io(msg)) => {
+                assert!(msg.contains("not a directory"));
+            }
+            other => panic!("expected Io(not a directory), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn list_dir_missing_config_returns_not_configured() {
+        assert!(matches!(
+            list_dir(None, "/tmp"),
+            ListDirOutcome::Err(ReadFileError::NotConfigured)
+        ));
     }
 
     #[test]
