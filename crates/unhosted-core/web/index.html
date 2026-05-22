@@ -239,9 +239,31 @@
 
       <header class="main-head">
         <div class="topic" id="topic-label">new chat</div>
-        <div class="mode-chip">
-          <span class="dot accent"></span>
-          local
+        <div class="head-controls">
+          <!-- Chat / Agent toggle. Persisted to localStorage so the
+               user's mode survives reloads. When agent mode is on,
+               the composer's submit triggers POST /v1/agents/run
+               instead of /v1/chat/completions. -->
+          <div class="mode-toggle" role="tablist" aria-label="conversation mode">
+            <button class="mode-toggle-btn is-active" data-mode="chat" role="tab" aria-selected="true" title="standard chat completion">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M2.5 4A1.5 1.5 0 0 1 4 2.5h8A1.5 1.5 0 0 1 13.5 4v6A1.5 1.5 0 0 1 12 11.5H6L3 14.5V4"/>
+              </svg>
+              <span>chat</span>
+            </button>
+            <button class="mode-toggle-btn" data-mode="agent" role="tab" aria-selected="false" title="agent runtime — the model can use tools to complete a goal">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="8" cy="6" r="3"/>
+                <path d="M3 14c0-2.8 2.2-5 5-5s5 2.2 5 5"/>
+                <path d="M11 4l1.5-1.5M5 4L3.5 2.5"/>
+              </svg>
+              <span>agent</span>
+            </button>
+          </div>
+          <div class="mode-chip">
+            <span class="dot accent"></span>
+            local
+          </div>
         </div>
       </header>
 
@@ -269,6 +291,28 @@
       </section>
 
       <footer class="composer-wrap">
+        <!-- Agent-mode-only: tool allow-list. Three read-only tools
+             in slice 1; operator-power users get more via the CLI.
+             Visibility toggled in JS by `body.agent-mode` class. -->
+        <div class="agent-bar" id="agent-bar" hidden>
+          <span class="agent-bar-label">tools the agent may call:</span>
+          <label class="agent-tool-chip">
+            <input type="checkbox" data-agent-tool="web_fetch" checked>
+            <span>web_fetch</span>
+            <span class="agent-tool-hint">fetch a URL, return text</span>
+          </label>
+          <label class="agent-tool-chip">
+            <input type="checkbox" data-agent-tool="search_memory">
+            <span>search_memory</span>
+            <span class="agent-tool-hint">query private memory</span>
+          </label>
+          <label class="agent-tool-chip">
+            <input type="checkbox" data-agent-tool="list_models">
+            <span>list_models</span>
+            <span class="agent-tool-hint">enumerate upstream models</span>
+          </label>
+        </div>
+
         <form class="composer" id="composer" autocomplete="off">
           <textarea
             id="prompt"

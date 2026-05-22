@@ -940,6 +940,16 @@ els.composer.addEventListener("submit", async (e) => {
   const prompt = els.prompt.value.trim();
   if (!prompt || streaming) return;
 
+  // Agent mode: fork the submit path. The agent runtime is
+  // non-streaming in slice 1 — POST returns the full step trace,
+  // which we render into the conversation in one pass.
+  if (agentModeOn()) {
+    els.prompt.value = "";
+    autoresize();
+    await submitAgentRun(prompt);
+    return;
+  }
+
   const chat = ensureActiveChat();
   const now = Date.now();
   const userMsg = { role: "user", text: prompt, ts: now };
@@ -2776,6 +2786,270 @@ document.addEventListener("visibilitychange", () => {
   refreshChatsFromServer();
   fetchTunnel().then((s) => { if (s) renderTunnel(s); });
 });
+
+// ---------------------------------------------------------- agent mode
+//
+// ADR-0012 slice 3: Web UI surface for the agent runtime. Adds:
+//   - A Chat / Agent toggle in the main header.
+//   - A tool-allow-list bar above the composer (visible only in
+//     agent mode).
+//   - A forked submit path that POSTs to /v1/agents/run and renders
+//     the step trace inline in the conversation.
+//
+// State lives in localStorage so the user's chosen mode survives
+// reloads. The toggle's UI is purely cosmetic until they actually
+// submit — switching modes mid-typing doesn't lose what's in the
+// composer.
+
+const AGENT_MODE_LS_KEY = "unhosted.agentMode";
+
+function agentModeOn() {
+  return document.body.classList.contains("agent-mode");
+}
+
+function setAgentMode(on) {
+  document.body.classList.toggle("agent-mode", on);
+  const bar = document.getElementById("agent-bar");
+  if (bar) bar.hidden = !on;
+  // Composer placeholder reflects the mode so the user sees the
+  // affordance, not just an abstract toggle.
+  if (els.prompt) {
+    els.prompt.placeholder = on
+      ? "give the agent a goal — it can fetch URLs, query memory, list models."
+      : "ask anything. shift+enter for newline.";
+  }
+  // Toggle visual state on the buttons.
+  document.querySelectorAll(".mode-toggle-btn").forEach((b) => {
+    const active = (b.dataset.mode === "agent") === on;
+    b.classList.toggle("is-active", active);
+    b.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  try {
+    localStorage.setItem(AGENT_MODE_LS_KEY, on ? "1" : "0");
+  } catch (_) {}
+}
+
+// Wire the toggle buttons. Each click sets agent mode to whichever
+// the clicked button represents.
+document.querySelectorAll(".mode-toggle-btn").forEach((b) => {
+  b.addEventListener("click", () => {
+    setAgentMode(b.dataset.mode === "agent");
+  });
+});
+
+// Restore previous mode on load.
+try {
+  if (localStorage.getItem(AGENT_MODE_LS_KEY) === "1") {
+    setAgentMode(true);
+  }
+} catch (_) {}
+
+function getSelectedAgentTools() {
+  return Array.from(
+    document.querySelectorAll('.agent-tool-chip input[type="checkbox"]:checked'),
+  ).map((cb) => cb.dataset.agentTool);
+}
+
+/**
+ * Run an agent against the supplied goal. Posts to /v1/agents/run,
+ * renders the step trace into the conversation, marks the final
+ * answer with `.turn--agent-final`. Captures step records into the
+ * active chat so reload preserves the trace.
+ */
+async function submitAgentRun(goal) {
+  const chat = ensureActiveChat();
+  const now = Date.now();
+  const userMsg = { role: "user", text: goal, ts: now };
+  chat.messages.push(userMsg);
+  chat.updatedAt = now;
+  if (chat.messages.length === 1) {
+    chat.title = truncate(goal, 48);
+    els.topic.textContent = chat.title;
+  }
+  // Hoist to top of recency list, same as a normal chat would.
+  const idx = store.chats.findIndex((c) => c.id === chat.id);
+  if (idx > 0) {
+    store.chats.splice(idx, 1);
+    store.chats.unshift(chat);
+  }
+  putChat(chat);
+  renderChatList();
+  if (els.empty) els.empty.style.display = "none";
+  renderMessage(userMsg);
+
+  // Show a thinking indicator immediately. The agent endpoint is
+  // non-streaming in slice 1, so this is the only liveness signal
+  // the user gets until the response arrives.
+  const thinkingMsg = {
+    role: "agent_thinking",
+    text: "running agent…",
+    ts: Date.now(),
+  };
+  const thinkingNode = renderAgentTurn(thinkingMsg);
+
+  streaming = true;
+  setSendMode("stop");
+  els.meta.innerHTML = '<span class="info">agent run in progress…</span>';
+
+  const tools = getSelectedAgentTools();
+  const body = {
+    goal,
+    tools,
+    max_steps: 8,
+    max_tokens: 4096,
+    max_seconds: 60,
+    model: "auto",
+  };
+
+  let resp;
+  try {
+    const r = await fetch("/v1/agents/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      const txt = await r.text().catch(() => "");
+      throw new Error(`daemon ${r.status}: ${txt || r.statusText}`);
+    }
+    resp = await r.json();
+  } catch (err) {
+    thinkingNode.remove();
+    const errorMsg = {
+      role: "agent_error",
+      text: `agent run failed: ${err && err.message ? err.message : err}`,
+      ts: Date.now(),
+    };
+    chat.messages.push(errorMsg);
+    renderAgentTurn(errorMsg);
+    streaming = false;
+    setSendMode("send");
+    els.meta.innerHTML = '<span class="hint">enter to send</span>';
+    putChat(chat);
+    return;
+  }
+
+  // Replace the thinking indicator with the rendered trace.
+  thinkingNode.remove();
+
+  const steps = Array.isArray(resp.steps) ? resp.steps : [];
+  for (const step of steps) {
+    if (step.kind === "model_message") {
+      // A model turn with no content + tool_calls > 0 is a "thinking"
+      // step. Show it compactly so the conversation reads as
+      // "agent decided to fetch / agent decided" rather than blank
+      // assistant bubbles.
+      if (!step.content || step.content === "") {
+        const m = {
+          role: "agent_thinking",
+          text: `step ${step.step}: deciding (${step.tool_calls_made} tool call${step.tool_calls_made === 1 ? "" : "s"})`,
+          ts: Date.now(),
+        };
+        chat.messages.push(m);
+        renderAgentTurn(m);
+      } else {
+        const m = {
+          role: "assistant",
+          text: step.content,
+          ts: Date.now(),
+          agentStep: step.step,
+        };
+        chat.messages.push(m);
+        renderMessage(m);
+      }
+    } else if (step.kind === "tool_call") {
+      const m = {
+        role: "agent_tool",
+        tool: step.tool,
+        argsHash: step.args_hash,
+        resultChars: step.result_chars,
+        error: step.error || null,
+        ts: Date.now(),
+      };
+      chat.messages.push(m);
+      renderAgentTurn(m);
+    }
+  }
+
+  // Final answer: highlight it so the user's eye lands on the
+  // result, not the trace. If the last step was a model_message
+  // with content, mark its bubble as final.
+  const finalText = resp.final_answer || "";
+  const lastConvBubble = els.conversation.lastElementChild;
+  if (lastConvBubble && finalText && lastConvBubble.dataset.role === "assistant") {
+    lastConvBubble.classList.add("turn--agent-final");
+  } else if (finalText) {
+    // No assistant bubble preceded — the run terminated on a
+    // non-final-answer reason (max_steps, dlp_blocked, etc.) and
+    // `final_answer` carries the system's explanation. Render it.
+    const m = {
+      role: "agent_error",
+      text: finalText,
+      ts: Date.now(),
+    };
+    chat.messages.push(m);
+    renderAgentTurn(m);
+  }
+
+  // Stop footer indicator.
+  const reasonLabel = (resp.stopped_because || "unknown").replace(/_/g, " ");
+  els.meta.innerHTML = `<span class="info">agent stopped: ${escapeHtml(reasonLabel)} · ${resp.tokens_used || 0} tokens · run ${escapeHtml((resp.run_id || "").slice(0, 8))}</span>`;
+  streaming = false;
+  setSendMode("send");
+  putChat(chat);
+  els.scroll.scrollTop = els.scroll.scrollHeight;
+}
+
+/**
+ * Render a non-chat agent turn (thinking indicator, tool call, or
+ * error) and return the DOM node so the caller can remove or update
+ * it later. Mirrors renderMessage()'s shape so the existing layout
+ * works without changes.
+ */
+function renderAgentTurn(msg) {
+  const node = document.createElement("div");
+  node.className = "turn";
+  node.dataset.role = msg.role;
+
+  if (msg.role === "agent_thinking") {
+    node.classList.add("turn--agent-thinking");
+    node.textContent = msg.text || "thinking…";
+  } else if (msg.role === "agent_tool") {
+    node.classList.add("turn--agent-tool");
+    if (msg.error) node.classList.add("is-error");
+    const name = document.createElement("span");
+    name.className = "agent-tool-name";
+    name.textContent = `🔧 ${msg.tool}`;
+    const meta = document.createElement("span");
+    meta.className = "agent-tool-meta";
+    if (msg.error) {
+      meta.textContent = `error: ${truncate(String(msg.error), 120)}`;
+    } else {
+      meta.textContent = `args#${(msg.argsHash || "").slice(0, 8)}  ${msg.resultChars || 0} chars`;
+    }
+    node.append(name, meta);
+  } else if (msg.role === "agent_error") {
+    node.classList.add("turn--agent-tool", "is-error");
+    node.textContent = msg.text || "agent error";
+  }
+  els.conversation.appendChild(node);
+  els.scroll.scrollTop = els.scroll.scrollHeight;
+  return node;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(
+    /[&<>"']/g,
+    (c) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[c],
+  );
+}
 
 // ---------------------------------------------------------- settings modal
 // Owns every "configuration" panel that used to clutter the sidebar

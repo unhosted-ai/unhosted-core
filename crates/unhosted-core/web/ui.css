@@ -2224,3 +2224,187 @@ button:focus-visible, input:focus-visible, textarea:focus-visible,
 .sidebar-foot { gap: 6px; }
 .sidebar-foot .foot-links { flex: 1 1 auto; }
 .sidebar-foot .icon-btn { flex-shrink: 0; }
+
+/* ==========================================================================
+   Agent mode (ADR-0012 slice 3) — Chat / Agent toggle in the main header,
+   tool-allow-list bar above the composer, step-trace bubbles in the
+   conversation area.
+   ========================================================================== */
+
+.head-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Toggle pill: two buttons in a tight container. Active one has the
+   accent underline and full-opacity text; inactive is muted. Mirrors
+   the docs site's mode pattern so the visual language is consistent. */
+.mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 2px;
+  background: var(--surface);
+  gap: 0;
+}
+.mode-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--mute);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color .15s ease, background .15s ease;
+}
+.mode-toggle-btn svg { width: 12px; height: 12px; flex-shrink: 0; opacity: 0.85; }
+.mode-toggle-btn:hover {
+  color: var(--fg);
+}
+.mode-toggle-btn.is-active {
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+.mode-toggle-btn.is-active svg { opacity: 1; }
+
+/* When agent mode is on at the document level, the topic label
+   gains a subtle "agent" hint — keeps the conversation grounded
+   in "what mode am I in". */
+body.agent-mode .topic::after {
+  content: " · agent mode";
+  color: var(--accent);
+  font-weight: 500;
+  font-size: 12px;
+}
+
+/* Tool-allow-list bar above the composer. Hidden in chat mode;
+   shown when body.agent-mode is set. Each tool is a checkbox-as-chip
+   so the user sees the registry at a glance. */
+.agent-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 12px;
+}
+/* Same trap as .settings-panel: `display: flex` here would otherwise
+   beat the user-agent `[hidden] { display: none }` rule and the bar
+   would always be visible. Re-establish hard-hide for the agent-bar
+   specifically. */
+.agent-bar[hidden] {
+  display: none;
+}
+.agent-bar-label {
+  color: var(--mute);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  margin-right: 4px;
+}
+.agent-tool-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--bg);
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+.agent-tool-chip:hover { border-color: var(--fg); }
+.agent-tool-chip input[type="checkbox"] {
+  margin: 0;
+  width: 12px;
+  height: 12px;
+  accent-color: var(--accent);
+}
+.agent-tool-chip input:not(:checked) ~ span {
+  color: var(--mute);
+}
+.agent-tool-chip .agent-tool-hint {
+  color: var(--mute);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+/* Step trace in the conversation area. Three new bubble flavors:
+     .turn--agent-thinking    — the "running step N..." indicator
+     .turn--agent-tool        — compact row showing tool name + result size
+     .turn--agent-final       — final-answer bubble with subtle highlight
+   They reuse the existing `.turn` base styles for spacing and avatars. */
+.turn--agent-tool {
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  font-size: 12.5px;
+  color: var(--mute);
+  padding: 4px 12px;
+  margin: 4px 0;
+  border-left: 2px solid var(--line-strong);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.turn--agent-tool .agent-tool-name {
+  color: var(--fg);
+  font-weight: 600;
+}
+.turn--agent-tool .agent-tool-meta {
+  color: var(--mute);
+}
+.turn--agent-tool.is-error {
+  border-left-color: var(--accent);
+  color: var(--accent);
+}
+
+.turn--agent-thinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--mute);
+  padding: 8px 12px;
+  font-style: italic;
+}
+.turn--agent-thinking::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: agent-pulse 1.2s ease-in-out infinite;
+}
+@keyframes agent-pulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.85); }
+  50%      { opacity: 1;   transform: scale(1.15); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .turn--agent-thinking::before { animation: none; opacity: 0.7; }
+}
+
+.turn--agent-final {
+  border-left: 3px solid var(--accent);
+  padding-left: 12px;
+  margin-left: -15px;
+}
+.turn--agent-final .turn-content {
+  font-weight: 450;
+}
+
+/* Mobile: the tool bar wraps, and the toggle compacts slightly. */
+@media (max-width: 720px) {
+  .head-controls { gap: 8px; }
+  .mode-toggle-btn { padding: 4px 8px; }
+  .mode-toggle-btn span:not(.dot) { display: none; }   /* icon-only on tight screens */
+  .agent-bar { padding: 8px 12px; gap: 6px; }
+  .agent-tool-chip { padding: 4px 8px; font-size: 11.5px; }
+  .agent-tool-chip .agent-tool-hint { display: none; }
+}
