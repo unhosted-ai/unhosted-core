@@ -105,6 +105,39 @@ pub enum AuditEvent {
         /// SIEM diff alert against the previous PolicyChanged event.
         policy: serde_json::Value,
     },
+    /// An agent run started. `goal_hash` is a SHA-256 prefix of the
+    /// goal text — the audit feed must not leak prompt content
+    /// directly. Full goal is logged at debug level via `tracing`.
+    AgentRunStarted {
+        ts: u64,
+        run_id: String,
+        caller: String,
+        goal_hash: String,
+        tools: Vec<String>,
+        max_steps: u32,
+        max_tokens: u32,
+        max_seconds: u32,
+    },
+    /// A tool call within an agent run. `args_hash` is a SHA-256
+    /// prefix — full args at debug-level tracing only.
+    AgentToolCall {
+        ts: u64,
+        run_id: String,
+        step: u32,
+        tool: String,
+        args_hash: String,
+        result_chars: usize,
+        error: Option<String>,
+    },
+    /// An agent run completed. `stopped_because` is one of the
+    /// reasons documented in ADR-0012.
+    AgentRunCompleted {
+        ts: u64,
+        run_id: String,
+        stopped_because: String,
+        steps_used: u32,
+        tokens_used: u32,
+    },
     /// A chat completion was blocked by the DLP integration. The
     /// `reason` mirrors what the DLP endpoint returned (e.g.
     /// "PII: SSN-pattern matched"). Same caller / model fields as

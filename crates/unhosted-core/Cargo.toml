@@ -44,6 +44,9 @@ rcgen.workspace = true
 # install onnxruntime by hand to use private memory.
 fastembed = { version = "5", default-features = false, features = ["hf-hub-native-tls", "ort-download-binaries-native-tls"] }
 unhosted-payments-core.workspace = true
+# SHA-256 for goal_hash / args_hash in audit events and step
+# records (ADR-0012). Doesn't pull anything heavy in.
+sha2 = "0.10"
 # Lightning rail adapter (LND REST). Pulled in only when the daemon is
 # built with `--features rail-lightning` — the default binary still
 # contains zero rail-specific code, per ADR-0011's "no rail in the

@@ -8,6 +8,7 @@
 //! Peer protocol is the same HTTP API the CLI uses (`POST /v1/run`), so a
 //! peer is just another `unhosted serve` process. No new transport.
 
+pub mod agent;
 pub mod audit;
 pub mod auth;
 pub mod chats;
@@ -488,6 +489,10 @@ pub async fn serve(node: Node) -> Result<()> {
         // Conventional path is `/metrics` (not under /v1) per
         // the Prometheus scrape convention.
         .route("/metrics", get(metrics_handler))
+        // Agent runtime (ADR-0012). POST a goal + tool allow-list;
+        // get back the steps the model took plus a final answer.
+        // Auth-gated like chat completions.
+        .route("/v1/agents/run", post(agents_run_handler))
         // OpenAI-compatible endpoints — any client that speaks OpenAI's HTTP
         // API (Delta, LangChain, LlamaIndex, OpenWebUI, …) can point at
         // http://127.0.0.1:7777 instead of OpenAI / Ollama / llama-server.
@@ -832,6 +837,45 @@ async fn metrics_handler(
     let body = state.metrics.to_prometheus_text();
     use axum::response::IntoResponse;
     Ok(([(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")], body).into_response())
+}
+
+/// Agent runtime endpoint (ADR-0012). Same auth posture as chat
+/// completions (loopback / bearer / signed-peer). Builds a
+/// `RunContext` from NodeState and hands it to `agent::run_agent`.
+async fn agents_run_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: bytes::Bytes,
+) -> Result<axum::Json<agent::AgentRunResponse>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &body);
+    require_auth(&outcome, false)?;
+    let req: agent::AgentRunRequest = match serde_json::from_slice(&body) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(error = %e, "agents/run: bad request");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+    // The agent talks to whichever upstream the daemon would proxy a
+    // chat completion to. Resolve once at run start; an in-progress
+    // run pinned to a stale upstream is preferable to mid-loop URL
+    // churn.
+    let live = resolve_upstream(&state.node, &state.vram_pool).await;
+    let upstream_url = match live {
+        Some(u) => u.url,
+        None => state.node.llama_server_url.clone(),
+    };
+    let ctx = agent::RunContext {
+        http: state.http.clone(),
+        upstream_url,
+        audit: state.audit.clone(),
+        metrics: state.metrics.clone(),
+        dlp: state.dlp.clone(),
+        caller_label: outcome.audit_label(),
+    };
+    let resp = agent::run_agent(&ctx, req).await;
+    Ok(axum::Json(resp))
 }
 
 /// CORS policy. Default is local-only — explicit allow-list extends it to

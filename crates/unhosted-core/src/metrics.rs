@@ -65,6 +65,26 @@ pub struct Metrics {
     /// wrong, replay caught). Useful as a security-monitoring
     /// signal — a sudden spike is worth alerting on.
     pub auth_rejections_total: AtomicU64,
+    /// Agent runs started (ADR-0012). Increments at the top of
+    /// `run_agent` before any model call.
+    pub agent_runs_total: AtomicU64,
+    /// Total steps executed across all agent runs. One step =
+    /// one round-trip to the model. Stops at max_steps per run.
+    pub agent_steps_total: AtomicU64,
+    /// Total tool invocations across all agent runs.
+    pub agent_tool_calls_total: AtomicU64,
+    /// Agent runs that terminated via the model's final answer.
+    pub agent_runs_stopped_final_answer: AtomicU64,
+    /// Agent runs that hit max_steps before producing a final answer.
+    pub agent_runs_stopped_max_steps: AtomicU64,
+    /// Agent runs that hit max_tokens before producing a final answer.
+    pub agent_runs_stopped_max_tokens: AtomicU64,
+    /// Agent runs that hit max_seconds before producing a final answer.
+    pub agent_runs_stopped_max_seconds: AtomicU64,
+    /// Agent runs that aborted because a tool returned an error.
+    pub agent_runs_stopped_tool_error: AtomicU64,
+    /// Agent runs that aborted because the DLP hook blocked content.
+    pub agent_runs_stopped_dlp_blocked: AtomicU64,
     /// Process start time, used to compute uptime on scrape.
     started_at: Instant,
     /// Static build version (Cargo's CARGO_PKG_VERSION). Recorded
@@ -84,6 +104,15 @@ impl Metrics {
             tunnel_state_changes_total: AtomicU64::new(0),
             tunnel_state: AtomicI64::new(0),
             auth_rejections_total: AtomicU64::new(0),
+            agent_runs_total: AtomicU64::new(0),
+            agent_steps_total: AtomicU64::new(0),
+            agent_tool_calls_total: AtomicU64::new(0),
+            agent_runs_stopped_final_answer: AtomicU64::new(0),
+            agent_runs_stopped_max_steps: AtomicU64::new(0),
+            agent_runs_stopped_max_tokens: AtomicU64::new(0),
+            agent_runs_stopped_max_seconds: AtomicU64::new(0),
+            agent_runs_stopped_tool_error: AtomicU64::new(0),
+            agent_runs_stopped_dlp_blocked: AtomicU64::new(0),
             started_at: Instant::now(),
             version: env!("CARGO_PKG_VERSION"),
         }
@@ -117,6 +146,37 @@ impl Metrics {
     }
     pub fn inc_auth_rejections(&self) {
         self.auth_rejections_total.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn inc_agent_runs(&self) {
+        self.agent_runs_total.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn inc_agent_steps(&self) {
+        self.agent_steps_total.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn inc_agent_tool_calls(&self) {
+        self.agent_tool_calls_total.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn inc_agent_stop(&self, reason: AgentStopReason) {
+        match reason {
+            AgentStopReason::FinalAnswer => {
+                self.agent_runs_stopped_final_answer.fetch_add(1, Ordering::Relaxed);
+            }
+            AgentStopReason::MaxSteps => {
+                self.agent_runs_stopped_max_steps.fetch_add(1, Ordering::Relaxed);
+            }
+            AgentStopReason::MaxTokens => {
+                self.agent_runs_stopped_max_tokens.fetch_add(1, Ordering::Relaxed);
+            }
+            AgentStopReason::MaxSeconds => {
+                self.agent_runs_stopped_max_seconds.fetch_add(1, Ordering::Relaxed);
+            }
+            AgentStopReason::ToolError => {
+                self.agent_runs_stopped_tool_error.fetch_add(1, Ordering::Relaxed);
+            }
+            AgentStopReason::DlpBlocked => {
+                self.agent_runs_stopped_dlp_blocked.fetch_add(1, Ordering::Relaxed);
+            }
+        }
     }
 
     /// Render the current values as Prometheus text format. Called
@@ -201,6 +261,54 @@ impl Metrics {
             self.auth_rejections_total.load(Ordering::Relaxed)
         ));
 
+        out.push_str("# HELP unhosted_agent_runs_total Total agent runs started.\n");
+        out.push_str("# TYPE unhosted_agent_runs_total counter\n");
+        out.push_str(&format!(
+            "unhosted_agent_runs_total {}\n",
+            self.agent_runs_total.load(Ordering::Relaxed)
+        ));
+
+        out.push_str("# HELP unhosted_agent_steps_total Total agent steps across all runs.\n");
+        out.push_str("# TYPE unhosted_agent_steps_total counter\n");
+        out.push_str(&format!(
+            "unhosted_agent_steps_total {}\n",
+            self.agent_steps_total.load(Ordering::Relaxed)
+        ));
+
+        out.push_str("# HELP unhosted_agent_tool_calls_total Total tool invocations across all agent runs.\n");
+        out.push_str("# TYPE unhosted_agent_tool_calls_total counter\n");
+        out.push_str(&format!(
+            "unhosted_agent_tool_calls_total {}\n",
+            self.agent_tool_calls_total.load(Ordering::Relaxed)
+        ));
+
+        out.push_str("# HELP unhosted_agent_runs_stopped_by Agent runs by stop reason.\n");
+        out.push_str("# TYPE unhosted_agent_runs_stopped_by counter\n");
+        out.push_str(&format!(
+            "unhosted_agent_runs_stopped_by{{reason=\"final_answer\"}} {}\n",
+            self.agent_runs_stopped_final_answer.load(Ordering::Relaxed)
+        ));
+        out.push_str(&format!(
+            "unhosted_agent_runs_stopped_by{{reason=\"max_steps\"}} {}\n",
+            self.agent_runs_stopped_max_steps.load(Ordering::Relaxed)
+        ));
+        out.push_str(&format!(
+            "unhosted_agent_runs_stopped_by{{reason=\"max_tokens\"}} {}\n",
+            self.agent_runs_stopped_max_tokens.load(Ordering::Relaxed)
+        ));
+        out.push_str(&format!(
+            "unhosted_agent_runs_stopped_by{{reason=\"max_seconds\"}} {}\n",
+            self.agent_runs_stopped_max_seconds.load(Ordering::Relaxed)
+        ));
+        out.push_str(&format!(
+            "unhosted_agent_runs_stopped_by{{reason=\"tool_error\"}} {}\n",
+            self.agent_runs_stopped_tool_error.load(Ordering::Relaxed)
+        ));
+        out.push_str(&format!(
+            "unhosted_agent_runs_stopped_by{{reason=\"dlp_blocked\"}} {}\n",
+            self.agent_runs_stopped_dlp_blocked.load(Ordering::Relaxed)
+        ));
+
         out
     }
 }
@@ -220,6 +328,18 @@ pub enum TunnelStateCode {
     Starting = 1,
     Live = 2,
     Failed = 3,
+}
+
+/// Why an agent run ended. Mirrors `agent::StoppedBecause` but lives
+/// here so `metrics.rs` doesn't depend on `agent.rs`.
+#[derive(Debug, Clone, Copy)]
+pub enum AgentStopReason {
+    FinalAnswer,
+    MaxSteps,
+    MaxTokens,
+    MaxSeconds,
+    ToolError,
+    DlpBlocked,
 }
 
 #[cfg(test)]
