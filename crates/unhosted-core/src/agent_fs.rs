@@ -121,6 +121,36 @@ pub struct GrepMatch {
     pub line: String,
 }
 
+/// What `git_log` returns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitLogOutcome {
+    Ok {
+        commits: Vec<GitCommit>,
+        truncated: bool,
+    },
+    Err(ReadFileError),
+}
+
+/// One commit in a git_log result.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct GitCommit {
+    /// Full 40-char SHA-1 hash.
+    pub sha: String,
+    /// ISO-8601 author date.
+    pub date: String,
+    /// Author name (as recorded in the commit; not validated).
+    pub author: String,
+    /// Subject line (the first line of the commit message). Trimmed
+    /// to 240 chars to keep the response bounded.
+    pub subject: String,
+}
+
+/// Hard cap on commits returned per `git_log` call.
+pub const GIT_LOG_MAX_ENTRIES: usize = 200;
+/// Cap on the spawned `git log` subprocess's runtime so a corrupted
+/// repository or a pathological filter can't hang the daemon.
+pub const GIT_LOG_TIMEOUT_SECS: u64 = 10;
+
 /// A single entry in a directory listing. Kind is one of `"file"`,
 /// `"dir"`, `"symlink"`, `"other"`. Size is bytes for files; 0 for
 /// directories and non-file entries.
@@ -590,6 +620,170 @@ pub fn grep_files(
     }
 }
 
+/// Read commit history from a git repository inside the allow-list.
+/// Spawns `git log --pretty=...` with a bounded argv (no shell), a
+/// hard timeout, and a fixed cwd. Same sandbox machinery as
+/// read_file / list_dir / grep_files, plus a `.git/` existence check
+/// since logging a non-git directory is nonsense.
+///
+/// argv layout:
+///   git log
+///       --pretty=format:%H|%aI|%an|%s
+///       --no-color
+///       --max-count=<N>
+///       [-- <file>]
+///
+/// Each value lives in its own argv slot — never concatenated into a
+/// shell string — so `file = "foo; rm -rf /"` would just be one
+/// pathspec arg that git refuses to resolve, not a shell injection.
+pub async fn git_log(
+    cfg: Option<&Arc<AgentFsConfig>>,
+    root: &str,
+    file: Option<&str>,
+    max_entries: usize,
+) -> GitLogOutcome {
+    let Some(cfg) = cfg else {
+        return GitLogOutcome::Err(ReadFileError::NotConfigured);
+    };
+    if cfg.allow_roots.is_empty() {
+        return GitLogOutcome::Err(ReadFileError::NotConfigured);
+    }
+
+    let root_buf = PathBuf::from(root);
+    if !root_buf.is_absolute() {
+        return GitLogOutcome::Err(ReadFileError::NotAbsolute);
+    }
+    if !cfg.follow_symlinks {
+        if let Ok(m) = std::fs::symlink_metadata(&root_buf) {
+            if m.file_type().is_symlink() {
+                return GitLogOutcome::Err(ReadFileError::SymlinkRefused);
+            }
+        }
+    }
+    let canonical_root = match std::fs::canonicalize(&root_buf) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return GitLogOutcome::Err(ReadFileError::NotFound);
+        }
+        Err(e) => return GitLogOutcome::Err(ReadFileError::Io(e.to_string())),
+    };
+
+    let under_allow_list = cfg
+        .allow_roots
+        .iter()
+        .any(|r| &canonical_root == r || is_strictly_under(&canonical_root, r));
+    if !under_allow_list {
+        return GitLogOutcome::Err(ReadFileError::OutsideAllowList);
+    }
+
+    let lower = canonical_root.to_string_lossy().to_lowercase();
+    for pat in &cfg.deny_patterns {
+        if lower.contains(&pat.to_lowercase()) {
+            return GitLogOutcome::Err(ReadFileError::DenyPattern(pat.clone()));
+        }
+    }
+
+    // Must look like a git repo. We don't require `.git` to be a
+    // directory specifically — submodules and worktrees use a
+    // `.git` file containing a `gitdir: ...` pointer. Either form
+    // is accepted; git itself handles the indirection.
+    if !canonical_root.join(".git").exists() {
+        return GitLogOutcome::Err(ReadFileError::Io(
+            "not a git repository (no .git at root)".into(),
+        ));
+    }
+
+    let capped = max_entries.min(GIT_LOG_MAX_ENTRIES).max(1);
+
+    let mut cmd = tokio::process::Command::new("git");
+    cmd.arg("log")
+        .arg("--pretty=format:%H|%aI|%an|%s")
+        .arg("--no-color")
+        .arg(format!("--max-count={capped}"))
+        .current_dir(&canonical_root);
+    if let Some(f) = file {
+        // Validate the filter path stays inside the allow-list when
+        // it's an absolute path. If it's a relative path, git
+        // resolves it against the cwd we already set — no escape
+        // surface beyond what the allow-list already permits.
+        let filter_buf = PathBuf::from(f);
+        if filter_buf.is_absolute() {
+            let canon = match std::fs::canonicalize(&filter_buf) {
+                Ok(c) => c,
+                Err(_) => {
+                    return GitLogOutcome::Err(ReadFileError::NotFound);
+                }
+            };
+            let inside = cfg
+                .allow_roots
+                .iter()
+                .any(|r| &canon == r || is_strictly_under(&canon, r));
+            if !inside {
+                return GitLogOutcome::Err(ReadFileError::OutsideAllowList);
+            }
+        }
+        cmd.arg("--").arg(f);
+    }
+
+    let output_fut = cmd.output();
+    let output = match tokio::time::timeout(
+        std::time::Duration::from_secs(GIT_LOG_TIMEOUT_SECS),
+        output_fut,
+    )
+    .await
+    {
+        Ok(Ok(o)) => o,
+        Ok(Err(e)) => return GitLogOutcome::Err(ReadFileError::Io(format!("spawn: {e}"))),
+        Err(_) => {
+            return GitLogOutcome::Err(ReadFileError::Io(format!(
+                "git log timed out after {}s",
+                GIT_LOG_TIMEOUT_SECS
+            )));
+        }
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let trimmed = stderr.trim().chars().take(240).collect::<String>();
+        return GitLogOutcome::Err(ReadFileError::Io(format!("git: {trimmed}")));
+    }
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut commits = Vec::with_capacity(capped);
+    for line in text.lines() {
+        if commits.len() >= capped {
+            break;
+        }
+        // Each commit line is %H|%aI|%an|%s. We split into 4 parts
+        // from the left so a `|` in the subject doesn't break the
+        // parse.
+        let mut parts = line.splitn(4, '|');
+        let sha = parts.next().unwrap_or("").to_string();
+        let date = parts.next().unwrap_or("").to_string();
+        let author = parts.next().unwrap_or("").to_string();
+        let subject_raw = parts.next().unwrap_or("");
+        if sha.is_empty() {
+            continue;
+        }
+        let subject = if subject_raw.chars().count() > 240 {
+            let mut s: String = subject_raw.chars().take(240).collect();
+            s.push('…');
+            s
+        } else {
+            subject_raw.to_string()
+        };
+        commits.push(GitCommit {
+            sha,
+            date,
+            author,
+            subject,
+        });
+    }
+
+    let truncated = commits.len() >= capped && text.lines().count() > capped;
+    GitLogOutcome::Ok { commits, truncated }
+}
+
 /// Strictly-under check that respects the path-separator boundary —
 /// `/a/foo2` is NOT under `/a/foo`. Uses `Path::starts_with`'s
 /// component-aware comparison which already gives us that property.
@@ -1055,6 +1249,163 @@ mod tests {
         assert!(matches!(
             grep_files(None, "/tmp", "x", false),
             GrepOutcome::Err(ReadFileError::NotConfigured)
+        ));
+    }
+
+    // ─── git_log ─────────────────────────────────────────────────
+
+    /// Helper: spawn a small git repo in `path` with `commits` listed
+    /// commits made in order. Skipped silently if `git` isn't on PATH.
+    fn make_repo(path: &Path, commits: &[&str]) -> bool {
+        use std::process::Command;
+        if Command::new("git").arg("--version").output().is_err() {
+            return false;
+        }
+        let run = |args: &[&str]| -> bool {
+            Command::new("git")
+                .args(args)
+                .current_dir(path)
+                .env("GIT_AUTHOR_NAME", "Test User")
+                .env("GIT_AUTHOR_EMAIL", "test@example.com")
+                .env("GIT_COMMITTER_NAME", "Test User")
+                .env("GIT_COMMITTER_EMAIL", "test@example.com")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        };
+        if !run(&["init", "--initial-branch=main"]) {
+            // Older git lacks `--initial-branch`; fall back.
+            if !run(&["init"]) {
+                return false;
+            }
+        }
+        for (i, msg) in commits.iter().enumerate() {
+            let fname = format!("file_{i}.txt");
+            write_file(&path.join(&fname), b"content");
+            if !run(&["add", &fname]) {
+                return false;
+            }
+            if !run(&["commit", "-m", msg]) {
+                return false;
+            }
+        }
+        true
+    }
+
+    #[tokio::test]
+    async fn git_log_returns_commits_in_order() {
+        let (_td, root) = temp_dir();
+        if !make_repo(&root, &["first commit", "second commit", "third commit"]) {
+            eprintln!("git unavailable, skipping");
+            return;
+        }
+        let cfg = cfg_with(vec![root.clone()]);
+        match git_log(Some(&cfg), root.to_str().unwrap(), None, 10).await {
+            GitLogOutcome::Ok { commits, truncated } => {
+                assert!(!truncated);
+                assert_eq!(commits.len(), 3);
+                // git log is newest-first.
+                assert_eq!(commits[0].subject, "third commit");
+                assert_eq!(commits[1].subject, "second commit");
+                assert_eq!(commits[2].subject, "first commit");
+                assert!(commits[0].sha.len() == 40);
+                assert!(commits[0].date.starts_with("20"));
+                assert_eq!(commits[0].author, "Test User");
+            }
+            other => panic!("expected Ok, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn git_log_respects_max_entries_cap() {
+        let (_td, root) = temp_dir();
+        if !make_repo(
+            &root,
+            &["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9", "c10"],
+        ) {
+            eprintln!("git unavailable, skipping");
+            return;
+        }
+        let cfg = cfg_with(vec![root.clone()]);
+        match git_log(Some(&cfg), root.to_str().unwrap(), None, 3).await {
+            GitLogOutcome::Ok { commits, .. } => {
+                assert_eq!(commits.len(), 3);
+            }
+            other => panic!("expected Ok, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn git_log_filters_by_file() {
+        let (_td, root) = temp_dir();
+        if !make_repo(&root, &["c0", "c1", "c2"]) {
+            eprintln!("git unavailable, skipping");
+            return;
+        }
+        let cfg = cfg_with(vec![root.clone()]);
+        // The repo's c1 commit added file_1.txt and only that.
+        // Filtering should return exactly one commit.
+        match git_log(Some(&cfg), root.to_str().unwrap(), Some("file_1.txt"), 10).await {
+            GitLogOutcome::Ok { commits, .. } => {
+                assert_eq!(commits.len(), 1);
+                assert_eq!(commits[0].subject, "c1");
+            }
+            other => panic!("expected Ok with one commit, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn git_log_rejects_non_git_directory() {
+        let (_td, root) = temp_dir();
+        write_file(&root.join("readme.txt"), b"not a git repo");
+        let cfg = cfg_with(vec![root.clone()]);
+        match git_log(Some(&cfg), root.to_str().unwrap(), None, 5).await {
+            GitLogOutcome::Err(ReadFileError::Io(msg)) => {
+                assert!(msg.contains("not a git repository"));
+            }
+            other => panic!("expected Io(not a git repo), got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn git_log_rejects_path_outside_allow_list() {
+        let (_td, root) = temp_dir();
+        if !make_repo(&root, &["x"]) {
+            eprintln!("git unavailable, skipping");
+            return;
+        }
+        let (_td2, other) = temp_dir();
+        let cfg = cfg_with(vec![other]);
+        let outcome = git_log(Some(&cfg), root.to_str().unwrap(), None, 5).await;
+        assert!(matches!(
+            outcome,
+            GitLogOutcome::Err(ReadFileError::OutsideAllowList)
+        ));
+    }
+
+    #[tokio::test]
+    async fn git_log_absolute_file_filter_must_be_inside_allowlist() {
+        let (_td, root) = temp_dir();
+        if !make_repo(&root, &["c0"]) {
+            eprintln!("git unavailable, skipping");
+            return;
+        }
+        let cfg = cfg_with(vec![root.clone()]);
+        // Absolute path OUTSIDE the allow-list as file filter.
+        let outcome = git_log(Some(&cfg), root.to_str().unwrap(), Some("/etc/hostname"), 5).await;
+        assert!(matches!(
+            outcome,
+            GitLogOutcome::Err(ReadFileError::OutsideAllowList)
+                | GitLogOutcome::Err(ReadFileError::NotFound)
+        ));
+    }
+
+    #[tokio::test]
+    async fn git_log_missing_config_returns_not_configured() {
+        let outcome = git_log(None, "/tmp", None, 5).await;
+        assert!(matches!(
+            outcome,
+            GitLogOutcome::Err(ReadFileError::NotConfigured)
         ));
     }
 

@@ -606,6 +606,21 @@ your prompt
             <span class="hiw-rt-port">sandboxed</span>
             <p>list a directory's entries inside the allow-list. returns sorted file + dir entries with kind and size, capped at 500. shares the <code>agent-fs.toml</code> sandbox with <code>read_file</code>. critical companion tool for "explore this codebase" agent loops.</p>
           </div>
+          <div class="hiw-rt">
+            <span class="hiw-rt-name">grep</span>
+            <span class="hiw-rt-port">sandboxed</span>
+            <p>recursive literal-substring search across the allow-listed tree. returns up to 200 matches with file path and line number. case-insensitive option, binary / large / deny-listed files skipped. literal text only — no regex (avoids ReDoS surface).</p>
+          </div>
+          <div class="hiw-rt">
+            <span class="hiw-rt-name">git_log</span>
+            <span class="hiw-rt-port">sandboxed</span>
+            <p>read-only git history for a repository inside the allow-list. returns up to 200 newest-first commits with sha, iso-8601 date, author, subject. optional file filter. argv-built (no shell), 10s timeout — safe to expose to the model.</p>
+          </div>
+          <div class="hiw-rt">
+            <span class="hiw-rt-name">cite</span>
+            <span class="hiw-rt-port">declarative</span>
+            <p>record a structured citation tying a claim to a source URL or path. claim, source, optional verbatim quote, retrieved-at timestamp. surfaces in the run response as <code>citations[]</code> so downstream renderers can show footnotes. doesn't verify the source — records what the agent reports.</p>
+          </div>
         </div>
         <p class="hiw-callout"><strong>blast-radius posture.</strong> the four shipped tools are read-only by construction. shell (<code>run_command</code>), filesystem write (<code>write_file</code>), directory listing (<code>list_dir</code>), and MCP-as-tool each warrant their own ADR before shipping, because each expands the blast radius and needs sandboxing analysis. the registry lives in the daemon — operators wanting to permanently disable a tool patch the registry in code.</p>
 

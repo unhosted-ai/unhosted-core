@@ -231,6 +231,7 @@ pub fn known_tools() -> BTreeSet<&'static str> {
     s.insert("list_dir");
     s.insert("grep");
     s.insert("cite");
+    s.insert("git_log");
     s
 }
 
@@ -501,6 +502,39 @@ fn tool_definitions(allowed: &[String]) -> Vec<ToolDef> {
                         }
                     },
                     "required": ["path"]
+                }),
+            },
+        });
+    }
+    if allow.contains("git_log") {
+        out.push(ToolDef {
+            kind: "function",
+            function: ToolFunctionDef {
+                name: "git_log",
+                description:
+                    "Read commit history from a git repository inside an allow-listed root. \
+                     Returns up to 200 newest-first commits with SHA, ISO-8601 date, author name, \
+                     and subject line. Optionally filter by a file (path relative to the repo root, \
+                     or an absolute path that must also be inside an allow-listed root). \
+                     Read-only — does not modify history.",
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "root": {
+                            "type": "string",
+                            "description": "Absolute path to the git repository's root (the directory containing .git)."
+                        },
+                        "file": {
+                            "type": "string",
+                            "description": "Optional: only show commits that touched this file. Path relative to `root`, or absolute and inside an allow-listed root."
+                        },
+                        "max_entries": {
+                            "type": "integer",
+                            "description": "Max commits to return (1..=200). Default 50.",
+                            "default": 50
+                        }
+                    },
+                    "required": ["root"]
                 }),
             },
         });
@@ -1083,6 +1117,38 @@ async fn execute_tool(
                 }
                 agent_fs::ReadFileOutcome::Err(e) => {
                     (String::new(), Some(format!("read_file: {}", e.label())))
+                }
+            }
+        }
+        "git_log" => {
+            let Some(root) = args.get("root").and_then(|v| v.as_str()) else {
+                return (
+                    String::new(),
+                    Some("git_log: missing `root` argument".into()),
+                );
+            };
+            let file = args.get("file").and_then(|v| v.as_str());
+            let max_entries = args
+                .get("max_entries")
+                .and_then(|v| v.as_u64())
+                .map(|n| n as usize)
+                .unwrap_or(50);
+            match agent_fs::git_log(ctx.agent_fs.as_ref(), root, file, max_entries).await {
+                agent_fs::GitLogOutcome::Ok { commits, truncated } => {
+                    let body = serde_json::json!({
+                        "root": root,
+                        "file": file,
+                        "count": commits.len(),
+                        "truncated": truncated,
+                        "commits": commits,
+                    });
+                    (
+                        serde_json::to_string_pretty(&body).unwrap_or_default(),
+                        None,
+                    )
+                }
+                agent_fs::GitLogOutcome::Err(e) => {
+                    (String::new(), Some(format!("git_log: {}", e.label())))
                 }
             }
         }
