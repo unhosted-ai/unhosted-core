@@ -31,8 +31,7 @@ struct ReleaseInfo {
     tag_name: String,
 }
 
-const LATEST_URL: &str =
-    "https://api.github.com/repos/unhosted-ai/unhosted-core/releases/latest";
+const LATEST_URL: &str = "https://api.github.com/repos/unhosted-ai/unhosted-core/releases/latest";
 
 /// Run the check unless disabled. Returns `Ok(Some(tag))` when a
 /// newer version is published, `Ok(None)` when up-to-date, and

@@ -1491,8 +1491,17 @@ async fn run_agent_action(action: AgentAction) -> Result<()> {
             model,
             json,
         } => {
-            run_agent_remote(goal, tools, max_steps, max_tokens, max_seconds, &node, &model, json)
-                .await
+            run_agent_remote(
+                goal,
+                tools,
+                max_steps,
+                max_tokens,
+                max_seconds,
+                &node,
+                &model,
+                json,
+            )
+            .await
         }
     }
 }
@@ -1549,7 +1558,10 @@ async fn run_agent_remote(
         let text = resp.text().await.unwrap_or_default();
         anyhow::bail!("daemon returned {status}: {text}");
     }
-    let raw: serde_json::Value = resp.json().await.context("parsing /v1/agents/run response")?;
+    let raw: serde_json::Value = resp
+        .json()
+        .await
+        .context("parsing /v1/agents/run response")?;
     if json {
         // Raw JSON mode: pipeable into jq.
         let pretty = serde_json::to_string_pretty(&raw)?;
@@ -1575,7 +1587,10 @@ fn print_agent_run_trace(resp: &serde_json::Value) {
         .get("stopped_because")
         .and_then(|v| v.as_str())
         .unwrap_or("?");
-    let tokens = resp.get("tokens_used").and_then(|v| v.as_u64()).unwrap_or(0);
+    let tokens = resp
+        .get("tokens_used")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
     let steps = resp.get("steps").and_then(|v| v.as_array());
 
     if let Some(steps) = steps {
@@ -1584,26 +1599,26 @@ fn print_agent_run_trace(resp: &serde_json::Value) {
             let step_n = step.get("step").and_then(|v| v.as_u64()).unwrap_or(0);
             match kind {
                 "model_message" => {
-                    let content = step
-                        .get("content")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
+                    let content = step.get("content").and_then(|v| v.as_str()).unwrap_or("");
                     let tcm = step
                         .get("tool_calls_made")
                         .and_then(|v| v.as_u64())
                         .unwrap_or(0);
                     if content.is_empty() {
-                        println!("  [step {step_n}] model: ({tcm} tool call{})", if tcm == 1 { "" } else { "s" });
+                        println!(
+                            "  [step {step_n}] model: ({tcm} tool call{})",
+                            if tcm == 1 { "" } else { "s" }
+                        );
                     } else {
-                        println!("  [step {step_n}] model: {}", trim_for_display(content, 200));
+                        println!(
+                            "  [step {step_n}] model: {}",
+                            trim_for_display(content, 200)
+                        );
                     }
                 }
                 "tool_call" => {
                     let tool = step.get("tool").and_then(|v| v.as_str()).unwrap_or("?");
-                    let args_hash = step
-                        .get("args_hash")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
+                    let args_hash = step.get("args_hash").and_then(|v| v.as_str()).unwrap_or("");
                     let chars = step
                         .get("result_chars")
                         .and_then(|v| v.as_u64())
@@ -1738,7 +1753,10 @@ async fn run_upgrade(force: bool) -> Result<()> {
                 })
                 .unwrap_or(false);
             if writable {
-                println!("install dir: {} (matching current binary location)", dir.display());
+                println!(
+                    "install dir: {} (matching current binary location)",
+                    dir.display()
+                );
                 child.env("UNHOSTED_INSTALL_DIR", dir);
             }
         }

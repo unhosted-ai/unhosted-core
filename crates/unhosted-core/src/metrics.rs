@@ -159,22 +159,28 @@ impl Metrics {
     pub fn inc_agent_stop(&self, reason: AgentStopReason) {
         match reason {
             AgentStopReason::FinalAnswer => {
-                self.agent_runs_stopped_final_answer.fetch_add(1, Ordering::Relaxed);
+                self.agent_runs_stopped_final_answer
+                    .fetch_add(1, Ordering::Relaxed);
             }
             AgentStopReason::MaxSteps => {
-                self.agent_runs_stopped_max_steps.fetch_add(1, Ordering::Relaxed);
+                self.agent_runs_stopped_max_steps
+                    .fetch_add(1, Ordering::Relaxed);
             }
             AgentStopReason::MaxTokens => {
-                self.agent_runs_stopped_max_tokens.fetch_add(1, Ordering::Relaxed);
+                self.agent_runs_stopped_max_tokens
+                    .fetch_add(1, Ordering::Relaxed);
             }
             AgentStopReason::MaxSeconds => {
-                self.agent_runs_stopped_max_seconds.fetch_add(1, Ordering::Relaxed);
+                self.agent_runs_stopped_max_seconds
+                    .fetch_add(1, Ordering::Relaxed);
             }
             AgentStopReason::ToolError => {
-                self.agent_runs_stopped_tool_error.fetch_add(1, Ordering::Relaxed);
+                self.agent_runs_stopped_tool_error
+                    .fetch_add(1, Ordering::Relaxed);
             }
             AgentStopReason::DlpBlocked => {
-                self.agent_runs_stopped_dlp_blocked.fetch_add(1, Ordering::Relaxed);
+                self.agent_runs_stopped_dlp_blocked
+                    .fetch_add(1, Ordering::Relaxed);
             }
         }
     }
@@ -198,14 +204,18 @@ impl Metrics {
         out.push_str("# TYPE unhosted_uptime_seconds counter\n");
         out.push_str(&format!("unhosted_uptime_seconds {uptime}\n"));
 
-        out.push_str("# HELP unhosted_chat_completions_total Total chat completion requests handled.\n");
+        out.push_str(
+            "# HELP unhosted_chat_completions_total Total chat completion requests handled.\n",
+        );
         out.push_str("# TYPE unhosted_chat_completions_total counter\n");
         out.push_str(&format!(
             "unhosted_chat_completions_total {}\n",
             self.chat_completions_total.load(Ordering::Relaxed)
         ));
 
-        out.push_str("# HELP unhosted_chat_completions_active Currently in-flight chat completions.\n");
+        out.push_str(
+            "# HELP unhosted_chat_completions_active Currently in-flight chat completions.\n",
+        );
         out.push_str("# TYPE unhosted_chat_completions_active gauge\n");
         out.push_str(&format!(
             "unhosted_chat_completions_active {}\n",
@@ -240,7 +250,9 @@ impl Metrics {
             self.policy_changes_total.load(Ordering::Relaxed)
         ));
 
-        out.push_str("# HELP unhosted_tunnel_state_changes_total Cloudflare-tunnel state transitions.\n");
+        out.push_str(
+            "# HELP unhosted_tunnel_state_changes_total Cloudflare-tunnel state transitions.\n",
+        );
         out.push_str("# TYPE unhosted_tunnel_state_changes_total counter\n");
         out.push_str(&format!(
             "unhosted_tunnel_state_changes_total {}\n",
@@ -393,7 +405,13 @@ mod tests {
     fn build_info_carries_cargo_pkg_version() {
         let m = Metrics::new();
         let text = m.to_prometheus_text();
-        let expected = format!("unhosted_build_info{{version=\"{}\"}} 1", env!("CARGO_PKG_VERSION"));
-        assert!(text.contains(&expected), "missing build_info line: {expected}\n{text}");
+        let expected = format!(
+            "unhosted_build_info{{version=\"{}\"}} 1",
+            env!("CARGO_PKG_VERSION")
+        );
+        assert!(
+            text.contains(&expected),
+            "missing build_info line: {expected}\n{text}"
+        );
     }
 }

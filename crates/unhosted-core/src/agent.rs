@@ -250,9 +250,7 @@ pub fn seconds_to_iso8601(unix_secs: u64) -> String {
     let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
     let year = if m <= 2 { y + 1 } else { y };
 
-    format!(
-        "{year:04}-{m:02}-{d:02}T{hour:02}:{minute:02}:{second:02}Z"
-    )
+    format!("{year:04}-{m:02}-{d:02}T{hour:02}:{minute:02}:{second:02}Z")
 }
 
 /// Compose the agent's system prompt. Exposes `now_iso8601` as a
@@ -491,10 +489,7 @@ pub struct RunContext {
 }
 
 /// Drive the tool-call loop. See module docs for the lifecycle.
-pub async fn run_agent(
-    ctx: &RunContext,
-    req: AgentRunRequest,
-) -> AgentRunResponse {
+pub async fn run_agent(ctx: &RunContext, req: AgentRunRequest) -> AgentRunResponse {
     let req = req.clamped();
     let run_id = new_run_id();
     let clock = RunClock::start();
@@ -540,10 +535,7 @@ pub async fn run_agent(
             tokens_used: 0,
         });
         return AgentRunResponse {
-            final_answer: format!(
-                "unknown tools requested: {}",
-                unknown.join(", ")
-            ),
+            final_answer: format!("unknown tools requested: {}", unknown.join(", ")),
             steps: vec![],
             stopped_because: stopped,
             tokens_used: 0,
@@ -553,7 +545,8 @@ pub async fn run_agent(
 
     // DLP gate on the user's goal. Same posture as chat completions.
     if let Some(dlp_cfg) = ctx.dlp.as_ref() {
-        let goal_json = serde_json::json!({ "messages": [{ "role": "user", "content": req.goal }] });
+        let goal_json =
+            serde_json::json!({ "messages": [{ "role": "user", "content": req.goal }] });
         match dlp::check(&ctx.http, dlp_cfg, goal_json.to_string().as_bytes()).await {
             DlpDecision::Allow => {}
             DlpDecision::Block { reason } => {
@@ -617,8 +610,9 @@ pub async fn run_agent(
         }
 
         ctx.metrics.inc_agent_steps();
-        let per_step_tokens =
-            (req.max_tokens.saturating_sub(tokens_used)).min(1024).max(64);
+        let per_step_tokens = (req.max_tokens.saturating_sub(tokens_used))
+            .min(1024)
+            .max(64);
         let chat_req = ChatCompletionRequest {
             model: &req.model,
             messages: &messages,
@@ -690,7 +684,10 @@ pub async fn run_agent(
                 allowed = allowed_in_step,
                 "agent: model exceeded max_tool_calls_per_step; truncating"
             );
-            tool_calls.into_iter().take(allowed_in_step).collect::<Vec<_>>()
+            tool_calls
+                .into_iter()
+                .take(allowed_in_step)
+                .collect::<Vec<_>>()
         } else {
             tool_calls
         };
@@ -700,8 +697,7 @@ pub async fn run_agent(
             let args_value: serde_json::Value =
                 serde_json::from_str(&call.function.arguments).unwrap_or(serde_json::Value::Null);
             let args_hash = short_hash(&args_value);
-            let (result_text, error) =
-                execute_tool(&call.function.name, &args_value, ctx).await;
+            let (result_text, error) = execute_tool(&call.function.name, &args_value, ctx).await;
             ctx.audit.emit(AuditEvent::AgentToolCall {
                 ts: AuditEvent::now(),
                 run_id: run_id.clone(),
@@ -940,10 +936,7 @@ async fn execute_tool(
             // upstream. Avoids re-implementing the daemon's
             // upstream-probe logic — that lives in upstream.rs and
             // depends on Node which RunContext doesn't carry.
-            let url = format!(
-                "{}/v1/models",
-                ctx.upstream_url.trim_end_matches('/')
-            );
+            let url = format!("{}/v1/models", ctx.upstream_url.trim_end_matches('/'));
             match ctx.http.get(&url).send().await {
                 Ok(r) if r.status().is_success() => match r.text().await {
                     Ok(body) => (body, None),
@@ -958,7 +951,9 @@ async fn execute_tool(
         }
         other => (
             String::new(),
-            Some(format!("unknown tool: {other} (registry guard should have caught this)")),
+            Some(format!(
+                "unknown tool: {other} (registry guard should have caught this)"
+            )),
         ),
     }
 }
@@ -1093,7 +1088,10 @@ mod tests {
         // First four chars are the year, must be plausible. Tests are
         // not time-traveling agents, so 2020..2200 is fine.
         let year: u32 = now[..4].parse().expect("year should parse");
-        assert!((2020..2200).contains(&year), "year out of plausible range: {year}");
+        assert!(
+            (2020..2200).contains(&year),
+            "year out of plausible range: {year}"
+        );
         assert!(now.ends_with('Z'));
     }
 
@@ -1194,7 +1192,11 @@ mod tests {
         assert_eq!(resp.final_answer, "the answer is 42");
         assert_eq!(resp.steps.len(), 1);
         match &resp.steps[0] {
-            StepRecord::ModelMessage { content, tool_calls_made, .. } => {
+            StepRecord::ModelMessage {
+                content,
+                tool_calls_made,
+                ..
+            } => {
                 assert_eq!(content, "the answer is 42");
                 assert_eq!(*tool_calls_made, 0);
             }
@@ -1232,8 +1234,7 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))
             .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(tool_call_response("list_models", "{}")),
+                ResponseTemplate::new(200).set_body_json(tool_call_response("list_models", "{}")),
             )
             .up_to_n_times(1)
             .mount(&server)
@@ -1241,8 +1242,7 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))
             .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(final_answer_response("found 3 models")),
+                ResponseTemplate::new(200).set_body_json(final_answer_response("found 3 models")),
             )
             .mount(&server)
             .await;
@@ -1276,7 +1276,12 @@ mod tests {
         assert_eq!(resp.steps.len(), 3);
         assert!(matches!(resp.steps[0], StepRecord::ModelMessage { .. }));
         match &resp.steps[1] {
-            StepRecord::ToolCall { tool, error, result_chars, .. } => {
+            StepRecord::ToolCall {
+                tool,
+                error,
+                result_chars,
+                ..
+            } => {
                 assert_eq!(tool, "list_models");
                 assert!(error.is_none());
                 assert!(*result_chars > 0);
@@ -1294,8 +1299,7 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))
             .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(tool_call_response("list_models", "{}")),
+                ResponseTemplate::new(200).set_body_json(tool_call_response("list_models", "{}")),
             )
             .mount(&server)
             .await;
@@ -1334,8 +1338,7 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))
             .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(tool_call_response("list_models", "{}")),
+                ResponseTemplate::new(200).set_body_json(tool_call_response("list_models", "{}")),
             )
             .mount(&server)
             .await;
@@ -1396,17 +1399,14 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))
             .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(tool_call_response("list_models", "{}")),
+                ResponseTemplate::new(200).set_body_json(tool_call_response("list_models", "{}")),
             )
             .up_to_n_times(1)
             .mount(&server)
             .await;
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(final_answer_response("done")),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(final_answer_response("done")))
             .mount(&server)
             .await;
         Mock::given(method("GET"))
@@ -1443,9 +1443,18 @@ mod tests {
                 _ => break,
             }
         }
-        assert!(seen_kinds.contains(&"agent_run_started".to_string()), "missing run_started in {seen_kinds:?}");
-        assert!(seen_kinds.contains(&"agent_tool_call".to_string()), "missing tool_call in {seen_kinds:?}");
-        assert!(seen_kinds.contains(&"agent_run_completed".to_string()), "missing run_completed in {seen_kinds:?}");
+        assert!(
+            seen_kinds.contains(&"agent_run_started".to_string()),
+            "missing run_started in {seen_kinds:?}"
+        );
+        assert!(
+            seen_kinds.contains(&"agent_tool_call".to_string()),
+            "missing tool_call in {seen_kinds:?}"
+        );
+        assert!(
+            seen_kinds.contains(&"agent_run_completed".to_string()),
+            "missing run_completed in {seen_kinds:?}"
+        );
     }
 
     #[tokio::test]
@@ -1453,9 +1462,7 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(final_answer_response("hi")),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(final_answer_response("hi")))
             .mount(&server)
             .await;
         let ctx = ctx_for_test(&server.uri());
@@ -1477,7 +1484,9 @@ mod tests {
         assert_eq!(metrics.agent_runs_total.load(Ordering::Relaxed), 1);
         assert_eq!(metrics.agent_steps_total.load(Ordering::Relaxed), 1);
         assert_eq!(
-            metrics.agent_runs_stopped_final_answer.load(Ordering::Relaxed),
+            metrics
+                .agent_runs_stopped_final_answer
+                .load(Ordering::Relaxed),
             1
         );
         assert_eq!(metrics.agent_tool_calls_total.load(Ordering::Relaxed), 0);

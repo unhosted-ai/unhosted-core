@@ -318,10 +318,12 @@ pub async fn serve(node: Node) -> Result<()> {
     // operator config presence. The default daemon binary therefore
     // contains zero rail-specific HTTP / gRPC / RPC code.
     let mut rail_registry = unhosted_payments_core::RailRegistry::empty();
-    rail_registry.insert(std::sync::Arc::new(unhosted_payments_core::ManualAdapter::new(
-        STUB_UNIT_PRICE_MICROS,
-        "out-of-band — operator marks paid",
-    )));
+    rail_registry.insert(std::sync::Arc::new(
+        unhosted_payments_core::ManualAdapter::new(
+            STUB_UNIT_PRICE_MICROS,
+            "out-of-band — operator marks paid",
+        ),
+    ));
     #[cfg(feature = "rail-lightning")]
     {
         // We register Lightning only when the operator has dropped
@@ -383,7 +385,9 @@ pub async fn serve(node: Node) -> Result<()> {
                 Some(Arc::new(cfg))
             }
             Ok(None) => {
-                tracing::debug!("dlp: no config file at ~/.config/unhosted/dlp.toml — chat path unchanged");
+                tracing::debug!(
+                    "dlp: no config file at ~/.config/unhosted/dlp.toml — chat path unchanged"
+                );
                 None
             }
             Err(e) => {
@@ -868,7 +872,14 @@ async fn metrics_handler(
     }
     let body = state.metrics.to_prometheus_text();
     use axum::response::IntoResponse;
-    Ok(([(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")], body).into_response())
+    Ok((
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
+        body,
+    )
+        .into_response())
 }
 
 /// Agent runtime endpoint (ADR-0012). Same auth posture as chat
@@ -2203,7 +2214,11 @@ async fn chat_completions_handler(
     // Don't fail the request on a parse error — just emit empty.
     let model_for_audit = serde_json::from_slice::<serde_json::Value>(&body)
         .ok()
-        .and_then(|v| v.get("model").and_then(|m| m.as_str()).map(|s| s.to_string()))
+        .and_then(|v| {
+            v.get("model")
+                .and_then(|m| m.as_str())
+                .map(|s| s.to_string())
+        })
         .unwrap_or_default();
     let upstream_for_audit = match &target {
         Target::Local => "local".to_string(),
@@ -2925,18 +2940,26 @@ async fn tunnel_start_handler(
             // Starting / Running / Failed depending on what cloudflared
             // managed to do in the brief window before the call returned.
             let (state_str, url, code) = match &s {
-                tunnel::TunnelState::Starting { .. } => {
-                    ("starting".to_string(), String::new(), metrics::TunnelStateCode::Starting)
-                }
-                tunnel::TunnelState::Running { url, .. } => {
-                    ("live".to_string(), url.clone(), metrics::TunnelStateCode::Live)
-                }
-                tunnel::TunnelState::Failed { error } => {
-                    ("failed".to_string(), error.clone(), metrics::TunnelStateCode::Failed)
-                }
-                tunnel::TunnelState::Idle => {
-                    ("idle".to_string(), String::new(), metrics::TunnelStateCode::Off)
-                }
+                tunnel::TunnelState::Starting { .. } => (
+                    "starting".to_string(),
+                    String::new(),
+                    metrics::TunnelStateCode::Starting,
+                ),
+                tunnel::TunnelState::Running { url, .. } => (
+                    "live".to_string(),
+                    url.clone(),
+                    metrics::TunnelStateCode::Live,
+                ),
+                tunnel::TunnelState::Failed { error } => (
+                    "failed".to_string(),
+                    error.clone(),
+                    metrics::TunnelStateCode::Failed,
+                ),
+                tunnel::TunnelState::Idle => (
+                    "idle".to_string(),
+                    String::new(),
+                    metrics::TunnelStateCode::Off,
+                ),
             };
             state.audit.emit(audit::AuditEvent::TunnelStateChanged {
                 ts: audit::AuditEvent::now(),
@@ -3009,7 +3032,9 @@ async fn tunnel_stop_handler(
         state: "stopped".into(),
         url: String::new(),
     });
-    state.metrics.record_tunnel_state(metrics::TunnelStateCode::Off);
+    state
+        .metrics
+        .record_tunnel_state(metrics::TunnelStateCode::Off);
     Ok(axum::Json(s))
 }
 

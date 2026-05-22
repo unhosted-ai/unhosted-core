@@ -162,8 +162,8 @@ pub fn load() -> Result<Option<AgentFsConfig>> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
     };
-    let raw: AgentFsConfigRaw = toml::from_str(&text)
-        .with_context(|| format!("parsing {} as TOML", path.display()))?;
+    let raw: AgentFsConfigRaw =
+        toml::from_str(&text).with_context(|| format!("parsing {} as TOML", path.display()))?;
     let mut canonical_roots = Vec::with_capacity(raw.allow_roots.len());
     for r in &raw.allow_roots {
         let canon = std::fs::canonicalize(r)
@@ -228,7 +228,11 @@ pub fn read_file(cfg: Option<&Arc<AgentFsConfig>>, path: &str) -> ReadFileOutcom
     };
 
     // 4. Strictly-under allow-list check.
-    if !cfg.allow_roots.iter().any(|root| is_strictly_under(&canonical, root)) {
+    if !cfg
+        .allow_roots
+        .iter()
+        .any(|root| is_strictly_under(&canonical, root))
+    {
         return ReadFileOutcome::Err(ReadFileError::OutsideAllowList);
     }
 
@@ -313,7 +317,11 @@ pub fn list_dir(cfg: Option<&Arc<AgentFsConfig>>, path: &str) -> ListDirOutcome 
         Err(e) => return ListDirOutcome::Err(ReadFileError::Io(e.to_string())),
     };
 
-    if !cfg.allow_roots.iter().any(|root| is_strictly_under(&canonical, root)) {
+    if !cfg
+        .allow_roots
+        .iter()
+        .any(|root| is_strictly_under(&canonical, root))
+    {
         // Special case: listing the root *itself* is allowed when the
         // root equals canonical. `is_strictly_under` rejects equality
         // (it's for files inside a root), so we explicitly admit the
@@ -405,14 +413,20 @@ mod tests {
     #[test]
     fn missing_config_returns_not_configured() {
         let outcome = read_file(None, "/etc/passwd");
-        assert!(matches!(outcome, ReadFileOutcome::Err(ReadFileError::NotConfigured)));
+        assert!(matches!(
+            outcome,
+            ReadFileOutcome::Err(ReadFileError::NotConfigured)
+        ));
     }
 
     #[test]
     fn empty_allow_list_returns_not_configured() {
         let cfg = cfg_with(vec![]);
         let outcome = read_file(Some(&cfg), "/etc/passwd");
-        assert!(matches!(outcome, ReadFileOutcome::Err(ReadFileError::NotConfigured)));
+        assert!(matches!(
+            outcome,
+            ReadFileOutcome::Err(ReadFileError::NotConfigured)
+        ));
     }
 
     #[test]
@@ -420,7 +434,10 @@ mod tests {
         let (_td, root) = temp_dir();
         let cfg = cfg_with(vec![root]);
         let outcome = read_file(Some(&cfg), "notes.txt");
-        assert!(matches!(outcome, ReadFileOutcome::Err(ReadFileError::NotAbsolute)));
+        assert!(matches!(
+            outcome,
+            ReadFileOutcome::Err(ReadFileError::NotAbsolute)
+        ));
     }
 
     #[test]
@@ -431,7 +448,11 @@ mod tests {
         let cfg = cfg_with(vec![root]);
         let outcome = read_file(Some(&cfg), target.to_str().unwrap());
         match outcome {
-            ReadFileOutcome::Ok { content, bytes_read, truncated } => {
+            ReadFileOutcome::Ok {
+                content,
+                bytes_read,
+                truncated,
+            } => {
                 assert_eq!(content, "hello, agent");
                 assert_eq!(bytes_read, 12);
                 assert!(!truncated);
@@ -443,10 +464,8 @@ mod tests {
     #[test]
     fn file_outside_allowlist_rejected() {
         let (_td, root) = temp_dir();
-        let outside = std::env::temp_dir().join(format!(
-            "unhosted-fs-test-outside-{}",
-            std::process::id()
-        ));
+        let outside =
+            std::env::temp_dir().join(format!("unhosted-fs-test-outside-{}", std::process::id()));
         write_file(&outside, b"secret");
         let cfg = cfg_with(vec![root]);
         let outcome = read_file(Some(&cfg), outside.to_str().unwrap());
@@ -503,7 +522,10 @@ mod tests {
         write_file(&upper, b"x");
         let cfg = cfg_with(vec![root]);
         let outcome = read_file(Some(&cfg), upper.to_str().unwrap());
-        assert!(matches!(outcome, ReadFileOutcome::Err(ReadFileError::DenyPattern(_))));
+        assert!(matches!(
+            outcome,
+            ReadFileOutcome::Err(ReadFileError::DenyPattern(_))
+        ));
     }
 
     #[test]
@@ -515,7 +537,10 @@ mod tests {
         std::os::unix::fs::symlink(&target, &link).unwrap();
         let cfg = cfg_with(vec![root]);
         let outcome = read_file(Some(&cfg), link.to_str().unwrap());
-        assert!(matches!(outcome, ReadFileOutcome::Err(ReadFileError::SymlinkRefused)));
+        assert!(matches!(
+            outcome,
+            ReadFileOutcome::Err(ReadFileError::SymlinkRefused)
+        ));
     }
 
     #[test]
@@ -547,7 +572,11 @@ mod tests {
         let cfg = cfg_with(vec![root]);
         let outcome = read_file(Some(&cfg), big.to_str().unwrap());
         match outcome {
-            ReadFileOutcome::Ok { bytes_read, truncated, .. } => {
+            ReadFileOutcome::Ok {
+                bytes_read,
+                truncated,
+                ..
+            } => {
                 assert_eq!(bytes_read, 1024);
                 assert!(truncated);
             }
@@ -563,7 +592,10 @@ mod tests {
         write_file(&bin, &[0xFFu8, 0xFE, 0xFD, 0xFC]);
         let cfg = cfg_with(vec![root]);
         let outcome = read_file(Some(&cfg), bin.to_str().unwrap());
-        assert!(matches!(outcome, ReadFileOutcome::Err(ReadFileError::NotUtf8)));
+        assert!(matches!(
+            outcome,
+            ReadFileOutcome::Err(ReadFileError::NotUtf8)
+        ));
     }
 
     #[test]
@@ -595,7 +627,10 @@ mod tests {
         let (_td2, outside) = temp_dir();
         let cfg = cfg_with(vec![root]);
         let outcome = list_dir(Some(&cfg), outside.to_str().unwrap());
-        assert!(matches!(outcome, ListDirOutcome::Err(ReadFileError::OutsideAllowList)));
+        assert!(matches!(
+            outcome,
+            ListDirOutcome::Err(ReadFileError::OutsideAllowList)
+        ));
     }
 
     #[test]

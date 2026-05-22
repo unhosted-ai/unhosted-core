@@ -76,8 +76,8 @@ pub fn load() -> Result<Option<LightningConfig>> {
             return Err(e).with_context(|| format!("reading {}", path.display()));
         }
     };
-    let on_disk: OnDisk = toml::from_str(&text)
-        .with_context(|| format!("parsing {} as TOML", path.display()))?;
+    let on_disk: OnDisk =
+        toml::from_str(&text).with_context(|| format!("parsing {} as TOML", path.display()))?;
     Ok(Some(LightningConfig {
         rest_url: on_disk.rest_url,
         macaroon_hex: on_disk.macaroon_hex,
@@ -107,7 +107,10 @@ mod tests {
         .unwrap();
         assert_eq!(cfg.rest_url, "https://127.0.0.1:8080");
         assert_eq!(cfg.macaroon_hex, "deadbeef");
-        assert!(cfg.tls_skip_verify, "defaults to skip — LND is self-signed by default");
+        assert!(
+            cfg.tls_skip_verify,
+            "defaults to skip — LND is self-signed by default"
+        );
         assert_eq!(cfg.invoice_ttl_seconds, 3600);
     }
 

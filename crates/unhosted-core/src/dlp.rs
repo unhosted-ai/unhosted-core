@@ -118,8 +118,8 @@ pub fn load() -> Result<Option<DlpConfig>> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
     };
-    let cfg: DlpConfig = toml::from_str(&text)
-        .with_context(|| format!("parsing {} as TOML", path.display()))?;
+    let cfg: DlpConfig =
+        toml::from_str(&text).with_context(|| format!("parsing {} as TOML", path.display()))?;
     Ok(Some(cfg))
 }
 
@@ -129,11 +129,7 @@ pub fn load() -> Result<Option<DlpConfig>> {
 /// Failure handling per `fail_mode`:
 ///   - FailOpen  — network / parse / timeout → `Allow`, warn-log.
 ///   - FailClosed → propagates as `Block`.
-pub async fn check(
-    http: &reqwest::Client,
-    cfg: &DlpConfig,
-    body: &[u8],
-) -> DlpDecision {
+pub async fn check(http: &reqwest::Client, cfg: &DlpConfig, body: &[u8]) -> DlpDecision {
     let mut req = http
         .post(&cfg.endpoint)
         .timeout(Duration::from_millis(cfg.timeout_ms))
@@ -279,12 +275,7 @@ mod tests {
     async fn fail_open_on_unreachable_endpoint() {
         // Port 1 — guaranteed unbound. The connect will refuse fast.
         let http = reqwest::Client::new();
-        let decision = check(
-            &http,
-            &cfg("http://127.0.0.1:1", FailMode::FailOpen),
-            b"{}",
-        )
-        .await;
+        let decision = check(&http, &cfg("http://127.0.0.1:1", FailMode::FailOpen), b"{}").await;
         assert_eq!(decision, DlpDecision::Allow);
     }
 
