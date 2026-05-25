@@ -437,6 +437,57 @@ button:disabled:hover { border-color: var(--line-strong); }
   color: var(--mute);
 }
 
+/* inline api-access block — surfaces base url + bearer token in the
+   sidebar so the user doesn't need to dig into the settings modal
+   to plug this daemon into an MCP / OpenAI-compatible client. */
+.api-access-block {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.api-access-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+.api-access-label {
+  color: var(--mute);
+  min-width: 48px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+}
+.api-access-btn {
+  background: none;
+  border: 1px dashed var(--line);
+  border-radius: 4px;
+  padding: 2px 6px;
+  cursor: pointer;
+  flex: 1;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  overflow: hidden;
+}
+.api-access-btn code {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+.api-access-btn:hover {
+  border-style: solid;
+  border-color: var(--accent);
+}
+.api-access-btn.copied {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 .peers-block { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; }
 .peer-list { list-style: none; padding: 0; margin: 0; }
 .peer-list li {
@@ -589,6 +640,14 @@ button:disabled:hover { border-color: var(--line-strong); }
 }
 .sidebar-foot .foot-link { color: var(--mute); }
 .sidebar-foot .foot-link:hover { color: var(--accent); }
+.sidebar-foot .foot-link-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
 
 .theme-toggle {
   display: inline-flex;

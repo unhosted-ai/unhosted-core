@@ -3037,20 +3037,6 @@ function renderAgentTurn(msg) {
   return node;
 }
 
-function escapeHtml(s) {
-  return String(s).replace(
-    /[&<>"']/g,
-    (c) =>
-      ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#39;",
-      })[c],
-  );
-}
-
 // ---------------------------------------------------------- settings modal
 // Owns every "configuration" panel that used to clutter the sidebar
 // (tunnel, phone, memory, vram-pool, public-mode, benchmark, developer).
@@ -3096,6 +3082,18 @@ function switchSettingsTab(name) {
 if (settingsEls.openBtn) {
   settingsEls.openBtn.addEventListener("click", () => openSettingsModal());
 }
+// Auto-open the settings modal on first page load so features
+// (tunnel/QR, vram-pool, memory, hosting) are visible upfront.
+// User can dismiss; we remember the choice so it doesn't re-open
+// on every refresh.
+try {
+  if (!localStorage.getItem("unhosted-settings-seen")) {
+    setTimeout(() => {
+      openSettingsModal("network");
+      localStorage.setItem("unhosted-settings-seen", "1");
+    }, 0);
+  }
+} catch (_) { /* localStorage may be unavailable in private mode */ }
 if (settingsEls.close) {
   settingsEls.close.addEventListener("click", closeSettingsModal);
 }
@@ -3167,3 +3165,103 @@ if (settingsEls.tunnelChip) {
     syncChip();
   }
 }
+
+// ---------------------------------------------------------- api access
+// Inline copy-buttons for local base url + public tunnel url + bearer
+// token. Visible in the sidebar so an MCP / OpenAI-compatible client
+// can be configured without opening the settings modal.
+(function wireApiAccess() {
+  const $id = (s) => document.getElementById(s);
+  const localBtn = $id("api-copy-local");
+  const tokenBtn = $id("api-copy-token");
+  const tokenPreview = $id("api-token-preview");
+  const publicRow = $id("api-public-row");
+  const publicBtn = $id("api-copy-public");
+  const publicCode = $id("api-public-url");
+  const localCode = $id("api-local-url");
+
+  if (localCode) localCode.textContent = location.origin;
+
+  const flashCopied = (btn) => {
+    if (!btn) return;
+    btn.classList.add("copied");
+    setTimeout(() => btn.classList.remove("copied"), 900);
+  };
+  const copy = async (text, btn) => {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      flashCopied(btn);
+    } catch (_) {
+      // Fallback for non-secure contexts (rare on loopback, but cheap).
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); flashCopied(btn); } catch (__) {}
+      ta.remove();
+    }
+  };
+
+  if (localBtn) {
+    localBtn.addEventListener("click", () => copy(location.origin, localBtn));
+  }
+
+  // Pre-fetch the bearer token once and cache it. /v1/auth/token only
+  // succeeds from loopback, which is exactly where this page is served.
+  let cachedToken = null;
+  const fetchToken = async () => {
+    if (cachedToken) return cachedToken;
+    try {
+      const r = await fetch("/v1/auth/token", { cache: "no-store" });
+      if (!r.ok) return null;
+      const j = await r.json();
+      cachedToken = j.token || j.api_token || null;
+      return cachedToken;
+    } catch (_) { return null; }
+  };
+  fetchToken().then((t) => {
+    if (t && tokenPreview) {
+      tokenPreview.textContent = t.slice(0, 12) + "… (click to copy)";
+    } else if (tokenPreview) {
+      tokenPreview.textContent = "no token (loopback only)";
+    }
+  });
+  if (tokenBtn) {
+    tokenBtn.addEventListener("click", async () => {
+      const t = await fetchToken();
+      if (t) copy(t, tokenBtn);
+    });
+  }
+
+  // Poll the tunnel status to surface the public url inline. Cheap
+  // (only when the row is in the DOM) and decoupled from renderTunnel.
+  let lastUrl = null;
+  const refresh = async () => {
+    if (!publicRow || !publicCode || !publicBtn) return;
+    try {
+      const r = await fetch("/v1/tunnel", { cache: "no-store" });
+      if (!r.ok) return;
+      const j = await r.json();
+      if (j.state === "running" && j.url) {
+        const t = await fetchToken();
+        const sep = j.url.includes("?") ? "&" : "?";
+        const href = t ? `${j.url}${sep}api_token=${encodeURIComponent(t)}` : j.url;
+        if (href !== lastUrl) {
+          lastUrl = href;
+          publicCode.textContent = href;
+          publicBtn.dataset.copy = href;
+        }
+        publicRow.hidden = false;
+      } else {
+        publicRow.hidden = true;
+        lastUrl = null;
+      }
+    } catch (_) {}
+  };
+  if (publicBtn) {
+    publicBtn.addEventListener("click", () => copy(publicBtn.dataset.copy || "", publicBtn));
+  }
+  refresh();
+  setInterval(refresh, 5000);
+})();
