@@ -103,6 +103,12 @@ jobs:
           # Tauri bundles
           BUNDLE_DIR="target/${{ matrix.target }}/release/bundle"
           find "$BUNDLE_DIR" -maxdepth 3 \( -name "*.deb" -o -name "*.AppImage" -o -name "*.rpm" -o -name "*.tar.gz" -o -name "*.sig" \) -exec cp {} dist-stage/ \;
+          # Stable-named AppImage copy for the website's
+          # releases/latest/download/ deep link.
+          APPIMAGE=$(find "$BUNDLE_DIR" -maxdepth 3 -name "*.AppImage" | head -1)
+          if [ -n "$APPIMAGE" ]; then
+            cp "$APPIMAGE" "dist-stage/unhosted-linux-${{ matrix.target }}.AppImage"
+          fi
           ls -lah dist-stage
 
       - name: Stage release artifacts (macos)
@@ -121,6 +127,13 @@ jobs:
           BUNDLE_DIR="target/${{ matrix.target }}/release/bundle"
           if [ -d "$BUNDLE_DIR/dmg" ]; then
             cp "$BUNDLE_DIR/dmg/"*.dmg dist-stage/ 2>/dev/null || true
+            # Stable-named copy so the website can deep-link the
+            # installer through releases/latest/download/ — the
+            # versioned name changes every release, this one doesn't.
+            VERSIONED_DMG=$(find "$BUNDLE_DIR/dmg" -maxdepth 1 -name "*.dmg" | head -1)
+            if [ -n "$VERSIONED_DMG" ]; then
+              cp "$VERSIONED_DMG" "dist-stage/unhosted-macos-${{ matrix.target }}.dmg"
+            fi
           fi
           if [ -d "$BUNDLE_DIR/macos" ]; then
             # Tauri's updater plugin requires the .app.tar.gz that *Tauri
@@ -176,6 +189,12 @@ jobs:
           }
           if (Test-Path "$bundleDir/nsis") {
             Get-ChildItem "$bundleDir/nsis/*.exe","$bundleDir/nsis/*.sig" -ErrorAction SilentlyContinue | Copy-Item -Destination dist-stage/
+            # Stable-named installer copy for the website's
+            # releases/latest/download/ deep link.
+            $setup = Get-ChildItem "$bundleDir/nsis/*-setup.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($setup) {
+              Copy-Item $setup.FullName "dist-stage/unhosted-windows-${{ matrix.target }}-setup.exe"
+            }
           }
           Get-ChildItem dist-stage
 

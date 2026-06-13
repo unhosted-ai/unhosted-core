@@ -137,20 +137,18 @@
     <ol class="qs-steps qs-steps-2">
       <li class="qs-step" id="qs-1">
         <div class="qs-num">01</div>
-        <h4>start a model runtime</h4>
-        <p>pick one. all three speak the same openai-compatible api.</p>
-        <pre><code>brew install llama.cpp &amp;&amp; \
-unhosted pull llama3.2:3b</code></pre>
-        <p class="qs-note">already running ollama or lm studio? <code>unhosted doctor</code> finds them.</p>
+        <h4>pick a model in the app</h4>
+        <p>open settings → compute → models. one click downloads a curated gguf and serves it through the built-in llama.cpp runtime — live progress bar, load / switch / eject.</p>
+        <p class="qs-note">terminal person? <code>brew install llama.cpp &amp;&amp; unhosted pull llama3.2:3b</code> still works — the app and cli share the same library. already running ollama or lm studio? the daemon auto-detects it.</p>
       </li>
       <li class="qs-step" id="qs-2">
         <div class="qs-num">02</div>
-        <h4>serve + chat</h4>
-        <p>daemon on <code>:7777</code>, ui in your browser.</p>
+        <h4>chat — and grow the radius when ready</h4>
+        <p>the desktop app is the chat. cli equivalent:</p>
         <pre><code>unhosted serve
 # in another shell:
 open http://127.0.0.1:7777</code></pre>
-        <p class="qs-note">other devices on the same wifi discover this node via mdns.</p>
+        <p class="qs-note">other devices on the same wifi discover this node via mdns. your phone connects with one qr scan.</p>
       </li>
     </ol>
   </section>
@@ -698,6 +696,12 @@ example.com is a single-page reserved-domain placeholder maintained by IANA for 
             <td>known short names + direct gguf url support.</td>
           </tr>
           <tr>
+            <td>in-app model library (lm studio-style)</td>
+            <td><span class="pill on">shipped</span></td>
+            <td>v0.0.76</td>
+            <td>curated catalog in settings → compute: one-click download with live progress, load / switch / eject through a supervised llama.cpp runtime, custom huggingface gguf urls. no terminal needed from install to first chat.</td>
+          </tr>
+          <tr>
             <td>auto-detect llama-server / ollama / lm studio</td>
             <td><span class="pill on">shipped</span></td>
             <td>v0.0.4</td>
@@ -862,38 +866,38 @@ example.com is a single-page reserved-domain placeholder maintained by IANA for 
       <h3>download</h3>
       <a class="view-all" href="https://github.com/unhosted-ai/unhosted-core/releases">all releases</a>
     </div>
-    <p class="sub">two ways to install: <strong>double-click</strong> the bundle for your os, or <strong>paste one line</strong> into a terminal. both fetch the <a href="https://github.com/unhosted-ai/unhosted-core/releases/latest">latest signed release</a> for your platform. you'll also need a local model runtime — <a href="docs.html#install">llama.cpp, ollama, or lm studio</a> — the daemon auto-detects whichever is running.</p>
+    <p class="sub">two ways to install: <strong>double-click</strong> the installer for your os, or <strong>paste one line</strong> into a terminal. both fetch the <a href="https://github.com/unhosted-ai/unhosted-core/releases/latest">latest signed release</a> for your platform. models download inside the app — pick one from the built-in catalog and start chatting. already running <a href="docs.html#install">llama.cpp, ollama, or lm studio</a>? the daemon auto-detects it.</p>
 
     <!-- easy install: auto-detects the visitor's OS and shows the right
-         primary CTA (double-click installer) + the copy-paste one-liner. -->
+         primary CTA (double-click installer) + the copy-paste one-liner.
+         The hrefs use the stable-named installer copies the release
+         workflow stages (unhosted-macos-*.dmg etc.) so "latest" always
+         resolves without knowing the version string. -->
     <div class="easy-install" id="easy-install" data-os="auto">
       <div class="ei-cards">
-        <!-- macOS: prefer .dmg (released from v0.0.6+), fall back to the
-             .tar.gz containing unhosted.app. The "all releases" link in
-             the section head gives advanced users every asset. -->
-        <a class="ei-card ei-mac" href="https://github.com/unhosted-ai/unhosted-core/releases/latest">
+        <a class="ei-card ei-mac" href="https://github.com/unhosted-ai/unhosted-core/releases/latest/download/unhosted-macos-aarch64-apple-darwin.dmg">
           <div class="ei-card-os">macos</div>
           <div class="ei-card-action">
-            <strong>download .dmg / .app</strong>
-            <span class="ei-card-sub">open · drag to applications · double-click</span>
+            <strong>download .dmg</strong>
+            <span class="ei-card-sub">open · drag to applications · done</span>
           </div>
           <div class="ei-card-meta">apple silicon · ~7&nbsp;MB</div>
         </a>
-        <a class="ei-card ei-windows" href="https://github.com/unhosted-ai/unhosted-core/releases/latest/download/unhosted-x86_64-pc-windows-msvc.zip">
+        <a class="ei-card ei-windows" href="https://github.com/unhosted-ai/unhosted-core/releases/latest/download/unhosted-windows-x86_64-pc-windows-msvc-setup.exe">
           <div class="ei-card-os">windows</div>
           <div class="ei-card-action">
-            <strong>download zip</strong>
-            <span class="ei-card-sub">extract · double-click <code>unhosted-desktop.exe</code></span>
+            <strong>download installer</strong>
+            <span class="ei-card-sub">run setup · launch from start menu</span>
           </div>
           <div class="ei-card-meta">x86_64 · ~6&nbsp;MB</div>
         </a>
-        <a class="ei-card ei-linux" href="https://github.com/unhosted-ai/unhosted-core/releases/latest/download/unhosted-x86_64-unknown-linux-gnu.tar.gz">
+        <a class="ei-card ei-linux" href="https://github.com/unhosted-ai/unhosted-core/releases/latest/download/unhosted-linux-x86_64-unknown-linux-gnu.AppImage">
           <div class="ei-card-os">linux</div>
           <div class="ei-card-action">
-            <strong>download tarball</strong>
-            <span class="ei-card-sub">extract · run <code>./unhosted-desktop</code></span>
+            <strong>download appimage</strong>
+            <span class="ei-card-sub"><code>chmod +x</code> · double-click</span>
           </div>
-          <div class="ei-card-meta">x86_64 / arm64 · ~6&nbsp;MB</div>
+          <div class="ei-card-meta">x86_64 · ~6&nbsp;MB</div>
         </a>
       </div>
 
@@ -1006,8 +1010,14 @@ example.com is a single-page reserved-domain placeholder maintained by IANA for 
 
     <div class="download-grid">
 
-      <a class="dl-card dl-primary" href="https://github.com/unhosted-ai/unhosted-core/releases/latest/download/unhosted-aarch64-apple-darwin.tar.gz">
-        <div class="dl-os">macos</div>
+      <a class="dl-card dl-primary" href="https://github.com/unhosted-ai/unhosted-core/releases/latest/download/unhosted-macos-aarch64-apple-darwin.dmg">
+        <div class="dl-os">macos · .dmg</div>
+        <div class="dl-arch">drag-to-applications installer</div>
+        <div class="dl-file">unhosted-macos-aarch64-apple-darwin.dmg</div>
+      </a>
+
+      <a class="dl-card" href="https://github.com/unhosted-ai/unhosted-core/releases/latest/download/unhosted-aarch64-apple-darwin.tar.gz">
+        <div class="dl-os">macos · cli</div>
         <div class="dl-arch">apple silicon · m1 / m2 / m3 / m4</div>
         <div class="dl-file">unhosted-aarch64-apple-darwin.tar.gz</div>
       </a>

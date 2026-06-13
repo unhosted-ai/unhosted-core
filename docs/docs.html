@@ -210,11 +210,12 @@ data: {"choices":[{"delta":{"content":" there"}}], ...}
 
     <section id="quickstart">
       <h2>quickstart</h2>
-      <p>v0.0.1 wraps llama.cpp's existing <code>llama-server</code>. you need llama.cpp installed and a model file before unhosted has anything to talk to.</p>
+      <p><strong>the short version:</strong> install the app, open settings → compute → models, click download on a starter model, chat. since v0.0.76 the app manages models itself — download with a progress bar, load / switch / eject — through a built-in llama.cpp runtime. the terminal flow below still works and shares the same model library at <code>~/.cache/unhosted/models/</code>.</p>
 
       <ol class="steps">
         <li>
           <h3>install unhosted</h3>
+          <p class="note"><strong>macos:</strong> <a href="https://github.com/unhosted-ai/unhosted-core/releases/latest/download/unhosted-macos-aarch64-apple-darwin.dmg">download the .dmg</a>, drag unhosted to applications, open it. <strong>windows / linux:</strong> grab the installer from <a href="https://github.com/unhosted-ai/unhosted-core/releases/latest">the latest release</a>, or use the one-liners:</p>
           <p class="note"><strong>macos / linux:</strong></p>
           <pre><code>curl -fsSL https://raw.githubusercontent.com/unhosted-ai/unhosted-core/main/scripts/install.sh | sh</code></pre>
           <p class="note"><strong>windows:</strong> open powershell and run</p>
@@ -226,20 +227,14 @@ data: {"choices":[{"delta":{"content":" there"}}], ...}
             arch: <code>sudo pacman -S gtk3 libsoup3 webkit2gtk-4.1</code></p>
         </li>
         <li>
-          <h3>install llama.cpp</h3>
-          <pre><code>brew install llama.cpp</code></pre>
-          <p class="note">on linux, build it from <a href="https://github.com/ggerganov/llama.cpp">github.com/ggerganov/llama.cpp</a>. windows works too, with extra steps.</p>
-        </li>
-        <li>
-          <h3>pull a model</h3>
-          <pre><code>unhosted pull llama3.2:1b</code></pre>
-          <p class="note">downloads a known good gguf into <code>~/.cache/unhosted/models/</code>. <code>unhosted models</code> lists everything available — <code>llama3.2:1b</code>, <code>llama3.2:3b</code>, <code>llama3.1:8b</code>, <code>qwen2.5:0.5b</code>, <code>qwen2.5-coder:7b</code>. you can also pass a direct https url to a gguf.</p>
-        </li>
-        <li>
-          <h3>start the inference backend</h3>
-          <pre><code>llama-server -m ~/.cache/unhosted/models/Llama-3.2-1B-Instruct-Q4_K_M.gguf \
+          <h3>get a model — in the app</h3>
+          <p class="note">open settings (gear icon) → compute → <strong>models</strong>. the curated catalog has seven known-good ggufs from 1B to 7B; click <strong>download</strong>, watch the progress bar, click <strong>load</strong>. the daemon spawns and supervises <code>llama-server</code> for you (install it once with <code>brew install llama.cpp</code> if the panel asks). you can also paste any huggingface <code>.gguf</code> url.</p>
+          <p class="note"><strong>or from the terminal</strong> — same library, same files:</p>
+          <pre><code>brew install llama.cpp
+unhosted pull llama3.2:1b
+llama-server -m ~/.cache/unhosted/models/Llama-3.2-1B-Instruct-Q4_K_M.gguf \
   --port 8080 -c 2048 -ngl 99</code></pre>
-          <p class="note"><code>-ngl 99</code> offloads all layers to gpu (metal on apple silicon, cuda on nvidia). leave that off if you don't have one.</p>
+          <p class="note"><code>-ngl 99</code> offloads all layers to gpu (metal on apple silicon, cuda on nvidia). leave that off if you don't have one. already running ollama or lm studio? skip all of this — the daemon auto-detects them.</p>
         </li>
         <li>
           <h3>run the daemon</h3>
