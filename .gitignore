@@ -60,3 +60,4 @@ crates/unhosted-desktop/gen/
 **/.fastembed_cache/
 
 /target/shotter
+crates/unhosted-desktop/bin/

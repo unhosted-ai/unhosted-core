@@ -74,6 +74,17 @@ cp "$ROOT/crates/unhosted-desktop/Info.plist" "$APP/Contents/Info.plist"
 cp "$BIN" "$APP_BIN_DIR/unhosted-desktop"
 cp "$DIST/unhosted.icns" "$APP_RES_DIR/unhosted.icns"
 
+# Bundle the daemon CLI next to the shell binary. The shell's
+# try_spawn_daemon() checks its own directory first, so a DMG-only
+# install works on a machine that never ran install.sh.
+DAEMON_BIN="${UNHOSTED_DAEMON_BIN:-$ROOT/target/release/unhosted}"
+if [ ! -x "$DAEMON_BIN" ]; then
+  echo "→ cargo build --release -p unhosted-cli"
+  cargo build --release -p unhosted-cli
+  DAEMON_BIN="$ROOT/target/release/unhosted"
+fi
+cp "$DAEMON_BIN" "$APP_BIN_DIR/unhosted"
+
 # Ad-hoc sign so macOS will at least launch it locally (no Gatekeeper warning
 # beyond "downloaded from internet" for distribution; that needs a real cert).
 codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true

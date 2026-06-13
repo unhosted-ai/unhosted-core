@@ -74,16 +74,40 @@ jobs:
       - name: Build CLI
         run: cargo build --release --target ${{ matrix.target }} -p unhosted-cli
 
+      # ----- stage the CLI as a Tauri sidecar -----
+      # The desktop shell spawns the daemon from its own directory
+      # first (try_spawn_daemon), so bundling the CLI inside the .app /
+      # installer makes a DMG-only or setup.exe-only install fully
+      # self-contained — no install.sh required. Tauri's externalBin
+      # expects `<path>-<target-triple>[.exe]` relative to the config
+      # dir; it lands next to the main binary in every bundle format.
+      - name: Stage CLI sidecar
+        shell: bash
+        run: |
+          mkdir -p crates/unhosted-desktop/bin
+          if [ "${{ matrix.kind }}" = "windows" ]; then
+            cp "target/${{ matrix.target }}/release/unhosted.exe" \
+               "crates/unhosted-desktop/bin/unhosted-${{ matrix.target }}.exe"
+          else
+            cp "target/${{ matrix.target }}/release/unhosted" \
+               "crates/unhosted-desktop/bin/unhosted-${{ matrix.target }}"
+          fi
+
       # ----- bundle the desktop shell via Tauri -----
       # Produces .app + .dmg on macOS, .deb + .AppImage + .rpm on Linux,
       # .msi + .exe (NSIS) on Windows — plus the updater manifest
       # (`latest.json`) when TAURI_SIGNING_PRIVATE_KEY is set.
+      # externalBin comes in through a --config overlay instead of
+      # tauri.conf.json so plain `cargo build` (Rust CI, local dev)
+      # never requires the sidecar file to exist.
       - name: Build desktop bundle
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         working-directory: crates/unhosted-desktop
-        run: cargo tauri build --target ${{ matrix.target }}
+        run: |
+          cargo tauri build --target ${{ matrix.target }} \
+            --config '{"bundle":{"externalBin":["bin/unhosted"]}}'
 
       # ----- stage release artifacts -----
       - name: Stage release artifacts (linux)

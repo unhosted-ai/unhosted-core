@@ -214,21 +214,40 @@ fn wait_for_daemon(url: &str, budget: Duration) {
 /// a detached background process running `serve`. Returns whether a
 /// spawn was attempted.
 ///
-/// We search a small whitelist of well-known install locations so that a
-/// fresh `install.sh` user gets a working .app without needing any
-/// terminal state — the desktop binary is what they double-clicked, so
-/// PATH inheritance from a login shell is unreliable on macOS (the .app
-/// is launched from Finder/Spotlight/LaunchPad with a minimal env).
+/// The first candidate is the daemon bundled NEXT TO this executable —
+/// inside the .app's Contents/MacOS on macOS, the install dir on
+/// Windows, the AppImage payload on Linux. That's what makes a
+/// DMG-only install work on a machine that never ran install.sh.
+/// After that we search a small whitelist of well-known install
+/// locations so a fresh `install.sh` user gets a working .app without
+/// needing any terminal state — the desktop binary is what they
+/// double-clicked, so PATH inheritance from a login shell is
+/// unreliable on macOS (the .app is launched from
+/// Finder/Spotlight/LaunchPad with a minimal env).
 fn try_spawn_daemon() -> bool {
     use std::process::{Command, Stdio};
 
+    let exe_name = if cfg!(windows) {
+        "unhosted.exe"
+    } else {
+        "unhosted"
+    };
+    let bundled = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join(exe_name)))
+        .map(|p| p.to_string_lossy().to_string());
+
     let home = std::env::var("HOME").ok();
     let candidates: Vec<String> = {
-        let mut v = vec![
+        let mut v = Vec::new();
+        if let Some(b) = bundled {
+            v.push(b);
+        }
+        v.extend([
             "/usr/local/bin/unhosted".to_string(),
             "/opt/homebrew/bin/unhosted".to_string(),
             "/usr/bin/unhosted".to_string(),
-        ];
+        ]);
         if let Some(h) = home.as_deref() {
             v.push(format!("{h}/.local/bin/unhosted"));
             v.push(format!("{h}/.cargo/bin/unhosted"));
