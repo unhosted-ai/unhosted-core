@@ -6,11 +6,14 @@
 # What's inside the .dmg:
 #   - unhosted.app (the desktop shell, built by scripts/bundle-macos.sh)
 #   - a symlink to /Applications so the user drag-drops the .app in
+#   - a styled Finder window: branded background + positioned icons,
+#     same drag-to-install layout the Tauri-bundled release DMG uses
+#     (bundle.macOS.dmg in crates/unhosted-desktop/tauri.conf.json)
 #
 # Requires: hdiutil (built into macOS). Does NOT require code-signing
 # tools — the .dmg itself is unsigned. Gatekeeper will still prompt on
 # first launch of the .app inside (right-click → open). Proper Developer
-# ID signing is on the roadmap.
+# ID signing runs in scripts/release-macos.sh when identities are set.
 #
 # Usage: bash scripts/build-dmg.sh
 
@@ -27,8 +30,10 @@ ROOT="$(pwd)"
 DIST="$ROOT/dist"
 APP="$DIST/unhosted.app"
 DMG="$DIST/unhosted.dmg"
+DMG_RW="$DIST/unhosted-rw.dmg"
 STAGING="$DIST/dmg-staging"
 VOL_NAME="unhosted"
+BACKGROUND="$ROOT/crates/unhosted-desktop/dmg/background.png"
 
 # Build the .app first if it doesn't exist (this is what gets dragged
 # into /Applications from the .dmg).
@@ -37,37 +42,68 @@ if [ ! -d "$APP" ]; then
   bash scripts/bundle-macos.sh
 fi
 
-# Stage: a clean directory with the .app and a symlink to /Applications.
-# hdiutil reads from here when creating the .dmg.
-rm -rf "$STAGING" "$DMG"
-mkdir -p "$STAGING"
+# Stage: a clean directory with the .app, a symlink to /Applications,
+# and the hidden .background dir Finder reads the window art from.
+rm -rf "$STAGING" "$DMG" "$DMG_RW"
+mkdir -p "$STAGING/.background"
 cp -R "$APP" "$STAGING/"
 ln -s /Applications "$STAGING/Applications"
+if [ -f "$BACKGROUND" ]; then
+  cp "$BACKGROUND" "$STAGING/.background/background.png"
+fi
 
-# Optional: drop in a tiny README so users know what to do.
-cat > "$STAGING/INSTALL.txt" <<'EOF'
-to install unhosted:
-  1. drag the "unhosted" icon onto the "Applications" shortcut.
-  2. open /Applications/unhosted.app (right-click → open the first time
-     so gatekeeper lets it through; code signing is on the roadmap).
-
-you'll also need a local model runtime — llama.cpp, ollama, or
-lm studio. the daemon auto-detects whichever is running.
-
-see https://github.com/unhosted-ai/unhosted-core for details.
-EOF
-
-echo "→ creating $DMG"
+echo "→ creating writable image"
 hdiutil create \
   -volname "$VOL_NAME" \
   -srcfolder "$STAGING" \
   -ov \
-  -format UDZO \
+  -format UDRW \
   -fs HFS+ \
-  "$DMG" > /dev/null
+  "$DMG_RW" > /dev/null
+
+# Mount the writable image and let Finder lay out the window: icon
+# view, no chrome, branded background, app on the left, Applications
+# on the right. Mirrors bundle.macOS.dmg in tauri.conf.json so local
+# and released DMGs look identical. Best-effort: a headless session
+# without Finder scripting still produces a valid (unstyled) DMG.
+echo "→ styling installer window"
+MOUNT_DIR="/Volumes/$VOL_NAME"
+hdiutil attach "$DMG_RW" -readwrite -noverify -noautoopen > /dev/null
+if osascript <<EOF
+tell application "Finder"
+  tell disk "$VOL_NAME"
+    open
+    set current view of container window to icon view
+    set toolbar visible of container window to false
+    set statusbar visible of container window to false
+    set the bounds of container window to {200, 120, 860, 540}
+    set viewOptions to the icon view options of container window
+    set arrangement of viewOptions to not arranged
+    set icon size of viewOptions to 110
+    set background picture of viewOptions to file ".background:background.png"
+    set position of item "unhosted.app" of container window to {170, 200}
+    set position of item "Applications" of container window to {490, 200}
+    close
+    open
+    update without registering applications
+    delay 1
+    close
+  end tell
+end tell
+EOF
+then
+  echo "  styled"
+else
+  echo "  Finder scripting unavailable — shipping unstyled layout"
+fi
+sync
+hdiutil detach "$MOUNT_DIR" > /dev/null
+
+echo "→ compressing to $DMG"
+hdiutil convert "$DMG_RW" -format UDZO -imagekey zlib-level=9 -o "$DMG" > /dev/null
 
 # Cleanup
-rm -rf "$STAGING"
+rm -rf "$STAGING" "$DMG_RW"
 
 SIZE="$(du -h "$DMG" | awk '{print $1}')"
 echo

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="660" height="420" viewBox="0 0 660 420">
+  <title>unhosted — dmg installer background</title>
+  <!-- Finder draws the two icons on top of this image: unhosted.app
+       centered at (170,200) and the /Applications symlink at (490,200),
+       matching bundle.macOS.dmg in tauri.conf.json. The background only
+       supplies the canvas, the drag arrow between them, and a caption. -->
+  <rect width="660" height="420" fill="#F5F5F0"/>
+
+  <!-- wordmark, top center -->
+  <text x="330" y="64" text-anchor="middle"
+        font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+        font-size="22" font-weight="600" letter-spacing="1"
+        fill="#0A0A0A">unhosted</text>
+  <circle cx="396" cy="57" r="4" fill="#FF3B30"/>
+
+  <!-- drag arrow between the icon positions (icon centers at y=200) -->
+  <g stroke="#0A0A0A" stroke-width="7" stroke-linecap="round" fill="none" opacity="0.82">
+    <path d="M 262 200 H 384"/>
+    <path d="M 360 176 L 396 200 L 360 224"/>
+  </g>
+
+  <!-- caption, bottom center -->
+  <text x="330" y="366" text-anchor="middle"
+        font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+        font-size="13" letter-spacing="0.4"
+        fill="#7A7A74">drag unhosted to Applications to install</text>
+</svg>

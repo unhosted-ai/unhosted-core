@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "unhosted",
-  "version": "0.0.74",
   "identifier": "ai.unhosted.app",
   "build": {
     "frontendDist": "dist"
@@ -37,6 +36,14 @@
       "icons/icon.ico"
     ],
     "category": "Productivity",
+    "macOS": {
+      "dmg": {
+        "background": "dmg/background.png",
+        "windowSize": { "width": 660, "height": 420 },
+        "appPosition": { "x": 170, "y": 200 },
+        "applicationFolderPosition": { "x": 490, "y": 200 }
+      }
+    },
     "shortDescription": "your hardware as your AI cluster",
     "longDescription": "Local-first AI daemon that pools owned hardware (Mac, Linux, Windows, Raspberry Pi) into a private inference cluster. Routes through llama.cpp / Ollama / LM Studio. Nothing leaves your machines."
   },
