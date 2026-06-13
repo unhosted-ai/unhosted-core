@@ -44,6 +44,45 @@ If the workflow misfires, you can also trigger it from the Actions tab:
 
 - Actions → Release → Run workflow → enter the tag you want to release against an existing branch.
 
+## Local macOS desktop release pipeline
+
+For local macOS desktop packaging (app + dmg), use the single orchestrator:
+
+```bash
+bash scripts/release-macos.sh
+```
+
+This runs a deterministic pipeline:
+
+- build `dist/unhosted.app`
+- build `dist/unhosted.dmg`
+- stage versioned artifacts + SHA-256 checksums in `dist/release-macos/`
+
+Optional signing + notarization (mirrors a production release flow):
+
+```bash
+UNHOSTED_VERSION=v0.0.2 \
+UNHOSTED_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+UNHOSTED_NOTARY_PROFILE="AC_PASSWORD" \
+bash scripts/release-macos.sh
+```
+
+By default, `scripts/release-macos.sh` refuses to run from a dirty
+working tree to avoid accidentally shipping uncommitted changes. For
+local smoke tests only, override with:
+
+```bash
+UNHOSTED_ALLOW_DIRTY=1 bash scripts/release-macos.sh
+```
+
+Expected outputs:
+
+- `dist/release-macos/unhosted-macos-app-<target>.tar.gz`
+- `dist/release-macos/unhosted-macos-<version>-<target>.dmg`
+- corresponding `.sha256` files
+
+Without signing variables, the script still builds unsigned artifacts for local testing.
+
 ## Cross-compile locally from macOS
 
 The CI workflow is the golden path. But sometimes you want to build a
