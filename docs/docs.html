@@ -270,7 +270,7 @@ journalctl --user -u unhosted -f       # follow logs</code></pre>
 
     <section id="status">
       <h2>what's working today</h2>
-      <p>the truth, not the marketing version.</p>
+      <p>the truth, not the marketing version. current desktop release: <strong>v0.0.74</strong>.</p>
 
       <table class="status-table">
         <thead>
@@ -288,6 +288,17 @@ journalctl --user -u unhosted -f       # follow logs</code></pre>
           <tr><td>web ui / desktop app</td><td><span class="pill off">designed</span></td><td>v0.1.0 web, v0.2.0 tauri.</td></tr>
         </tbody>
       </table>
+    </section>
+
+    <section id="sharing-options">
+      <h2>sharing options via unhosted</h2>
+      <p>pick the sharing radius based on who should reach your models.</p>
+      <ul class="next-list">
+        <li><strong>local network (lan cluster):</strong> use mdns discovery + lan routing so your own machines on the same wifi/lan can use the same backend.</li>
+        <li><strong>trusted remote peers:</strong> roadmap mode for explicit pairing and encrypted peer transport to friends/teammates outside your network.</li>
+        <li><strong>public url:</strong> use the built-in cloudflare tunnel toggle from the web ui (<code>:7777</code>) to expose a controlled external link.</li>
+        <li><strong>scale up:</strong> use vram-pooling across paired peers to run larger models than one machine can fit alone.</li>
+      </ul>
     </section>
 
     <section id="faq">

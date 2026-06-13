@@ -106,6 +106,16 @@ This section replaces the typical "Features" list. It's the truth about what wor
 
 Reproducible benchmarks land in `benchmarks/` once any code exists. We will publish honest tokens-per-second numbers, not marketing language.
 
+## Sharing Options Via Unhosted
+
+Depending on *who* you want to share with, use the radius that matches your risk:
+
+- **Local network (LAN cluster):** for your own machines or family devices on the same LAN. Unhosted ships mDNS discovery + LAN request routing, so peers can be found and used without manual router-level setup.
+- **Trusted remote peers:** for friends or teammates outside your network. This mode is on the roadmap (see status table above) and is designed around explicit pairing plus encrypted peer transport, not open public exposure.
+- **Public URL:** for external apps, frontends, or agents that need internet reach. Unhosted already ships one-click Cloudflare tunnel exposure from the web UI at `:7777`.
+
+Once peers are connected, VRAM-pooling is the next step for larger models: distribute layer inference across paired machines instead of fitting everything on one box.
+
 ## Plugins
 
 The MCP server in [`unhosted-plugins`](https://github.com/unhosted-ai/unhosted-plugins) lets MCP-aware host apps (Claude Desktop, Cursor, Zed) call into your local daemon — `unhosted_status`, `unhosted_web_fetch`, `unhosted_memory_*`, `unhosted_vram_pool_status`. One command wires it up:

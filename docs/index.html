@@ -736,8 +736,8 @@ example.com is a single-page reserved-domain placeholder maintained by IANA for 
           <tr>
             <td>signed auto-updater</td>
             <td><span class="pill on">shipped</span></td>
-            <td>v0.0.15</td>
-            <td>minisign-signed releases on all four platforms (darwin-aarch64 / linux-x86_64 / linux-aarch64 / windows-x86_64). in-app prompt on new release.</td>
+            <td>v0.0.15+</td>
+            <td>minisign-signed releases on all four platforms (darwin-aarch64 / linux-x86_64 / linux-aarch64 / windows-x86_64). in-app prompt on new release. current desktop release: v0.0.74.</td>
           </tr>
           <tr>
             <td>public swarm (usdc payments)</td>
@@ -761,6 +761,22 @@ example.com is a single-page reserved-domain placeholder maintained by IANA for 
       </table>
     </div>
     <p class="status-foot">reproducible benchmarks land in <code>benchmarks/</code> once any code exists. we publish honest tokens-per-second numbers, not marketing language.</p>
+  </section>
+
+  <hr class="divider">
+
+  <section class="status" id="sharing-options">
+    <div class="head">
+      <h3>sharing options via unhosted</h3>
+      <a class="view-all" href="docs.html#sharing-options">docs version</a>
+    </div>
+    <p class="section-sub">pick the radius that matches who you want to share with.</p>
+    <ul class="netsec-honest">
+      <li><strong>local network (lan cluster):</strong> share models with your own devices on the same wifi/lan using built-in mdns discovery and lan routing.</li>
+      <li><strong>trusted remote peers:</strong> for friends or teammates outside your network. this remains a roadmap mode (see status table) and is designed around explicit pairing and encrypted peer transport.</li>
+      <li><strong>public url:</strong> expose your node with one-click cloudflare tunnel from the web ui (<code>:7777</code>) for external apps, frontends, or agents.</li>
+      <li><strong>larger models:</strong> once peers are connected, use vram-pooling to distribute layer inference across paired machines.</li>
+    </ul>
   </section>
 
   <hr class="divider">
