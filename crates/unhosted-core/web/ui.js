@@ -239,6 +239,28 @@ const els = {
   phoneQrCanvas: $("#phone-qr-canvas"),
   phoneQrHint:   $("#phone-qr-hint"),
   phoneSection:  $("#phone-section"),
+  appUpdateSection: $("#app-update-section"),
+  appUpdateStatus: $("#app-update-status-line"),
+  appUpdateCheck: $("#app-update-check"),
+  appUpdateCheckLabel: $("#app-update-check-label"),
+  appUpdateUnavailable: $("#app-update-unavailable"),
+  voiceListenToggle: $("#voice-listen-toggle"),
+  voiceListenLabel: $("#voice-listen-label"),
+  voiceRunTranscript: $("#voice-run-transcript"),
+  voiceTranscriptInput: $("#voice-transcript-input"),
+  voiceAutoRun: $("#voice-auto-run"),
+  voiceAutoSpeak: $("#voice-auto-speak"),
+  voiceAutoSaveNeed: $("#voice-auto-save-need"),
+  voiceWakeMode: $("#voice-wake-mode"),
+  voiceWakeWordInput: $("#voice-wake-word-input"),
+  voiceSaveNeed: $("#voice-save-need"),
+  voiceExtractNeed: $("#voice-extract-need"),
+  voiceNeedPreview: $("#voice-need-preview"),
+  voiceClearTranscript: $("#voice-clear-transcript"),
+  voiceStatus: $("#voice-status-line"),
+  bugReportFooter: $("#bug-report-footer"),
+  bugReportOpen: $("#bug-report-open"),
+  bugReportCopyDiagnostics: $("#bug-report-copy-diagnostics"),
   developerOpen: $("#developer-open"),
   developerModal: $("#developer-modal"),
   developerModalClose: $("#developer-modal-close"),
@@ -1030,6 +1052,7 @@ els.composer.addEventListener("submit", async (e) => {
     assistantNode.classList.remove("streaming");
     streaming = false;
     currentAbort = null;
+    handleVoiceAssistantReply(assistantMsg.text);
     setSendMode("send");
     els.meta.innerHTML = '<span class="hint">enter to send</span>';
     chat.updatedAt = Date.now();
@@ -1674,6 +1697,348 @@ if (els.memoryClearAll) {
     } else {
       notify("clear failed", { level: "error" });
     }
+  });
+}
+
+// ---------------------------------------------------------------- voice assistant
+// OpenJarvis-style local voice loop: microphone -> transcript -> run prompt,
+// plus optional spoken assistant replies and explicit "save as need" memory.
+const VOICE_PREFS_KEY = "unhosted-voice-assistant-prefs";
+const voiceState = {
+  recognition: null,
+  listening: false,
+  pendingSpeak: false,
+  manualStop: false,
+  lastError: null,
+  wakeCooldownUntil: 0,
+};
+
+function readVoicePrefs() {
+  try {
+    const raw = localStorage.getItem(VOICE_PREFS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function writeVoicePrefs() {
+  try {
+    localStorage.setItem(
+      VOICE_PREFS_KEY,
+      JSON.stringify({
+        autoRun: !!els.voiceAutoRun?.checked,
+        autoSpeak: !!els.voiceAutoSpeak?.checked,
+        autoSaveNeed: !!els.voiceAutoSaveNeed?.checked,
+        wakeMode: !!els.voiceWakeMode?.checked,
+        wakeWord: (els.voiceWakeWordInput?.value || "jarvis").trim() || "jarvis",
+      }),
+    );
+  } catch (e) {
+    // Storage can fail in private mode — non-fatal.
+  }
+}
+
+function setVoiceStatus(text, state = "idle") {
+  if (!els.voiceStatus) return;
+  els.voiceStatus.textContent = text;
+  els.voiceStatus.dataset.state = state;
+}
+
+function speechRecognitionCtor() {
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+function setVoiceListeningUi(listening) {
+  voiceState.listening = listening;
+  if (els.voiceListenLabel) {
+    els.voiceListenLabel.textContent = listening ? "stop listening" : "start listening";
+  }
+  if (els.voiceListenToggle) {
+    els.voiceListenToggle.dataset.state = listening ? "running" : "idle";
+  }
+}
+
+function transcriptText() {
+  return (els.voiceTranscriptInput?.value || "").trim();
+}
+
+function wakeWord() {
+  const w = (els.voiceWakeWordInput?.value || "jarvis").trim().toLowerCase();
+  return w || "jarvis";
+}
+
+function extractNeedFromText(text) {
+  const raw = String(text || "").trim();
+  const lower = raw.toLowerCase();
+  const out = { category: "preference", summary: raw };
+
+  const nameMatch = raw.match(/(?:call me|my name is)\s+([a-z0-9 _-]{2,40})/i);
+  if (nameMatch) {
+    out.category = "profile";
+    out.summary = `Preferred name: ${nameMatch[1].trim()}`;
+    return out;
+  }
+  const langMatch = raw.match(/(?:respond|answer|write)\s+in\s+([a-z][a-z\- ]{1,24})/i);
+  if (langMatch) {
+    out.category = "language";
+    out.summary = `Response language: ${langMatch[1].trim()}`;
+    return out;
+  }
+  if (/(?:prefer|i prefer|please|always|never|do not|don't|only)/i.test(raw)) {
+    out.category = "style";
+    out.summary = raw;
+    return out;
+  }
+  if (/rust|python|javascript|typescript|go|java|c\+\+/i.test(lower)) {
+    out.category = "tech";
+    out.summary = raw;
+    return out;
+  }
+  return out;
+}
+
+function renderNeedPreview(need) {
+  if (!els.voiceNeedPreview) return;
+  if (!need || !need.summary) {
+    els.voiceNeedPreview.textContent = "need preview: —";
+    return;
+  }
+  els.voiceNeedPreview.textContent = `need preview [${need.category}]: ${need.summary}`;
+}
+
+function speakAssistantText(text) {
+  const synth = window.speechSynthesis;
+  if (!synth) {
+    notify("speech output is not supported in this browser", { level: "error", duration: 3000 });
+    setVoiceStatus("speech output unsupported in this browser", "error");
+    return;
+  }
+  const spoken = String(text || "").trim();
+  if (!spoken) return;
+  const utter = new SpeechSynthesisUtterance(spoken);
+  utter.rate = 1;
+  utter.onstart = () => setVoiceStatus("speaking assistant reply…", "running");
+  utter.onend = () => setVoiceStatus("reply spoken", "idle");
+  utter.onerror = () => setVoiceStatus("speech output failed", "error");
+  synth.cancel();
+  synth.speak(utter);
+}
+
+function handleVoiceAssistantReply(text) {
+  if (!voiceState.pendingSpeak) return;
+  voiceState.pendingSpeak = false;
+  if (!els.voiceAutoSpeak?.checked) return;
+  // Keep spoken output clean: strip bracketed transport markers.
+  const cleaned = String(text || "")
+    .replace(/\[(stopped|error:[^\]]+)\]/gi, "")
+    .trim();
+  if (!cleaned) return;
+  speakAssistantText(cleaned.slice(0, 1200));
+}
+
+async function saveNeedFromText(text) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) {
+    notify("nothing to save", { level: "info", duration: 2200 });
+    return false;
+  }
+  const need = extractNeedFromText(trimmed);
+  renderNeedPreview(need);
+  const saved = await addMemory(`user need [${need.category}]: ${need.summary}`, null);
+  if (saved) {
+    notify("saved to private memory", { level: "success", duration: 2200 });
+    setVoiceStatus("saved as a durable user need", "idle");
+    return true;
+  }
+  notify("save need failed", { level: "error", duration: 2600 });
+  setVoiceStatus("save failed", "error");
+  return false;
+}
+
+async function runVoiceTranscript({ auto = false } = {}) {
+  const text = transcriptText();
+  if (!text) {
+    notify("record or type a transcript first", { level: "info", duration: 2200 });
+    return;
+  }
+  if (agentModeOn()) {
+    notify("voice run currently targets chat mode. switch chat/agent toggle to chat", {
+      level: "info",
+      duration: 3500,
+    });
+    return;
+  }
+  if (streaming) {
+    notify("assistant is already running", { level: "info", duration: 2200 });
+    return;
+  }
+  if (els.voiceAutoSaveNeed?.checked) {
+    await saveNeedFromText(text);
+  }
+  voiceState.pendingSpeak = !!els.voiceAutoSpeak?.checked;
+  els.prompt.value = text;
+  autoresize();
+  els.composer.requestSubmit();
+  setVoiceStatus(auto ? "heard you — running assistant…" : "running assistant from transcript…", "running");
+}
+
+function stopVoiceListening() {
+  voiceState.manualStop = true;
+  if (voiceState.recognition) {
+    try {
+      voiceState.recognition.stop();
+    } catch (_) {}
+  }
+}
+
+function startVoiceListening() {
+  const Ctor = speechRecognitionCtor();
+  if (!Ctor) {
+    notify("speech recognition is not supported in this browser", { level: "error", duration: 3200 });
+    setVoiceStatus("speech recognition unsupported", "error");
+    return;
+  }
+  if (voiceState.listening) return;
+
+  const rec = new Ctor();
+  voiceState.recognition = rec;
+  voiceState.manualStop = false;
+  voiceState.lastError = null;
+  rec.lang = "en-US";
+  rec.continuous = !!els.voiceWakeMode?.checked;
+  rec.interimResults = true;
+
+  let stableText = "";
+  rec.onstart = () => {
+    setVoiceListeningUi(true);
+    setVoiceStatus("listening… speak now", "running");
+  };
+  rec.onerror = (ev) => {
+    voiceState.lastError = ev.error || "unknown";
+    setVoiceStatus(`mic error: ${ev.error || "unknown"}`, "error");
+    notify(`voice error: ${ev.error || "unknown"}`, { level: "error", duration: 3200 });
+  };
+  rec.onresult = (ev) => {
+    const wakeMode = !!els.voiceWakeMode?.checked;
+    let interim = "";
+    for (let i = ev.resultIndex; i < ev.results.length; i += 1) {
+      const t = (ev.results[i][0] && ev.results[i][0].transcript) || "";
+      if (ev.results[i].isFinal) {
+        stableText = `${stableText} ${t}`.trim();
+        if (wakeMode) {
+          const ww = wakeWord();
+          const lower = t.toLowerCase();
+          const idx = lower.indexOf(ww);
+          if (idx >= 0 && Date.now() >= voiceState.wakeCooldownUntil) {
+            const command = t.slice(idx + ww.length).replace(/^[\s,:.-]+/, "").trim();
+            if (!command) {
+              setVoiceStatus(`wake word heard (${ww}) — waiting for command`, "running");
+            } else if (streaming) {
+              setVoiceStatus("assistant busy — wake command queued in transcript", "running");
+              if (els.voiceTranscriptInput) els.voiceTranscriptInput.value = command;
+            } else {
+              if (els.voiceTranscriptInput) els.voiceTranscriptInput.value = command;
+              voiceState.wakeCooldownUntil = Date.now() + 1200;
+              runVoiceTranscript({ auto: true });
+            }
+          }
+        }
+      } else {
+        interim = `${interim} ${t}`.trim();
+      }
+    }
+    if (!wakeMode && els.voiceTranscriptInput) {
+      els.voiceTranscriptInput.value = `${stableText} ${interim}`.trim();
+    } else if (wakeMode && !stableText && interim) {
+      setVoiceStatus(`listening for wake word "${wakeWord()}"…`, "running");
+    }
+  };
+  rec.onend = async () => {
+    setVoiceListeningUi(false);
+    const wakeMode = !!els.voiceWakeMode?.checked;
+    if (wakeMode) {
+      const fatal = voiceState.lastError === "not-allowed" || voiceState.lastError === "service-not-allowed";
+      if (!voiceState.manualStop && !fatal) {
+        setTimeout(() => {
+          if (els.voiceWakeMode?.checked && !voiceState.manualStop) startVoiceListening();
+        }, 140);
+        return;
+      }
+    }
+    const text = transcriptText();
+    if (!text) {
+      setVoiceStatus("no speech captured", "error");
+      return;
+    }
+    if (els.voiceAutoRun?.checked) {
+      await runVoiceTranscript({ auto: true });
+    } else {
+      setVoiceStatus("transcript ready — click run transcript", "idle");
+    }
+  };
+  rec.start();
+}
+
+if (els.voiceAutoRun || els.voiceAutoSpeak || els.voiceAutoSaveNeed) {
+  const prefs = readVoicePrefs();
+  if (els.voiceAutoRun && typeof prefs.autoRun === "boolean") {
+    els.voiceAutoRun.checked = prefs.autoRun;
+  }
+  if (els.voiceAutoSpeak && typeof prefs.autoSpeak === "boolean") {
+    els.voiceAutoSpeak.checked = prefs.autoSpeak;
+  }
+  if (els.voiceAutoSaveNeed && typeof prefs.autoSaveNeed === "boolean") {
+    els.voiceAutoSaveNeed.checked = prefs.autoSaveNeed;
+  }
+  if (els.voiceWakeMode && typeof prefs.wakeMode === "boolean") {
+    els.voiceWakeMode.checked = prefs.wakeMode;
+  }
+  if (els.voiceWakeWordInput && typeof prefs.wakeWord === "string" && prefs.wakeWord.trim()) {
+    els.voiceWakeWordInput.value = prefs.wakeWord.trim();
+  }
+  [els.voiceAutoRun, els.voiceAutoSpeak, els.voiceAutoSaveNeed, els.voiceWakeMode, els.voiceWakeWordInput]
+    .filter(Boolean)
+    .forEach((el) => el.addEventListener("change", writeVoicePrefs));
+}
+
+if (els.voiceListenToggle) {
+  els.voiceListenToggle.addEventListener("click", () => {
+    if (voiceState.listening) stopVoiceListening();
+    else startVoiceListening();
+  });
+}
+if (els.voiceRunTranscript) {
+  els.voiceRunTranscript.addEventListener("click", async () => {
+    await runVoiceTranscript();
+  });
+}
+if (els.voiceSaveNeed) {
+  els.voiceSaveNeed.addEventListener("click", async () => {
+    await saveNeedFromText(transcriptText());
+  });
+}
+if (els.voiceExtractNeed) {
+  els.voiceExtractNeed.addEventListener("click", async () => {
+    const text = transcriptText();
+    if (!text) {
+      notify("record or type transcript first", { level: "info", duration: 2200 });
+      return;
+    }
+    const need = extractNeedFromText(text);
+    renderNeedPreview(need);
+    await saveNeedFromText(need.summary);
+  });
+}
+if (els.voiceClearTranscript) {
+  els.voiceClearTranscript.addEventListener("click", () => {
+    if (els.voiceTranscriptInput) {
+      els.voiceTranscriptInput.value = "";
+    }
+    renderNeedPreview(null);
+    setVoiceStatus("transcript cleared", "idle");
   });
 }
 
@@ -3166,6 +3531,120 @@ if (settingsEls.tunnelChip) {
   }
 }
 
+// ---------------------------------------------------------- bug reporting
+// Opens a prefilled issue template with runtime diagnostics so bug reports
+// have enough context to reproduce without extra back-and-forth.
+const BUG_REPORT_BASE_URL =
+  "https://github.com/unhosted-ai/unhosted-core/issues/new";
+
+async function readBugDiagnostics() {
+  const diagnostics = {
+    app: "unhosted web ui",
+    origin: location.origin,
+    path: location.pathname,
+    userAgent: navigator.userAgent,
+    utc: new Date().toISOString(),
+  };
+  try {
+    const healthRes = await fetch("/health", { cache: "no-store" });
+    diagnostics.healthHttp = healthRes.status;
+    diagnostics.healthOk = healthRes.ok;
+  } catch (_) {
+    diagnostics.healthError = "request failed";
+  }
+  try {
+    const statusRes = await fetch("/v1/status", { cache: "no-store" });
+    diagnostics.statusHttp = statusRes.status;
+    if (statusRes.ok) {
+      const status = await statusRes.json();
+      diagnostics.status = {
+        mode: status.mode || null,
+        model: status.model || null,
+        upstream: status.upstream || null,
+        daemonAddr: status.addr || null,
+        peersCount: Array.isArray(status.peers) ? status.peers.length : null,
+        publicMode: status.public_mode ? status.public_mode.state || "configured" : null,
+      };
+    }
+  } catch (_) {
+    diagnostics.statusError = "request failed";
+  }
+
+  return diagnostics;
+}
+
+function bugDiagnosticsMarkdown(diagnostics) {
+  return [
+    "## Summary",
+    "Describe what you expected vs what happened.",
+    "",
+    "## Steps To Reproduce",
+    "1. ",
+    "2. ",
+    "3. ",
+    "",
+    "## Diagnostics",
+    "```json",
+    JSON.stringify(diagnostics, null, 2),
+    "```",
+  ].join("\n");
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (_) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand("copy");
+      ta.remove();
+      return true;
+    } catch (__) {
+      ta.remove();
+      return false;
+    }
+  }
+}
+
+async function openBugReport() {
+  const diagnostics = await readBugDiagnostics();
+  const params = new URLSearchParams({
+    labels: "bug",
+    template: "bug_report.md",
+    title: "[bug] ",
+    body: bugDiagnosticsMarkdown(diagnostics),
+  });
+  window.open(`${BUG_REPORT_BASE_URL}?${params.toString()}`, "_blank", "noopener");
+}
+
+if (els.bugReportFooter) {
+  els.bugReportFooter.addEventListener("click", async (e) => {
+    // Always route through the prefilled flow even though href exists as a fallback.
+    e.preventDefault();
+    await openBugReport();
+  });
+}
+if (els.bugReportOpen) {
+  els.bugReportOpen.addEventListener("click", async () => {
+    await openBugReport();
+  });
+}
+if (els.bugReportCopyDiagnostics) {
+  els.bugReportCopyDiagnostics.addEventListener("click", async () => {
+    const diagnostics = await readBugDiagnostics();
+    const ok = await copyText(bugDiagnosticsMarkdown(diagnostics));
+    if (ok) {
+      notify("diagnostics copied", { level: "success", duration: 2200 });
+    } else {
+      notify("couldn't access clipboard", { level: "error" });
+    }
+  });
+}
+
 // ---------------------------------------------------------- api access
 // Inline copy-buttons for local base url + public tunnel url + bearer
 // token. Visible in the sidebar so an MCP / OpenAI-compatible client
@@ -3264,4 +3743,49 @@ if (settingsEls.tunnelChip) {
   }
   refresh();
   setInterval(refresh, 5000);
+})();
+
+// ---------------------------------------------------------- desktop updater
+(function wireDesktopUpdater() {
+  const invoke = globalThis.__TAURI__?.core?.invoke;
+  if (!els.appUpdateSection || !els.appUpdateUnavailable) return;
+
+  if (!invoke) {
+    els.appUpdateUnavailable.hidden = false;
+    return;
+  }
+
+  els.appUpdateSection.hidden = false;
+
+  const setStatus = (text) => {
+    if (els.appUpdateStatus) els.appUpdateStatus.textContent = text;
+  };
+
+  const setBusy = (busy) => {
+    if (!els.appUpdateCheck) return;
+    els.appUpdateCheck.disabled = busy;
+    if (els.appUpdateCheckLabel) {
+      els.appUpdateCheckLabel.textContent = busy ? "checking…" : "check for updates";
+    }
+  };
+
+  els.appUpdateCheck?.addEventListener("click", async () => {
+    setBusy(true);
+    setStatus("checking for signed desktop updates…");
+    try {
+      const res = await invoke("check_for_app_update");
+      if (res?.available) {
+        const latest = res.latestVersion ? `v${res.latestVersion}` : "a newer version";
+        setStatus(`${latest} is available — follow the native updater prompt.`);
+      } else {
+        const current = res?.currentVersion ? `v${res.currentVersion}` : "this version";
+        setStatus(`${current} is up to date.`);
+      }
+    } catch (err) {
+      const msg = typeof err === "string" ? err : (err && err.message) || "update check failed";
+      setStatus(`update check failed — ${msg}`);
+    } finally {
+      setBusy(false);
+    }
+  });
 })();
