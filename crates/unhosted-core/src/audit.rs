@@ -170,6 +170,17 @@ pub enum AuditEvent {
         /// The public URL if `state == "live"`, otherwise empty.
         url: String,
     },
+    /// The local model library or runtime changed: a download
+    /// started, a model was loaded/unloaded into the managed
+    /// llama-server, or a library file was deleted. `action` is one
+    /// of `download_started`, `download_cancelled`, `loaded`,
+    /// `unloaded`, `deleted`.
+    ModelEvent {
+        ts: u64,
+        action: String,
+        /// The `*.gguf` file the action applies to.
+        file: String,
+    },
 }
 
 impl AuditEvent {

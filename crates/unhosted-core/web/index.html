@@ -737,8 +737,49 @@
           </div>
         </section>
 
-        <!-- ── compute: memory + vram-pool + benchmark ─────────── -->
+        <!-- ── compute: models + memory + vram-pool + benchmark ── -->
         <section class="settings-panel" data-panel="compute" hidden>
+          <div class="settings-section" id="models-section">
+            <h3 class="settings-h3">models</h3>
+            <p class="settings-blurb">download, load, and switch local models without leaving the app. files live in <code id="models-dir-path">~/.cache/unhosted/models</code> and serve through the built-in llama.cpp runtime.</p>
+            <div class="tunnel-status" id="models-status-line">checking…</div>
+            <div class="public-mode-actions" id="models-runtime-actions" hidden>
+              <button class="pair-btn pair-btn-danger" id="models-unload">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="4" y="4" width="8" height="8" rx="1"/>
+                </svg>
+                <span>eject model</span>
+              </button>
+            </div>
+            <div class="models-group" id="models-installed-wrap" hidden>
+              <div class="models-group-head">library</div>
+              <ul class="models-list" id="models-installed-list"></ul>
+            </div>
+            <div class="models-group">
+              <div class="models-group-head">get models</div>
+              <ul class="models-list" id="models-catalog-list"></ul>
+            </div>
+            <div class="models-custom-row">
+              <input
+                type="text"
+                id="models-custom-url"
+                class="models-custom-url"
+                placeholder="https://huggingface.co/…/model.gguf"
+                spellcheck="false"
+                autocapitalize="off"
+                autocomplete="off"
+              >
+              <button class="pair-btn pair-btn-secondary" id="models-custom-download">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M8 2.5v8"/>
+                  <path d="M4.5 7L8 10.5 11.5 7"/>
+                  <path d="M3 13.5h10"/>
+                </svg>
+                <span>fetch</span>
+              </button>
+            </div>
+          </div>
+
           <div class="settings-section" id="memory-section">
             <h3 class="settings-h3">private memory</h3>
             <p class="settings-blurb">remember relevant bits from past chats and prepend them as system context on new ones. all local, never leaves this machine.</p>

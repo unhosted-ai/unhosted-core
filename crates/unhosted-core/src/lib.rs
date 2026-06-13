@@ -20,6 +20,7 @@ pub mod identity;
 pub mod lightning_cfg;
 pub mod memory;
 pub mod metrics;
+pub mod model_manager;
 pub mod paths;
 pub mod peer;
 pub mod public_mode;
@@ -179,6 +180,10 @@ struct NodeState {
     /// present and let `start()` fail with a clear error when the
     /// machine isn't RPC-capable.
     vram_pool: Arc<vram_pool::PoolManager>,
+    /// Local model library + supervised llama-server runtime
+    /// (LM Studio-style download / load / switch). Owns the
+    /// llama-server child when the user loads a model from the UI.
+    model_manager: Arc<model_manager::ModelManager>,
     /// Payment-rail adapters. The daemon seeds this with a `ManualAdapter`
     /// at startup (Phase A — ADR-0011 in unhosted-payments). Lightning /
     /// USDC / Stripe adapters are registered conditionally in later
@@ -368,6 +373,7 @@ pub async fn serve(node: Node) -> Result<()> {
         http,
         summarize_inflight: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         vram_pool: Arc::new(vram_pool::PoolManager::new(vram_pool::probe())),
+        model_manager: Arc::new(model_manager::ModelManager::new()),
         rail_registry: Arc::new(rail_registry),
         audit: Arc::new(audit::AuditBroadcaster::new()),
         metrics: Arc::new(metrics::Metrics::new()),
@@ -574,6 +580,22 @@ pub async fn serve(node: Node) -> Result<()> {
         // this machine the orchestrator of a layer-split inference
         // cluster. Local-user-only — spawning subprocesses on the
         // user's box is consequential.
+        // Model manager (LM Studio-style library). Download GGUFs
+        // from the curated catalog, load one into a supervised
+        // llama-server child, switch, delete. Local-user-only —
+        // writes to disk and spawns subprocesses.
+        .route("/v1/models/manage", get(models_manage_handler))
+        .route("/v1/models/download", post(models_download_handler))
+        .route(
+            "/v1/models/download/cancel",
+            post(models_download_cancel_handler),
+        )
+        .route("/v1/models/load", post(models_load_handler))
+        .route("/v1/models/unload", post(models_unload_handler))
+        .route(
+            "/v1/models/file/{name}",
+            axum::routing::delete(models_delete_handler),
+        )
         .route("/v1/vram-pool", get(vram_pool_status_handler))
         .route("/v1/vram-pool/start", post(vram_pool_start_handler))
         .route("/v1/vram-pool/stop", post(vram_pool_stop_handler))
@@ -2650,6 +2672,194 @@ async fn models_handler(
         .header("content-type", content_type)
         .body(Body::from(body_bytes))
         .expect("valid response"))
+}
+
+// ─── model manager endpoints ───────────────────────────────────────────────
+// LM Studio-style library management. All local-user-only (loopback or
+// local bearer): these write multi-GB files to disk and spawn
+// subprocesses on the user's box, which a paired peer has no business
+// doing. Errors come back as `{"error": "..."}` with a 4xx so the UI
+// can show the reason instead of a bare status code.
+
+type ModelApiError = (StatusCode, axum::Json<serde_json::Value>);
+
+fn model_api_error(status: StatusCode, msg: impl std::fmt::Display) -> ModelApiError {
+    (
+        status,
+        axum::Json(serde_json::json!({ "error": msg.to_string() })),
+    )
+}
+
+fn require_local_user(
+    state: &NodeState,
+    headers: &HeaderMap,
+    remote: SocketAddr,
+) -> Result<(), ModelApiError> {
+    let outcome = state.classify(headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true).map_err(|s| model_api_error(s, "unauthorized"))
+}
+
+/// `GET /v1/models/manage` — one-poll snapshot: installed library,
+/// curated catalog (with installed flags), download progress, and
+/// the supervised runtime's state.
+async fn models_manage_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<axum::Json<model_manager::Snapshot>, ModelApiError> {
+    require_local_user(&state, &headers, remote)?;
+    Ok(axum::Json(state.model_manager.snapshot().await))
+}
+
+#[derive(Deserialize)]
+struct ModelDownloadRequest {
+    /// Catalog id (preferred) …
+    #[serde(default)]
+    id: Option<String>,
+    /// … or a direct HTTPS huggingface.co URL to any `.gguf`.
+    #[serde(default)]
+    url: Option<String>,
+}
+
+/// `POST /v1/models/download` — start downloading a catalog entry
+/// (`{"id": …}`) or a custom HuggingFace GGUF (`{"url": …}`).
+async fn models_download_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    axum::Json(req): axum::Json<ModelDownloadRequest>,
+) -> Result<axum::Json<serde_json::Value>, ModelApiError> {
+    require_local_user(&state, &headers, remote)?;
+
+    let (url, file) = if let Some(id) = req.id.as_deref() {
+        let entry = model_manager::CATALOG
+            .iter()
+            .find(|e| e.id == id)
+            .ok_or_else(|| {
+                model_api_error(StatusCode::NOT_FOUND, format!("unknown catalog id `{id}`"))
+            })?;
+        (entry.url.to_string(), entry.file.to_string())
+    } else if let Some(url) = req.url.clone() {
+        // Derive the library file name from the URL's last segment.
+        let file = url
+            .rsplit('/')
+            .next()
+            .unwrap_or_default()
+            .split('?')
+            .next()
+            .unwrap_or_default()
+            .to_string();
+        (url, file)
+    } else {
+        return Err(model_api_error(
+            StatusCode::BAD_REQUEST,
+            "provide `id` (catalog) or `url` (huggingface .gguf)",
+        ));
+    };
+
+    state
+        .model_manager
+        .start_download(url, file.clone())
+        .await
+        .map_err(|e| model_api_error(StatusCode::BAD_REQUEST, e))?;
+    state.audit.emit(audit::AuditEvent::ModelEvent {
+        ts: audit::AuditEvent::now(),
+        action: "download_started".into(),
+        file: file.clone(),
+    });
+    Ok(axum::Json(serde_json::json!({ "ok": true, "file": file })))
+}
+
+/// `POST /v1/models/download/cancel` — abort the in-flight download.
+async fn models_download_cancel_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<axum::Json<serde_json::Value>, ModelApiError> {
+    require_local_user(&state, &headers, remote)?;
+    state
+        .model_manager
+        .cancel_download()
+        .await
+        .map_err(|e| model_api_error(StatusCode::BAD_REQUEST, e))?;
+    state.audit.emit(audit::AuditEvent::ModelEvent {
+        ts: audit::AuditEvent::now(),
+        action: "download_cancelled".into(),
+        file: String::new(),
+    });
+    Ok(axum::Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct ModelLoadRequest {
+    file: String,
+}
+
+/// `POST /v1/models/load` — spawn (or switch) the supervised
+/// llama-server to serve `file`. The runtime binds the daemon's
+/// configured upstream port so the existing chat proxy path picks
+/// it up without any reconfiguration.
+async fn models_load_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    axum::Json(req): axum::Json<ModelLoadRequest>,
+) -> Result<axum::Json<model_manager::RuntimeState>, ModelApiError> {
+    require_local_user(&state, &headers, remote)?;
+    let port = model_manager::runtime_port(&state.node.llama_server_url);
+    let runtime = state
+        .model_manager
+        .load(&req.file, port)
+        .await
+        .map_err(|e| model_api_error(StatusCode::BAD_REQUEST, e))?;
+    state.audit.emit(audit::AuditEvent::ModelEvent {
+        ts: audit::AuditEvent::now(),
+        action: "loaded".into(),
+        file: req.file,
+    });
+    Ok(axum::Json(runtime))
+}
+
+/// `POST /v1/models/unload` — stop the supervised llama-server.
+async fn models_unload_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<axum::Json<model_manager::RuntimeState>, ModelApiError> {
+    require_local_user(&state, &headers, remote)?;
+    let runtime = state
+        .model_manager
+        .unload()
+        .await
+        .map_err(|e| model_api_error(StatusCode::BAD_REQUEST, e))?;
+    state.audit.emit(audit::AuditEvent::ModelEvent {
+        ts: audit::AuditEvent::now(),
+        action: "unloaded".into(),
+        file: String::new(),
+    });
+    Ok(axum::Json(runtime))
+}
+
+/// `DELETE /v1/models/file/{name}` — remove a library file. Refuses
+/// while the file backs the running child.
+async fn models_delete_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> Result<axum::Json<serde_json::Value>, ModelApiError> {
+    require_local_user(&state, &headers, remote)?;
+    state
+        .model_manager
+        .delete(&name)
+        .await
+        .map_err(|e| model_api_error(StatusCode::BAD_REQUEST, e))?;
+    state.audit.emit(audit::AuditEvent::ModelEvent {
+        ts: audit::AuditEvent::now(),
+        action: "deleted".into(),
+        file: name,
+    });
+    Ok(axum::Json(serde_json::json!({ "ok": true })))
 }
 
 async fn identity_handler(

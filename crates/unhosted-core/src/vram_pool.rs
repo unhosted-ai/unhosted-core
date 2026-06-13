@@ -145,6 +145,13 @@ const TAP_BIN_PATHS: &[&str] = &[
     "/usr/local/opt/llama-cpp-rpc/bin",
 ];
 
+/// Resolve the `llama-server` binary for callers outside this module
+/// (the model manager spawns it for single-model serving). Same
+/// resolution order as the vram-pool probe: tap opt-prefix, then PATH.
+pub(crate) fn find_llama_server() -> Option<PathBuf> {
+    resolve_with_tap_priority("llama-server")
+}
+
 fn resolve_with_tap_priority(name: &str) -> Option<PathBuf> {
     for prefix in TAP_BIN_PATHS {
         let candidate = PathBuf::from(prefix).join(name);

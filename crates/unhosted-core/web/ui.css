@@ -2058,6 +2058,108 @@ button:focus-visible, input:focus-visible, textarea:focus-visible,
   color: var(--danger, #c33);
 }
 
+/* Model manager (settings -> compute). Library + catalog rows share
+   one list style; the catalog row grows an inline progress bar while
+   its download is running. */
+.models-group { margin-top: 10px; }
+.models-group-head {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--mute);
+  margin-bottom: 4px;
+}
+.models-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.models-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+}
+.models-list li:last-child { border-bottom: none; }
+.models-list .model-meta {
+  flex: 1;
+  min-width: 0;
+}
+.models-list .model-name {
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.models-list .model-sub {
+  color: var(--mute);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.models-list .model-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.models-list .model-btn {
+  font: inherit;
+  font-size: 11.5px;
+  padding: 3px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: none;
+  color: var(--fg);
+  cursor: pointer;
+}
+.models-list .model-btn:hover { border-color: var(--accent); color: var(--accent); }
+.models-list .model-btn[disabled] { opacity: 0.5; cursor: default; }
+.models-list .model-btn.model-btn-danger:hover { border-color: var(--danger, #c33); color: var(--danger, #c33); }
+.models-list li.model-active .model-name::after {
+  content: " ● loaded";
+  color: var(--ok, #2a7);
+  font-size: 11px;
+}
+.model-progress {
+  margin-top: 5px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+.model-progress-bar {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}
+.models-custom-row {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+.models-custom-url {
+  width: 100%;
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 8px;
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+.models-custom-url:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
 /* VRAM-pool controls (sidebar). The input + buttons row appears
    under the status line when the local machine is ready or a pool
    is active. */

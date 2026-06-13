@@ -3789,3 +3789,289 @@ if (els.bugReportCopyDiagnostics) {
     }
   });
 })();
+
+// ---------------------------------------------------------- model manager
+// LM Studio-style library (settings -> compute -> models): curated
+// catalog with one-click downloads, installed list with load/switch/
+// delete, and a supervised llama-server runtime the daemon spawns on
+// the upstream port. Polls /v1/models/manage while the settings modal
+// is open so progress bars and runtime transitions render live.
+(function wireModelManager() {
+  const els = {
+    section: document.getElementById("models-section"),
+    dirPath: document.getElementById("models-dir-path"),
+    statusLine: document.getElementById("models-status-line"),
+    runtimeActions: document.getElementById("models-runtime-actions"),
+    unloadBtn: document.getElementById("models-unload"),
+    installedWrap: document.getElementById("models-installed-wrap"),
+    installedList: document.getElementById("models-installed-list"),
+    catalogList: document.getElementById("models-catalog-list"),
+    customUrl: document.getElementById("models-custom-url"),
+    customBtn: document.getElementById("models-custom-download"),
+  };
+  if (!els.section) return;
+
+  let snapshot = null;
+  let pollTimer = null;
+
+  function humanBytes(n) {
+    if (!n || n <= 0) return "—";
+    if (n >= 1e9) return `${(n / 1e9).toFixed(1)} GB`;
+    if (n >= 1e6) return `${(n / 1e6).toFixed(0)} MB`;
+    return `${Math.max(1, Math.round(n / 1e3))} KB`;
+  }
+
+  async function api(path, opts) {
+    const res = await fetch(path, opts);
+    let body = null;
+    try { body = await res.json(); } catch (_) { /* non-JSON error */ }
+    if (!res.ok) {
+      throw new Error((body && body.error) || `HTTP ${res.status}`);
+    }
+    return body;
+  }
+
+  function activeFile() {
+    const r = snapshot?.runtime;
+    if (!r) return null;
+    if (r.state === "running" || r.state === "starting") return r.file;
+    return null;
+  }
+
+  function renderStatus() {
+    const r = snapshot.runtime;
+    const d = snapshot.download;
+    let text = "";
+    let state = "idle";
+    if (!snapshot.llama_server_found) {
+      text = "llama-server not installed — run `brew install llama.cpp`, then models load with one click.";
+      state = "error";
+    } else if (r.state === "running") {
+      text = `serving ${r.file} on :${r.port}`;
+      state = "running";
+    } else if (r.state === "starting") {
+      text = `loading ${r.file}… (large models can take a minute)`;
+      state = "running";
+    } else if (r.state === "failed") {
+      text = `runtime: ${r.error}`;
+      state = "error";
+    } else if (d.state === "downloading") {
+      const pct = d.bytes_total > 0 ? ` ${(100 * d.bytes_done / d.bytes_total).toFixed(0)}%` : "";
+      text = `downloading ${d.file}…${pct}`;
+      state = "running";
+    } else if (d.state === "failed") {
+      text = `download failed: ${d.error}`;
+      state = "error";
+    } else if (snapshot.installed.length === 0) {
+      text = "no local models yet — grab one below to get a private chat running.";
+    } else {
+      text = "pick a model from the library to start serving.";
+    }
+    els.statusLine.textContent = text;
+    els.statusLine.dataset.state = state;
+    els.runtimeActions.hidden = !(r.state === "running" || r.state === "starting");
+  }
+
+  function modelRow({ name, sub, buttons, active, progressPct }) {
+    const li = document.createElement("li");
+    if (active) li.classList.add("model-active");
+    const meta = document.createElement("div");
+    meta.className = "model-meta";
+    const nameEl = document.createElement("div");
+    nameEl.className = "model-name";
+    nameEl.textContent = name;
+    const subEl = document.createElement("div");
+    subEl.className = "model-sub";
+    subEl.textContent = sub;
+    meta.appendChild(nameEl);
+    meta.appendChild(subEl);
+    if (progressPct != null) {
+      const wrap = document.createElement("div");
+      wrap.className = "model-progress";
+      const bar = document.createElement("div");
+      bar.className = "model-progress-bar";
+      bar.style.width = `${progressPct}%`;
+      wrap.appendChild(bar);
+      meta.appendChild(wrap);
+    }
+    const actions = document.createElement("div");
+    actions.className = "model-actions";
+    for (const b of buttons) actions.appendChild(b);
+    li.appendChild(meta);
+    li.appendChild(actions);
+    return li;
+  }
+
+  function actionBtn(label, { danger = false, disabled = false } = {}) {
+    const btn = document.createElement("button");
+    btn.className = danger ? "model-btn model-btn-danger" : "model-btn";
+    btn.textContent = label;
+    btn.disabled = disabled;
+    return btn;
+  }
+
+  function render() {
+    if (!snapshot) return;
+    if (els.dirPath) els.dirPath.textContent = snapshot.models_dir;
+    renderStatus();
+
+    const act = activeFile();
+    const dl = snapshot.download;
+
+    // Library (installed files).
+    els.installedWrap.hidden = snapshot.installed.length === 0;
+    els.installedList.replaceChildren();
+    for (const m of snapshot.installed) {
+      const isActive = m.file === act;
+      const loadBtn = actionBtn(isActive ? "loaded" : "load", {
+        disabled: isActive || !snapshot.llama_server_found,
+      });
+      loadBtn.addEventListener("click", async () => {
+        loadBtn.disabled = true;
+        try {
+          await api("/v1/models/load", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ file: m.file }),
+          });
+          notify(`loading ${m.file}`, { level: "success", duration: 2400 });
+        } catch (e) {
+          notify(`load failed: ${e.message}`, { level: "error" });
+        }
+        refresh();
+      });
+      const delBtn = actionBtn("delete", { danger: true, disabled: isActive });
+      delBtn.addEventListener("click", async () => {
+        if (!confirm(`delete ${m.file} from disk?`)) return;
+        try {
+          await api(`/v1/models/file/${encodeURIComponent(m.file)}`, { method: "DELETE" });
+          notify(`${m.file} deleted`, { level: "success", duration: 2200 });
+        } catch (e) {
+          notify(`delete failed: ${e.message}`, { level: "error" });
+        }
+        refresh();
+      });
+      els.installedList.appendChild(
+        modelRow({
+          name: m.file,
+          sub: humanBytes(m.size_bytes),
+          buttons: [loadBtn, delBtn],
+          active: isActive,
+        }),
+      );
+    }
+
+    // Catalog (downloadable).
+    els.catalogList.replaceChildren();
+    for (const c of snapshot.catalog) {
+      const isDownloading = dl.state === "downloading" && dl.file === c.file;
+      let buttons;
+      let progressPct = null;
+      if (c.installed) {
+        buttons = [actionBtn("installed", { disabled: true })];
+      } else if (isDownloading) {
+        progressPct = dl.bytes_total > 0 ? Math.min(100, (100 * dl.bytes_done) / dl.bytes_total) : 0;
+        const cancelBtn = actionBtn("cancel", { danger: true });
+        cancelBtn.addEventListener("click", async () => {
+          try {
+            await api("/v1/models/download/cancel", { method: "POST" });
+          } catch (e) {
+            notify(`cancel failed: ${e.message}`, { level: "error" });
+          }
+          refresh();
+        });
+        buttons = [cancelBtn];
+      } else {
+        const dlBtn = actionBtn("download", {
+          disabled: dl.state === "downloading",
+        });
+        dlBtn.addEventListener("click", async () => {
+          dlBtn.disabled = true;
+          try {
+            await api("/v1/models/download", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ id: c.id }),
+            });
+            notify(`downloading ${c.name}`, { level: "success", duration: 2400 });
+          } catch (e) {
+            notify(`download failed: ${e.message}`, { level: "error" });
+          }
+          refresh();
+        });
+        buttons = [dlBtn];
+      }
+      els.catalogList.appendChild(
+        modelRow({
+          name: c.name,
+          sub: `${humanBytes(c.size_bytes)} · ${c.blurb}`,
+          buttons,
+          progressPct,
+        }),
+      );
+    }
+  }
+
+  async function refresh() {
+    try {
+      snapshot = await api("/v1/models/manage");
+      render();
+    } catch (e) {
+      if (els.statusLine) {
+        els.statusLine.textContent = `models: ${e.message}`;
+        els.statusLine.dataset.state = "error";
+      }
+    }
+  }
+
+  if (els.unloadBtn) {
+    els.unloadBtn.addEventListener("click", async () => {
+      try {
+        await api("/v1/models/unload", { method: "POST" });
+        notify("model ejected", { level: "success", duration: 2200 });
+      } catch (e) {
+        notify(`eject failed: ${e.message}`, { level: "error" });
+      }
+      refresh();
+    });
+  }
+
+  if (els.customBtn) {
+    els.customBtn.addEventListener("click", async () => {
+      const url = (els.customUrl?.value || "").trim();
+      if (!url) {
+        notify("paste a huggingface .gguf url first", { level: "info", duration: 2400 });
+        return;
+      }
+      try {
+        await api("/v1/models/download", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ url }),
+        });
+        notify("download started", { level: "success", duration: 2200 });
+        if (els.customUrl) els.customUrl.value = "";
+      } catch (e) {
+        notify(`download failed: ${e.message}`, { level: "error" });
+      }
+      refresh();
+    });
+  }
+
+  // Poll fast while the settings modal is open (progress bars), slow
+  // otherwise (catches runtime death even with the modal closed).
+  function schedule() {
+    clearInterval(pollTimer);
+    const settingsOpen = !document.getElementById("settings-modal")?.hidden;
+    pollTimer = setInterval(refresh, settingsOpen ? 2500 : 15000);
+  }
+  const settingsModal = document.getElementById("settings-modal");
+  if (settingsModal) {
+    new MutationObserver(schedule).observe(settingsModal, {
+      attributes: true,
+      attributeFilter: ["hidden"],
+    });
+  }
+  refresh();
+  schedule();
+})();
