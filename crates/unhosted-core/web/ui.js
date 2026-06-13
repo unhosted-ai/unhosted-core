@@ -253,9 +253,21 @@ const els = {
   voiceAutoSaveNeed: $("#voice-auto-save-need"),
   voiceWakeMode: $("#voice-wake-mode"),
   voiceWakeWordInput: $("#voice-wake-word-input"),
+  voiceRoutingMode: $("#voice-routing-mode"),
+  voiceRoutingPreview: $("#voice-routing-preview"),
   voiceSaveNeed: $("#voice-save-need"),
   voiceExtractNeed: $("#voice-extract-need"),
   voiceNeedPreview: $("#voice-need-preview"),
+  voiceConsentGoogle: $("#voice-consent-google"),
+  voiceConsentNotion: $("#voice-consent-notion"),
+  voiceConsentSlack: $("#voice-consent-slack"),
+  voiceConnectGoogle: $("#voice-connect-google"),
+  voiceConnectNotion: $("#voice-connect-notion"),
+  voiceConnectSlack: $("#voice-connect-slack"),
+  voiceDisconnectGoogle: $("#voice-disconnect-google"),
+  voiceDisconnectNotion: $("#voice-disconnect-notion"),
+  voiceDisconnectSlack: $("#voice-disconnect-slack"),
+  voiceConnectorsStatus: $("#voice-connectors-status"),
   voiceClearTranscript: $("#voice-clear-transcript"),
   voiceStatus: $("#voice-status-line"),
   bugReportFooter: $("#bug-report-footer"),
@@ -1704,6 +1716,20 @@ if (els.memoryClearAll) {
 // OpenJarvis-style local voice loop: microphone -> transcript -> run prompt,
 // plus optional spoken assistant replies and explicit "save as need" memory.
 const VOICE_PREFS_KEY = "unhosted-voice-assistant-prefs";
+const VOICE_CONNECTOR_INFO = {
+  google: {
+    label: "google calendar",
+    oauthUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+  },
+  notion: {
+    label: "notion",
+    oauthUrl: "https://api.notion.com/v1/oauth/authorize",
+  },
+  slack: {
+    label: "slack",
+    oauthUrl: "https://slack.com/oauth/v2/authorize",
+  },
+};
 const voiceState = {
   recognition: null,
   listening: false,
@@ -1734,6 +1760,7 @@ function writeVoicePrefs() {
         autoSaveNeed: !!els.voiceAutoSaveNeed?.checked,
         wakeMode: !!els.voiceWakeMode?.checked,
         wakeWord: (els.voiceWakeWordInput?.value || "jarvis").trim() || "jarvis",
+        routingMode: (els.voiceRoutingMode?.value || "auto").trim() || "auto",
       }),
     );
   } catch (e) {
@@ -1768,6 +1795,163 @@ function transcriptText() {
 function wakeWord() {
   const w = (els.voiceWakeWordInput?.value || "jarvis").trim().toLowerCase();
   return w || "jarvis";
+}
+
+function connectorRefs() {
+  return {
+    google: {
+      consent: els.voiceConsentGoogle,
+      connect: els.voiceConnectGoogle,
+      disconnect: els.voiceDisconnectGoogle,
+    },
+    notion: {
+      consent: els.voiceConsentNotion,
+      connect: els.voiceConnectNotion,
+      disconnect: els.voiceDisconnectNotion,
+    },
+    slack: {
+      consent: els.voiceConsentSlack,
+      connect: els.voiceConnectSlack,
+      disconnect: els.voiceDisconnectSlack,
+    },
+  };
+}
+
+function applyConnectorLedger(ledger) {
+  const map = (ledger && ledger.connectors) || {};
+  const refs = connectorRefs();
+  const connected = [];
+  for (const [name, ui] of Object.entries(refs)) {
+    const s = map[name] || { enabled: false, connected: false, has_token: false };
+    if (ui.consent) ui.consent.checked = !!s.enabled;
+    if (ui.disconnect) ui.disconnect.disabled = !s.connected;
+    if (s.connected) connected.push(VOICE_CONNECTOR_INFO[name].label + (s.has_token ? " (token)" : ""));
+  }
+  if (els.voiceConnectorsStatus) {
+    els.voiceConnectorsStatus.textContent = connected.length
+      ? `connectors: ${connected.join(" · ")}`
+      : "connectors: none connected";
+  }
+}
+
+async function fetchConnectorLedger() {
+  const r = await fetch("/v1/connectors/consent", { cache: "no-store" });
+  if (!r.ok) throw new Error(`consent load failed: ${r.status}`);
+  return await r.json();
+}
+
+async function refreshConnectorStatus() {
+  try {
+    const ledger = await fetchConnectorLedger();
+    applyConnectorLedger(ledger);
+  } catch (e) {
+    if (els.voiceConnectorsStatus) {
+      els.voiceConnectorsStatus.textContent = "connectors: unavailable";
+    }
+  }
+}
+
+async function setConnectorConsent(name, enabled) {
+  const r = await fetch("/v1/connectors/consent", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ connector: name, enabled }),
+  });
+  if (!r.ok) throw new Error(`consent save failed: ${r.status}`);
+  const ledger = await r.json();
+  applyConnectorLedger(ledger);
+}
+
+async function connectConnector(name) {
+  const meta = VOICE_CONNECTOR_INFO[name];
+  if (!meta) return;
+  const url = `${meta.oauthUrl}?response_type=code&scope=openid&state=unhosted_${name}`;
+  try {
+    window.open(url, "_blank", "noopener");
+  } catch (_) {}
+  const r = await fetch("/v1/connectors/oauth/connect", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      connector: name,
+      scopes: ["openid"],
+      // OAuth callback wiring lands in a dedicated connector backend.
+      // For now we persist consent + connection state server-side.
+    }),
+  });
+  if (!r.ok) throw new Error(`connect failed: ${r.status}`);
+  applyConnectorLedger(await r.json());
+  notify(`${meta.label} consent granted`, { level: "success", duration: 2400 });
+}
+
+async function disconnectConnector(name) {
+  const meta = VOICE_CONNECTOR_INFO[name];
+  if (!meta) return;
+  const r = await fetch("/v1/connectors/oauth/disconnect", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ connector: name }),
+  });
+  if (!r.ok) throw new Error(`disconnect failed: ${r.status}`);
+  applyConnectorLedger(await r.json());
+  notify(`${meta.label} consent revoked`, { level: "info", duration: 2200 });
+}
+
+function complexityRiskProfile(text) {
+  const s = String(text || "").trim();
+  const lower = s.toLowerCase();
+  const words = s ? s.split(/\s+/).length : 0;
+  let complexityScore = 0;
+  let riskScore = 0;
+
+  if (words >= 40) complexityScore += 2;
+  else if (words >= 18) complexityScore += 1;
+
+  if (/(plan|compare|analy[sz]e|research|multi[- ]step|step[- ]by[- ]step|route|architecture|design)/.test(lower)) {
+    complexityScore += 2;
+  }
+  if (/(summari[sz]e|quick|short|single|one[- ]line)/.test(lower)) {
+    complexityScore -= 1;
+  }
+
+  if (/(password|token|secret|credential|ssn|passport|medical|bank|payment|transfer|wire|delete|drop table|sudo|rm -rf|oauth)/.test(lower)) {
+    riskScore += 2;
+  }
+  if (/(public|publish|share externally|send to|post to)/.test(lower)) {
+    riskScore += 1;
+  }
+
+  const complexity = complexityScore >= 3 ? "high" : complexityScore >= 1 ? "medium" : "low";
+  const risk = riskScore >= 3 ? "high" : riskScore >= 1 ? "medium" : "low";
+
+  let suggestedRoute = "chat";
+  if (complexity === "high" && risk !== "high") suggestedRoute = "agent";
+  if (risk === "high") suggestedRoute = "safe";
+
+  return { complexity, risk, suggestedRoute };
+}
+
+function renderRoutingPreview(text) {
+  const p = complexityRiskProfile(text);
+  if (!els.voiceRoutingPreview) return p;
+  els.voiceRoutingPreview.textContent =
+    `route preview: ${p.suggestedRoute} · complexity ${p.complexity} · risk ${p.risk}`;
+  return p;
+}
+
+function routingMode() {
+  return (els.voiceRoutingMode?.value || "auto").trim() || "auto";
+}
+
+function resolveRoute(profile) {
+  const mode = routingMode();
+  if (mode === "chat") return "chat";
+  if (mode === "agent") return "agent";
+  if (mode === "safe") {
+    return profile.risk === "high" ? "blocked" : "chat";
+  }
+  if (profile.risk === "high") return "blocked";
+  return profile.suggestedRoute;
 }
 
 function extractNeedFromText(text) {
@@ -1875,14 +2059,30 @@ async function runVoiceTranscript({ auto = false } = {}) {
     notify("assistant is already running", { level: "info", duration: 2200 });
     return;
   }
+  const profile = renderRoutingPreview(text);
+  const route = resolveRoute(profile);
+  if (route === "blocked") {
+    notify("blocked by safe routing: high-risk command needs manual review", {
+      level: "error",
+      duration: 3800,
+    });
+    setVoiceStatus("high-risk request blocked by routing policy", "error");
+    return;
+  }
   if (els.voiceAutoSaveNeed?.checked) {
     await saveNeedFromText(text);
   }
-  voiceState.pendingSpeak = !!els.voiceAutoSpeak?.checked;
-  els.prompt.value = text;
-  autoresize();
-  els.composer.requestSubmit();
-  setVoiceStatus(auto ? "heard you — running assistant…" : "running assistant from transcript…", "running");
+  if (route === "agent") {
+    voiceState.pendingSpeak = false;
+    await submitAgentRun(text);
+    setVoiceStatus(auto ? "heard you — running agent…" : "running agent from transcript…", "running");
+  } else {
+    voiceState.pendingSpeak = !!els.voiceAutoSpeak?.checked;
+    els.prompt.value = text;
+    autoresize();
+    els.composer.requestSubmit();
+    setVoiceStatus(auto ? "heard you — running assistant…" : "running assistant from transcript…", "running");
+  }
 }
 
 function stopVoiceListening() {
@@ -1999,9 +2199,27 @@ if (els.voiceAutoRun || els.voiceAutoSpeak || els.voiceAutoSaveNeed) {
   if (els.voiceWakeWordInput && typeof prefs.wakeWord === "string" && prefs.wakeWord.trim()) {
     els.voiceWakeWordInput.value = prefs.wakeWord.trim();
   }
-  [els.voiceAutoRun, els.voiceAutoSpeak, els.voiceAutoSaveNeed, els.voiceWakeMode, els.voiceWakeWordInput]
+  if (els.voiceRoutingMode && typeof prefs.routingMode === "string") {
+    const allowed = new Set(["auto", "chat", "agent", "safe"]);
+    if (allowed.has(prefs.routingMode)) {
+      els.voiceRoutingMode.value = prefs.routingMode;
+    }
+  }
+  [els.voiceAutoRun, els.voiceAutoSpeak, els.voiceAutoSaveNeed, els.voiceWakeMode, els.voiceWakeWordInput, els.voiceRoutingMode]
     .filter(Boolean)
     .forEach((el) => el.addEventListener("change", writeVoicePrefs));
+}
+
+if (els.voiceRoutingMode) {
+  els.voiceRoutingMode.addEventListener("change", () => {
+    renderRoutingPreview(transcriptText());
+  });
+}
+
+if (els.voiceTranscriptInput) {
+  els.voiceTranscriptInput.addEventListener("input", () => {
+    renderRoutingPreview(transcriptText());
+  });
 }
 
 if (els.voiceListenToggle) {
@@ -2038,9 +2256,44 @@ if (els.voiceClearTranscript) {
       els.voiceTranscriptInput.value = "";
     }
     renderNeedPreview(null);
+    renderRoutingPreview("");
     setVoiceStatus("transcript cleared", "idle");
   });
 }
+
+for (const name of Object.keys(VOICE_CONNECTOR_INFO)) {
+  const refs = connectorRefs()[name];
+  if (refs?.consent) {
+    refs.consent.addEventListener("change", async () => {
+      try {
+        await setConnectorConsent(name, !!refs.consent.checked);
+      } catch (e) {
+        notify(`${VOICE_CONNECTOR_INFO[name].label}: ${e.message || e}`, { level: "error" });
+        refreshConnectorStatus();
+      }
+    });
+  }
+  if (refs?.connect) {
+    refs.connect.addEventListener("click", async () => {
+      try {
+        await connectConnector(name);
+      } catch (e) {
+        notify(`${VOICE_CONNECTOR_INFO[name].label}: ${e.message || e}`, { level: "error" });
+      }
+    });
+  }
+  if (refs?.disconnect) {
+    refs.disconnect.addEventListener("click", async () => {
+      try {
+        await disconnectConnector(name);
+      } catch (e) {
+        notify(`${VOICE_CONNECTOR_INFO[name].label}: ${e.message || e}`, { level: "error" });
+      }
+    });
+  }
+}
+refreshConnectorStatus();
+renderRoutingPreview(transcriptText());
 
 // Initial paint of the memory panel — runs alongside the first status
 // poll so the sidebar reflects the persisted state on every page load.

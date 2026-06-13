@@ -13,6 +13,8 @@ pub mod agent_fs;
 pub mod audit;
 pub mod auth;
 pub mod chats;
+pub mod connectors;
+pub mod critique;
 pub mod discovery;
 pub mod dlp;
 pub mod identity;
@@ -571,6 +573,20 @@ pub async fn serve(node: Node) -> Result<()> {
         )
         .route("/v1/memory/clear", post(memory_clear_handler))
         .route("/v1/memory/enable", post(memory_enable_handler))
+        // Consent connectors (OAuth-style integrations). Local-user-only:
+        // consent + token-vault are operator data, never peer-facing.
+        .route(
+            "/v1/connectors/consent",
+            get(connectors_consent_get_handler).put(connectors_consent_put_handler),
+        )
+        .route(
+            "/v1/connectors/oauth/connect",
+            post(connectors_oauth_connect_handler),
+        )
+        .route(
+            "/v1/connectors/oauth/disconnect",
+            post(connectors_oauth_disconnect_handler),
+        )
         // Web fetch tool — exposed so external agents (and eventually
         // the LLM itself via a tool-use loop) can pull web pages
         // through the daemon. SSRF-guarded; only HTTPS to public IPs.
@@ -3346,6 +3362,114 @@ async fn memory_enable_handler(
     require_auth(&outcome, true)?;
     memory::set_enabled(req.enabled);
     Ok(axum::Json(serde_json::json!({ "enabled": req.enabled })))
+}
+
+// ─── consent connectors ───────────────────────────────────────────────────
+// Local-user-only. Stores explicit connector consent and OAuth token
+// material in local files under ~/.config/unhosted/. Tokens are never
+// returned by these endpoints.
+
+#[derive(serde::Deserialize)]
+struct ConnectorConsentPutRequest {
+    connector: String,
+    enabled: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct ConnectorOAuthConnectRequest {
+    connector: String,
+    #[serde(default)]
+    account: Option<String>,
+    #[serde(default)]
+    scopes: Vec<String>,
+    #[serde(default)]
+    access_token: Option<String>,
+    #[serde(default)]
+    refresh_token: Option<String>,
+    #[serde(default)]
+    expires_at: Option<i64>,
+}
+
+#[derive(serde::Deserialize)]
+struct ConnectorOAuthDisconnectRequest {
+    connector: String,
+}
+
+async fn connectors_consent_get_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<axum::Json<connectors::ConnectorConsentLedger>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    Ok(axum::Json(connectors::load_consent()))
+}
+
+async fn connectors_consent_put_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    axum::Json(req): axum::Json<ConnectorConsentPutRequest>,
+) -> Result<axum::Json<connectors::ConnectorConsentLedger>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    let connector = req.connector.trim().to_lowercase();
+    if !connectors::is_known_connector(&connector) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    connectors::set_enabled(&connector, req.enabled)
+        .map(axum::Json)
+        .map_err(|e| {
+            tracing::error!(error = %e, connector = %connector, "connectors: set_enabled failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
+
+async fn connectors_oauth_connect_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    axum::Json(req): axum::Json<ConnectorOAuthConnectRequest>,
+) -> Result<axum::Json<connectors::ConnectorConsentLedger>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    let connector = req.connector.trim().to_lowercase();
+    if !connectors::is_known_connector(&connector) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let input = connectors::ConnectInput {
+        account: req.account,
+        scopes: req.scopes,
+        access_token: req.access_token,
+        refresh_token: req.refresh_token,
+        expires_at: req.expires_at,
+    };
+    connectors::connect(&connector, input)
+        .map(axum::Json)
+        .map_err(|e| {
+            tracing::error!(error = %e, connector = %connector, "connectors: connect failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
+
+async fn connectors_oauth_disconnect_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    axum::Json(req): axum::Json<ConnectorOAuthDisconnectRequest>,
+) -> Result<axum::Json<connectors::ConnectorConsentLedger>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    let connector = req.connector.trim().to_lowercase();
+    if !connectors::is_known_connector(&connector) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    connectors::disconnect(&connector)
+        .map(axum::Json)
+        .map_err(|e| {
+            tracing::error!(error = %e, connector = %connector, "connectors: disconnect failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
 }
 
 // ─── tool: web_fetch ──────────────────────────────────────────────────────

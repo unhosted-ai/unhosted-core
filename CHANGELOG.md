@@ -6,6 +6,67 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.78] — 2026-06-13
+
+### Added
+
+- **Voice assistant** — Settings → Hosting → Voice assistant. Dictate prompts
+  via the browser microphone; transcripts route to chat or agent mode. Optional
+  spoken replies via Web Speech Synthesis (clean of bracketed error markers).
+  Preferences (auto-run, auto-speak, auto-save, wake-word, routing mode) persist
+  to `localStorage`.
+
+- **Wake-word mode** — continuous hands-free listening. Any utterance containing
+  the configured wake word (default: `jarvis`, editable in the panel) strips the
+  keyword prefix and fires the prompt automatically. 1.2 s cooldown prevents
+  double-firing. Re-starts the recogniser after each utterance unless manually
+  stopped or a fatal mic error occurs.
+
+- **Complexity / risk routing engine** — deterministic pre-flight classifier scores
+  every transcript for complexity (word count, multi-step keywords) and risk
+  (credential patterns, publish/share intent). Four routing modes:
+  - `auto` — high-complexity non-risky prompts → agent run; rest → chat.
+  - `force chat` / `force agent` — override the classifier.
+  - `safe-only` — blocks high-risk commands before they reach the model.
+  Live route preview updates as the user types or changes the routing mode
+  dropdown.
+
+- **Structured need extraction** — "Extract + save need" action parses the
+  transcript into a structured category (`profile`, `language`, `style`, `tech`,
+  or `preference`) before persisting to private memory, so needs are labelled and
+  retrievable by type.
+
+- **Consent connectors with server-side ledger** — three explicit opt-in OAuth
+  connectors (Google Calendar, Notion, Slack) backed by a new `connectors` module:
+  - `connector-consent.json` — per-connector enabled/connected state and scopes,
+    persisted under `~/.config/unhosted/`.
+  - `connector-vault.json` — OAuth access/refresh tokens, written mode `0600` on
+    Unix, never returned by any API response.
+  - Three new local-user-only daemon endpoints:
+    `GET/PUT /v1/connectors/consent`,
+    `POST /v1/connectors/oauth/connect`,
+    `POST /v1/connectors/oauth/disconnect`.
+  - Frontend migrated from localStorage-only to backend-backed consent; disconnect
+    revokes the stored token.
+
+- **Bug reporting** — sidebar footer shortcut + Settings → Hosting section. Opens
+  a prefilled GitHub issue (template `bug_report.md`) with runtime diagnostics
+  collected from `/health` + `/v1/status`. Separate "Copy diagnostics" button
+  copies the same structured markdown to clipboard.
+
+- **macOS release pipeline** — `scripts/release-macos.sh`: one-command orchestrator
+  covering app bundle → optional Developer ID signing → DMG → optional
+  `notarytool` notarization + staple → versioned artifact staging with SHA-256
+  checksums. Refuses to run from a dirty worktree by default
+  (`UNHOSTED_ALLOW_DIRTY=1` to override for local smoke tests).
+
+### Changed
+
+- Sidebar footer `bug` link now routes through the prefilled diagnostics flow
+  instead of opening the plain GitHub issues URL.
+- Voice transcript submit now dispatches to `submitAgentRun` for agent-mode
+  prompts rather than the chat composer, so agent tool tracing is preserved.
+
 ## [0.0.38] — 2026-05-16
 
 ### Changed

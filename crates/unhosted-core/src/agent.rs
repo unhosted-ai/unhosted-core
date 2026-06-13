@@ -130,6 +130,12 @@ pub struct AgentRunResponse {
     /// answer.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub citations: Vec<Citation>,
+    /// Advisory findings from the deterministic pre-output critique
+    /// gate (tone / architecture / UX / risk). Empty when the final
+    /// answer passed every gate. Surfaced so UI and audit callers can
+    /// flag self-correction signals without a second model round-trip.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub critique: Vec<crate::critique::Finding>,
 }
 
 /// A structured citation recorded by the agent via the `cite` tool.
@@ -294,10 +300,24 @@ pub fn seconds_to_iso8601(unix_secs: u64) -> String {
 /// recent filing"). Without this, models will confidently invent a
 /// date from training-data heuristics.
 pub fn build_system_prompt(max_steps: u32, now: &str) -> String {
+    // The "behavioral DNA" block below is ported from the cognitive-twin-agent
+    // behavior spec: a local-first persona that biases the agent toward
+    // reversible, concise, deterministic work. It pairs with the deterministic
+    // critique gate (see `crate::critique`), which checks the final answer
+    // against these same priorities.
     format!(
-        "You are an agent. Use the provided tools when useful. \
-         When you have a final answer, reply with prose only and no tool calls. \
-         You have at most {max_steps} steps to complete the task.\n\n\
+        "You are a local-first operator agent. Use the provided tools when \
+         useful. When you have a final answer, reply with prose only and no \
+         tool calls. You have at most {max_steps} steps to complete the task.\n\n\
+         Decision priorities, in order:\n\
+         1. Clarify the user's intent before acting.\n\
+         2. Prefer reversible actions; for anything destructive or hard to \
+         undo, state the reversibility/undo path and ask for confirmation first.\n\
+         3. Respect local data and control boundaries; prefer local-first \
+         options and name the trade-off before reaching for cloud coupling.\n\
+         4. Favor simplicity over abstraction.\n\n\
+         Communication style: technical, concise, and direct. No inflated \
+         marketing language. Explain trade-offs and failure boundaries plainly.\n\n\
          The current date and time is {now} (UTC). Treat this as authoritative \
          when reasoning about anything time-sensitive — quarters, recency of news, \
          relative ages, deadlines."
@@ -680,6 +700,7 @@ pub async fn run_agent(ctx: &RunContext, req: AgentRunRequest) -> AgentRunRespon
             tokens_used: 0,
             run_id,
             citations: vec![],
+            critique: vec![],
         };
     }
 
@@ -705,6 +726,7 @@ pub async fn run_agent(ctx: &RunContext, req: AgentRunRequest) -> AgentRunRespon
                     tokens_used: 0,
                     run_id,
                     citations: vec![],
+                    critique: vec![],
                 };
             }
         }
@@ -1004,6 +1026,13 @@ fn finish(
         steps_used,
         tokens_used,
     });
+    // Run the deterministic pre-output critique only on genuine final
+    // answers — error/limit stops carry diagnostic text, not advice.
+    let critique = if matches!(stopped, StoppedBecause::FinalAnswer) {
+        crate::critique::critique(&final_answer).findings
+    } else {
+        Vec::new()
+    };
     AgentRunResponse {
         final_answer,
         steps,
@@ -1011,6 +1040,7 @@ fn finish(
         tokens_used,
         run_id,
         citations,
+        critique,
     }
 }
 
@@ -1594,6 +1624,16 @@ mod tests {
         // to the prompt — that phrase is load-bearing for models
         // that would otherwise prefer their training-data prior.
         assert!(prompt.contains("authoritative"));
+    }
+
+    #[test]
+    fn system_prompt_carries_behavioral_dna() {
+        let prompt = build_system_prompt(8, "2026-05-21T03:14:15Z");
+        // Local-first persona + reversibility bias ported from the
+        // cognitive-twin behavior spec must be present.
+        assert!(prompt.contains("local-first"));
+        assert!(prompt.contains("reversible"));
+        assert!(prompt.contains("concise"));
     }
 
     #[test]

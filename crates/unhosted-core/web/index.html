@@ -993,6 +993,15 @@
               <label for="voice-wake-word-input" class="muted small">wake word</label>
               <input type="text" id="voice-wake-word-input" class="voice-wake-word-input" value="jarvis" spellcheck="false" autocomplete="off" autocapitalize="off">
             </div>
+            <div class="voice-routing-row">
+              <label for="voice-routing-mode" class="muted small">routing mode</label>
+              <select id="voice-routing-mode" class="voice-routing-mode">
+                <option value="auto">auto (risk-aware)</option>
+                <option value="chat">force chat</option>
+                <option value="agent">force agent</option>
+                <option value="safe">safe-only</option>
+              </select>
+            </div>
             <div class="public-mode-actions">
               <button class="pair-btn pair-btn-secondary" id="voice-save-need">
                 <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1019,6 +1028,27 @@
                 </svg>
                 <span>extract + save need</span>
               </button>
+            </div>
+            <div class="tunnel-status" id="voice-routing-preview">route preview: chat · complexity low · risk low</div>
+            <div class="voice-connectors" id="voice-connectors">
+              <div class="voice-connectors-head">consent connectors (oauth)</div>
+              <p class="muted small">connectors are opt-in and off by default. consent is stored locally and can be revoked anytime.</p>
+              <div class="voice-connector-row" data-connector="google">
+                <label><input type="checkbox" id="voice-consent-google"> google calendar</label>
+                <button class="pair-btn pair-btn-secondary voice-connector-connect" id="voice-connect-google">connect</button>
+                <button class="pair-btn pair-btn-secondary voice-connector-disconnect" id="voice-disconnect-google">disconnect</button>
+              </div>
+              <div class="voice-connector-row" data-connector="notion">
+                <label><input type="checkbox" id="voice-consent-notion"> notion</label>
+                <button class="pair-btn pair-btn-secondary voice-connector-connect" id="voice-connect-notion">connect</button>
+                <button class="pair-btn pair-btn-secondary voice-connector-disconnect" id="voice-disconnect-notion">disconnect</button>
+              </div>
+              <div class="voice-connector-row" data-connector="slack">
+                <label><input type="checkbox" id="voice-consent-slack"> slack</label>
+                <button class="pair-btn pair-btn-secondary voice-connector-connect" id="voice-connect-slack">connect</button>
+                <button class="pair-btn pair-btn-secondary voice-connector-disconnect" id="voice-disconnect-slack">disconnect</button>
+              </div>
+              <div class="tunnel-status" id="voice-connectors-status">connectors: none connected</div>
             </div>
             <div class="tunnel-status" id="voice-need-preview">need preview: —</div>
             <div class="tunnel-status" id="voice-status-line">idle — click start listening to dictate.</div>
