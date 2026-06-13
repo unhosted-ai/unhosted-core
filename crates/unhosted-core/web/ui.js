@@ -4075,3 +4075,22 @@ if (els.bugReportCopyDiagnostics) {
   refresh();
   schedule();
 })();
+
+// ---------------------------------------------------------- service worker
+// Registers the offline-shell worker (sw.js). Required for Chrome
+// Android's "Install app" prompt; on iOS the apple-touch-icon +
+// manifest cover Add to Home Screen. Daemon API paths are excluded
+// from caching inside the worker itself. Browsers only allow SWs on
+// secure contexts (https or loopback) — register() would just reject
+// elsewhere, so the guard is for log cleanliness, not security.
+(function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  const secure =
+    location.protocol === "https:" ||
+    location.hostname === "127.0.0.1" ||
+    location.hostname === "localhost";
+  if (!secure) return;
+  navigator.serviceWorker.register("/sw.js").catch((e) => {
+    console.warn("service worker registration failed", e);
+  });
+})();
