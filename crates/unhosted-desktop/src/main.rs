@@ -26,6 +26,7 @@
 )]
 
 use anyhow::Result;
+use serde::Serialize;
 use std::time::{Duration, Instant};
 use tauri::Manager;
 use tauri_plugin_updater::UpdaterExt;
@@ -43,6 +44,20 @@ const DAEMON_WAIT_BUDGET: Duration = Duration::from_secs(60);
 /// feels instant once `unhosted serve` is responding, slow enough that
 /// we don't hammer the kernel scheduler on cold boot.
 const DAEMON_POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateCheckStatus {
+    current_version: &'static str,
+    available: bool,
+    latest_version: Option<String>,
+    status: &'static str,
+}
+
+#[tauri::command]
+async fn check_for_app_update(app: tauri::AppHandle) -> Result<UpdateCheckStatus, String> {
+    check_for_update(app).await.map_err(|e| e.to_string())
+}
 
 fn main() {
     tracing_subscriber::fmt()
@@ -88,6 +103,7 @@ fn main() {
     tracing::info!(node_url = %node_url, "opening tauri desktop shell");
 
     tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![check_for_app_update])
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // A second instance tried to launch — focus the existing window instead.
             if let Some(window) = app.get_webview_window("main") {
@@ -116,7 +132,7 @@ fn main() {
 /// Best-effort updater check. The updater plugin reads the endpoints +
 /// pubkey from `tauri.conf.json`. If a newer signed release exists, the
 /// `dialog: true` config flag pops the native "update available" prompt.
-async fn check_for_update(app: tauri::AppHandle) -> Result<()> {
+async fn check_for_update(app: tauri::AppHandle) -> Result<UpdateCheckStatus> {
     let updater = app.updater()?;
     match updater.check().await {
         Ok(Some(update)) => {
@@ -128,11 +144,27 @@ async fn check_for_update(app: tauri::AppHandle) -> Result<()> {
             // With `dialog: true` in tauri.conf.json the plugin shows
             // its own prompt + downloads + relaunches. No further code
             // needed here.
+            Ok(UpdateCheckStatus {
+                current_version: env!("CARGO_PKG_VERSION"),
+                available: true,
+                latest_version: Some(update.version.to_string()),
+                status: "available",
+            })
         }
-        Ok(None) => tracing::info!("desktop shell is up to date"),
-        Err(e) => tracing::warn!(error = %e, "updater check failed"),
+        Ok(None) => {
+            tracing::info!("desktop shell is up to date");
+            Ok(UpdateCheckStatus {
+                current_version: env!("CARGO_PKG_VERSION"),
+                available: false,
+                latest_version: None,
+                status: "up_to_date",
+            })
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "updater check failed");
+            Err(e.into())
+        }
     }
-    Ok(())
 }
 
 fn daemon_reachable(url: &str) -> bool {

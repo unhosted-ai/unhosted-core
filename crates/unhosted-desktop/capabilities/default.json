@@ -3,6 +3,12 @@
   "identifier": "default",
   "description": "default capabilities for the unhosted desktop shell — just enough to host a window pointed at the local daemon",
   "windows": ["main"],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:7777/*",
+      "http://localhost:7777/*"
+    ]
+  },
   "permissions": [
     "core:default",
     "updater:default"
