@@ -28,6 +28,7 @@ pub mod peer;
 pub mod public_mode;
 pub mod relay_client;
 pub mod router;
+pub mod swarm;
 pub mod transport;
 pub mod tunnel;
 pub mod update_check;
@@ -601,6 +602,7 @@ pub async fn serve(node: Node) -> Result<()> {
         // llama-server child, switch, delete. Local-user-only —
         // writes to disk and spawns subprocesses.
         .route("/v1/models/manage", get(models_manage_handler))
+        .route("/v1/models/seedable", get(models_seedable_handler))
         .route("/v1/models/download", post(models_download_handler))
         .route(
             "/v1/models/download/cancel",
@@ -2727,6 +2729,25 @@ async fn models_manage_handler(
     Ok(axum::Json(state.model_manager.snapshot().await))
 }
 
+/// `GET /v1/models/seedable` — the models this node can serve to peers
+/// over the swarm protocol (ADR-0014), each keyed by content digest.
+/// Hashes every local GGUF, so it runs on a blocking thread and isn't
+/// something to poll on a tight loop. Local-user-only.
+async fn models_seedable_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<axum::Json<swarm::ListModelsResponse>, ModelApiError> {
+    require_local_user(&state, &headers, remote)?;
+    let models = tokio::task::spawn_blocking(|| match model_manager::models_dir() {
+        Ok(dir) => swarm::seedable_models_in(&dir),
+        Err(_) => Vec::new(),
+    })
+    .await
+    .map_err(|e| model_api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("seedable: {e}")))?;
+    Ok(axum::Json(swarm::ListModelsResponse { models }))
+}
+
 #[derive(Deserialize)]
 struct ModelDownloadRequest {
     /// Catalog id (preferred) …
@@ -2773,6 +2794,48 @@ async fn models_download_handler(
         ));
     };
 
+    // ADR-0014 slice 4: if we know this model's content digest (pinned
+    // in the catalog) and a known peer can seed it, pull peer-to-peer
+    // instead of hammering the origin. Falls back to the origin download
+    // on any miss — no pinned digest, no peer has it, or the pull fails.
+    let pinned_digest = model_manager::CATALOG
+        .iter()
+        .find(|e| e.url == url)
+        .and_then(|e| e.sha256)
+        .map(|s| s.to_string());
+
+    if let (Some(digest), Some(quic)) = (pinned_digest.as_ref(), state.quic.clone()) {
+        if let Some((qaddr, label)) = find_peer_with_digest(&state, digest).await {
+            let source = if label.starts_with("lan:") {
+                model_manager::DownloadSource::Lan
+            } else {
+                model_manager::DownloadSource::Peer
+            };
+            let manager = state.model_manager.clone();
+            let digest = digest.clone();
+            let file_for_pull = file.clone();
+            // Spawn the transfer; the handler returns immediately and the
+            // UI tracks progress via the snapshot, identical to origin.
+            tokio::spawn(async move {
+                let res =
+                    pull_model_from_peer(&quic, qaddr, &digest, &file_for_pull, &manager, source)
+                        .await;
+                if let Err(e) = &res {
+                    tracing::warn!(error = %e, file = %file_for_pull, "swarm: peer pull failed");
+                }
+                manager.finish_external_download(&file_for_pull, res).await;
+            });
+            state.audit.emit(audit::AuditEvent::ModelEvent {
+                ts: audit::AuditEvent::now(),
+                action: "download_started_peer".into(),
+                file: file.clone(),
+            });
+            return Ok(axum::Json(
+                serde_json::json!({ "ok": true, "file": file, "source": label }),
+            ));
+        }
+    }
+
     state
         .model_manager
         .start_download(url, file.clone())
@@ -2783,7 +2846,9 @@ async fn models_download_handler(
         action: "download_started".into(),
         file: file.clone(),
     });
-    Ok(axum::Json(serde_json::json!({ "ok": true, "file": file })))
+    Ok(axum::Json(
+        serde_json::json!({ "ok": true, "file": file, "source": "origin" }),
+    ))
 }
 
 /// `POST /v1/models/download/cancel` — abort the in-flight download.
@@ -4560,6 +4625,245 @@ async fn run_peer_via_quic(
         .expect("valid response"))
 }
 
+/// Open a stream on `conn`, write the `kind` header + JSON `body`,
+/// finish the send side. Returns the recv stream for the caller to
+/// read the response. Shared by the swarm client helpers below.
+async fn quic_open_request<T: serde::Serialize>(
+    conn: &quinn::Connection,
+    kind: &str,
+    body: &T,
+) -> Result<quinn::RecvStream> {
+    let (mut send, recv) = conn.open_bi().await.context("quic: open bi stream")?;
+    let header = format!("{{\"kind\":\"{kind}\",\"version\":0}}\n");
+    send.write_all(header.as_bytes())
+        .await
+        .context("quic: write header")?;
+    let json = serde_json::to_vec(body).context("quic: serialize request body")?;
+    send.write_all(&json).await.context("quic: write body")?;
+    send.finish().context("quic: finish send")?;
+    Ok(recv)
+}
+
+/// Client side of `have_manifest`: ask `conn`'s peer for the manifest of
+/// `digest`. Returns `Ok(None)` when the peer doesn't have it.
+async fn fetch_manifest_via_quic(
+    conn: &quinn::Connection,
+    digest: &str,
+) -> Result<Option<swarm::ModelManifest>> {
+    let mut recv = quic_open_request(
+        conn,
+        swarm::kind::HAVE_MANIFEST,
+        &swarm::HaveManifestRequest {
+            digest: digest.to_string(),
+        },
+    )
+    .await?;
+    // Manifest for a 70B model is ~tens of KB; 4 MiB cap is generous.
+    let resp = recv
+        .read_to_end(4 * 1024 * 1024)
+        .await
+        .context("quic: read manifest response")?;
+    // A not-found answer is `{"found":false}`; a hit is a full manifest.
+    if let Ok(manifest) = serde_json::from_slice::<swarm::ModelManifest>(&resp) {
+        // Guard against a peer returning a manifest for a different file.
+        if manifest.digest == digest {
+            return Ok(Some(manifest));
+        }
+    }
+    Ok(None)
+}
+
+/// Client side of `get_chunk`: pull chunk `index` from `conn`'s peer and
+/// verify it against `manifest` before returning. A peer that returns
+/// non-matching bytes yields an error so the caller can try another
+/// source — source trust is never required, the hash decides.
+async fn fetch_chunk_via_quic(
+    conn: &quinn::Connection,
+    digest: &str,
+    index: u32,
+    manifest: &swarm::ModelManifest,
+) -> Result<Vec<u8>> {
+    let mut recv = quic_open_request(
+        conn,
+        swarm::kind::GET_CHUNK,
+        &swarm::GetChunkRequest {
+            digest: digest.to_string(),
+            index,
+        },
+    )
+    .await?;
+
+    // Response = header line (JSON, LF-terminated) + raw bytes. Read the
+    // whole thing (one chunk ≤ CHUNK_SIZE + a small header) and split.
+    let cap = swarm::CHUNK_SIZE + 4096;
+    let raw = recv.read_to_end(cap).await.context("quic: read chunk")?;
+    let lf = raw
+        .iter()
+        .position(|&b| b == b'\n')
+        .context("quic: chunk response missing header terminator")?;
+    let header: swarm::ChunkResponseHeader =
+        serde_json::from_slice(&raw[..lf]).context("quic: parse chunk header")?;
+    if !header.found {
+        anyhow::bail!("peer does not have chunk {index}");
+    }
+    let bytes = &raw[lf + 1..];
+    if bytes.len() != header.len as usize {
+        anyhow::bail!(
+            "chunk {index} length mismatch: header said {}, got {}",
+            header.len,
+            bytes.len()
+        );
+    }
+    if !manifest.verify_chunk(index as usize, bytes) {
+        anyhow::bail!("chunk {index} failed hash verification");
+    }
+    Ok(bytes.to_vec())
+}
+
+/// Client side of `list_models`: ask `conn`'s peer what it can seed.
+async fn list_models_via_quic(conn: &quinn::Connection) -> Result<swarm::ListModelsResponse> {
+    let mut recv = quic_open_request(
+        conn,
+        swarm::kind::LIST_MODELS,
+        &serde_json::json!({}), // no body fields
+    )
+    .await?;
+    let resp = recv
+        .read_to_end(4 * 1024 * 1024)
+        .await
+        .context("quic: read list_models response")?;
+    serde_json::from_slice(&resp).context("quic: parse list_models response")
+}
+
+/// QUIC address for a peer: the daemon's HTTP port + 1 (the convention
+/// `serve()` uses when it binds the QUIC endpoint).
+fn peer_quic_addr(http_addr: SocketAddr) -> SocketAddr {
+    SocketAddr::new(http_addr.ip(), http_addr.port().saturating_add(1))
+}
+
+/// Survey known peers (paired registry entries + mDNS-discovered nodes)
+/// for one that can seed `digest`. Returns the first reachable peer's
+/// QUIC address + a label for logging. LAN-discovered peers are tried
+/// before registry-only peers so a same-network source wins.
+///
+/// Best-effort: a peer that's offline or doesn't speak the swarm
+/// protocol is skipped, not fatal. `None` means "nobody has it — use
+/// the origin."
+async fn find_peer_with_digest(state: &NodeState, digest: &str) -> Option<(SocketAddr, String)> {
+    let quic = state.quic.as_ref()?;
+
+    // Build the candidate address set: LAN discovery first, then the
+    // persistent registry. De-dupe by address so a peer that appears in
+    // both isn't probed twice.
+    let mut candidates: Vec<(SocketAddr, String)> = Vec::new();
+    if let Some(disc) = state.discovery.as_ref() {
+        for p in disc.snapshot() {
+            candidates.push((p.addr, format!("lan:{}", p.name)));
+        }
+    }
+    if let Ok(reg) = state.registry.lock() {
+        for p in reg.peers.iter() {
+            if !candidates.iter().any(|(a, _)| *a == p.addr) {
+                candidates.push((p.addr, format!("peer:{}", p.name)));
+            }
+        }
+    }
+
+    for (http_addr, label) in candidates {
+        let qaddr = peer_quic_addr(http_addr);
+        let Ok(conn) = quic.connect(qaddr).await else {
+            continue; // offline or not a trusted peer
+        };
+        match list_models_via_quic(&conn).await {
+            Ok(resp) if resp.models.iter().any(|m| m.digest == digest) => {
+                tracing::info!(%label, %qaddr, "swarm: found peer seeding requested model");
+                conn.close(0u32.into(), b"survey done");
+                return Some((qaddr, label));
+            }
+            _ => {
+                conn.close(0u32.into(), b"survey done");
+            }
+        }
+    }
+    None
+}
+
+/// Pull a model from a peer's QUIC endpoint into the models dir: fetch
+/// the manifest, then every chunk (each verified against the manifest),
+/// assemble into a `.part` file, verify the whole-file digest, and
+/// atomically rename into place. Reports progress through the same
+/// `ModelManager` download state the UI already polls.
+///
+/// Returns an error if the peer turns out not to have the model after
+/// all, or any chunk fails verification — the caller falls back to the
+/// origin. Bytes are never trusted by source: the hashes decide.
+async fn pull_model_from_peer(
+    quic: &Arc<transport::PeerEndpoint>,
+    peer_quic_addr: SocketAddr,
+    digest: &str,
+    file: &str,
+    manager: &Arc<model_manager::ModelManager>,
+    source: model_manager::DownloadSource,
+) -> Result<()> {
+    use tokio::io::AsyncWriteExt;
+
+    let dir = model_manager::models_dir()?;
+    std::fs::create_dir_all(&dir).context("creating models dir")?;
+    let dest = dir.join(file);
+    if dest.exists() {
+        anyhow::bail!("{file} is already in the library");
+    }
+    let part = dir.join(format!("{file}.part"));
+
+    let conn = quic
+        .connect(peer_quic_addr)
+        .await
+        .context("swarm: connect to peer")?;
+    let manifest = fetch_manifest_via_quic(&conn, digest)
+        .await?
+        .context("swarm: peer no longer has the manifest")?;
+
+    let total = manifest.size_bytes;
+    manager.begin_external_download(file, total, source).await?;
+
+    let mut out = tokio::fs::File::create(&part)
+        .await
+        .context("swarm: create partial file")?;
+    let mut done: u64 = 0;
+    for index in 0..manifest.chunk_count() as u32 {
+        let bytes = match fetch_chunk_via_quic(&conn, digest, index, &manifest).await {
+            Ok(b) => b,
+            Err(e) => {
+                drop(out);
+                let _ = std::fs::remove_file(&part);
+                return Err(e);
+            }
+        };
+        out.write_all(&bytes).await.context("swarm: write chunk")?;
+        done += bytes.len() as u64;
+        manager
+            .report_external_progress(file, done.min(total), total, source)
+            .await;
+    }
+    out.flush().await.ok();
+    drop(out);
+    conn.close(0u32.into(), b"pull done");
+
+    // Final source-independent gate.
+    let assembled = tokio::fs::read(&part)
+        .await
+        .context("swarm: re-read assembled file")?;
+    if !manifest.verify_whole(&assembled) {
+        let _ = std::fs::remove_file(&part);
+        anyhow::bail!("swarm: assembled file failed whole-file digest check");
+    }
+    tokio::fs::rename(&part, &dest)
+        .await
+        .context("swarm: move finished pull into library")?;
+    tracing::info!(%file, digest, "swarm: model pulled from peer and verified");
+    Ok(())
+}
+
 /// QUIC peer transport, server-side. Dispatches each inbound stream by
 /// its JSON header `kind` field. v0.0.4 + v0.0.5 only handle "run".
 async fn quic_inbound_handler(conn: quinn::Connection, state: NodeState) {
@@ -4613,6 +4917,27 @@ async fn quic_inbound_handler(conn: quinn::Connection, state: NodeState) {
                     }
                 });
             }
+            swarm::kind::HAVE_MANIFEST => {
+                tokio::spawn(async move {
+                    if let Err(e) = handle_quic_have_manifest(&mut send, &mut recv).await {
+                        tracing::debug!(error = %e, "quic: have_manifest stream errored");
+                    }
+                });
+            }
+            swarm::kind::GET_CHUNK => {
+                tokio::spawn(async move {
+                    if let Err(e) = handle_quic_get_chunk(&mut send, &mut recv).await {
+                        tracing::debug!(error = %e, "quic: get_chunk stream errored");
+                    }
+                });
+            }
+            swarm::kind::LIST_MODELS => {
+                tokio::spawn(async move {
+                    if let Err(e) = handle_quic_list_models(&mut send).await {
+                        tracing::debug!(error = %e, "quic: list_models stream errored");
+                    }
+                });
+            }
             other => {
                 tracing::debug!(%remote, kind = %other, "quic: unknown stream kind");
                 let _ = send.finish();
@@ -4660,6 +4985,122 @@ async fn handle_quic_run(
             }
         }
     }
+    let _ = send.finish();
+    Ok(())
+}
+
+/// Resolve which local `*.gguf` file matches a content digest, building
+/// a manifest per candidate until one matches. Blocking (reads files);
+/// callers wrap in `spawn_blocking`. Returns the path + its manifest.
+///
+/// This slice rebuilds manifests on demand — fine for the LAN case where
+/// a manifest is fetched once per transfer. A later slice should cache
+/// `(path, mtime) -> manifest` so repeated `get_chunk` calls don't
+/// re-hash a multi-GB file.
+fn find_local_model_by_digest(digest: &str) -> Option<(std::path::PathBuf, swarm::ModelManifest)> {
+    let dir = model_manager::models_dir().ok()?;
+    swarm::find_model_by_digest_in(&dir, digest)
+}
+
+/// `have_manifest` server side: read the request, answer with the
+/// model's manifest as a JSON line, or `{"found":false}` if we don't
+/// have it.
+async fn handle_quic_have_manifest(
+    send: &mut quinn::SendStream,
+    recv: &mut quinn::RecvStream,
+) -> Result<()> {
+    let body = recv.read_to_end(4096).await.context("quic: read body")?;
+    let req: swarm::HaveManifestRequest =
+        serde_json::from_slice(&body).context("quic: parse have_manifest")?;
+
+    let digest = req.digest.clone();
+    let found =
+        tokio::task::spawn_blocking(move || find_local_model_by_digest(&digest).map(|(_, m)| m))
+            .await
+            .context("quic: manifest lookup join")?;
+
+    match found {
+        Some(manifest) => {
+            let line = serde_json::to_vec(&manifest).context("serialize manifest")?;
+            send.write_all(&line)
+                .await
+                .context("quic: write manifest")?;
+            send.write_all(b"\n").await.ok();
+        }
+        None => {
+            send.write_all(b"{\"found\":false}\n").await.ok();
+        }
+    }
+    let _ = send.finish();
+    Ok(())
+}
+
+/// `get_chunk` server side: answer with a `ChunkResponseHeader` line
+/// followed by the raw chunk bytes (when found). The server hashes
+/// nothing extra here — the client re-hashes and verifies against the
+/// manifest it already holds.
+async fn handle_quic_get_chunk(
+    send: &mut quinn::SendStream,
+    recv: &mut quinn::RecvStream,
+) -> Result<()> {
+    let body = recv.read_to_end(4096).await.context("quic: read body")?;
+    let req: swarm::GetChunkRequest =
+        serde_json::from_slice(&body).context("quic: parse get_chunk")?;
+
+    let digest = req.digest.clone();
+    let index = req.index;
+    let chunk = tokio::task::spawn_blocking(move || {
+        let (path, _manifest) = find_local_model_by_digest(&digest)?;
+        swarm::read_chunk(&path, index).ok().flatten()
+    })
+    .await
+    .context("quic: chunk read join")?;
+
+    match chunk {
+        Some(bytes) => {
+            let header = swarm::ChunkResponseHeader {
+                found: true,
+                index,
+                len: bytes.len() as u32,
+            };
+            let line = serde_json::to_vec(&header).context("serialize chunk header")?;
+            send.write_all(&line)
+                .await
+                .context("quic: write chunk header")?;
+            send.write_all(b"\n").await.ok();
+            send.write_all(&bytes).await.context("quic: write chunk")?;
+        }
+        None => {
+            let header = swarm::ChunkResponseHeader {
+                found: false,
+                index,
+                len: 0,
+            };
+            let line = serde_json::to_vec(&header).unwrap_or_default();
+            send.write_all(&line).await.ok();
+            send.write_all(b"\n").await.ok();
+        }
+    }
+    let _ = send.finish();
+    Ok(())
+}
+
+/// `list_models` server side: enumerate the local library and report
+/// what we can seed, each entry keyed by its content digest.
+async fn handle_quic_list_models(send: &mut quinn::SendStream) -> Result<()> {
+    let models = tokio::task::spawn_blocking(|| match model_manager::models_dir() {
+        Ok(dir) => swarm::seedable_models_in(&dir),
+        Err(_) => Vec::new(),
+    })
+    .await
+    .context("quic: list_models join")?;
+
+    let resp = swarm::ListModelsResponse { models };
+    let line = serde_json::to_vec(&resp).context("serialize list_models")?;
+    send.write_all(&line)
+        .await
+        .context("quic: write list_models")?;
+    send.write_all(b"\n").await.ok();
     let _ = send.finish();
     Ok(())
 }
@@ -4898,5 +5339,200 @@ mod rail_registry_tests {
         assert!(reg.get(PaymentRail::Lightning).is_none());
         assert!(reg.get(PaymentRail::UsdcBase).is_none());
         assert!(reg.get(PaymentRail::StripeConnect).is_none());
+    }
+}
+
+// ─── swarm model distribution (ADR-0014) ──────────────────────────────────
+// End-to-end test of the peer chunk protocol over a real loopback QUIC
+// connection: a seeder serves a synthetic GGUF from a temp dir, a puller
+// fetches the manifest + every chunk via the production client helpers,
+// reassembles, and verifies the whole-file digest. This exercises the
+// actual wire framing (header line + body, chunk header + raw bytes) and
+// the hash-verifies-not-source-trust property, which the pure swarm unit
+// tests can't cover.
+
+#[cfg(test)]
+mod swarm_quic_tests {
+    use super::*;
+    use crate::identity::Identity;
+    use crate::peer::{Peer, PeerRegistry};
+    use std::sync::Arc;
+
+    fn temp_identity(tag: &str) -> Identity {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "unhosted-swarmq-{tag}-{}-{stamp}",
+            std::process::id()
+        ));
+        Identity::load_or_create_at(&dir.join("identity.toml")).unwrap()
+    }
+
+    fn synthetic(len: usize) -> Vec<u8> {
+        let mut v = Vec::with_capacity(len);
+        let mut x: u32 = 0x1234_5678;
+        for _ in 0..len {
+            x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            v.push((x >> 24) as u8);
+        }
+        v
+    }
+
+    /// Test seeder: mirrors the production `have_manifest` / `get_chunk`
+    /// handlers but serves from an explicit dir (so we don't override the
+    /// process-global HOME). Uses the same `swarm` server functions and
+    /// the same framing the real handlers use.
+    async fn run_test_seeder(conn: quinn::Connection, dir: std::path::PathBuf) {
+        loop {
+            let (mut send, mut recv) = match conn.accept_bi().await {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            // Read header line.
+            let mut header = Vec::new();
+            let mut byte = [0u8; 1];
+            loop {
+                match recv.read(&mut byte).await {
+                    Ok(Some(_)) if byte[0] == b'\n' => break,
+                    Ok(Some(_)) => header.push(byte[0]),
+                    _ => break,
+                }
+            }
+            let kind = serde_json::from_slice::<serde_json::Value>(&header)
+                .ok()
+                .and_then(|v| v.get("kind").and_then(|k| k.as_str()).map(str::to_string))
+                .unwrap_or_default();
+            let body = recv.read_to_end(4096).await.unwrap_or_default();
+            let dir = dir.clone();
+            match kind.as_str() {
+                k if k == swarm::kind::HAVE_MANIFEST => {
+                    let req: swarm::HaveManifestRequest = serde_json::from_slice(&body).unwrap();
+                    let found = swarm::find_model_by_digest_in(&dir, &req.digest).map(|(_, m)| m);
+                    if let Some(m) = found {
+                        let line = serde_json::to_vec(&m).unwrap();
+                        let _ = send.write_all(&line).await;
+                        let _ = send.write_all(b"\n").await;
+                    } else {
+                        let _ = send.write_all(b"{\"found\":false}\n").await;
+                    }
+                    let _ = send.finish();
+                }
+                k if k == swarm::kind::GET_CHUNK => {
+                    let req: swarm::GetChunkRequest = serde_json::from_slice(&body).unwrap();
+                    let chunk = swarm::find_model_by_digest_in(&dir, &req.digest)
+                        .and_then(|(p, _)| swarm::read_chunk(&p, req.index).ok().flatten());
+                    if let Some(bytes) = chunk {
+                        let hdr = swarm::ChunkResponseHeader {
+                            found: true,
+                            index: req.index,
+                            len: bytes.len() as u32,
+                        };
+                        let _ = send.write_all(&serde_json::to_vec(&hdr).unwrap()).await;
+                        let _ = send.write_all(b"\n").await;
+                        let _ = send.write_all(&bytes).await;
+                    } else {
+                        let _ = send
+                            .write_all(b"{\"found\":false,\"index\":0,\"len\":0}\n")
+                            .await;
+                    }
+                    let _ = send.finish();
+                }
+                _ => {
+                    let _ = send.finish();
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn pull_model_from_peer_end_to_end() {
+        // Two mutually-trusting daemons.
+        let id_seed = temp_identity("seed");
+        let id_pull = temp_identity("pull");
+        let pk_seed = id_seed.public_b64();
+        let pk_pull = id_pull.public_b64();
+
+        let reg_seed = Arc::new(std::sync::Mutex::new(PeerRegistry {
+            peers: vec![Peer {
+                name: "pull".into(),
+                addr: "127.0.0.1:0".parse().unwrap(),
+                priority: 5,
+                models: vec![],
+                pubkey: Some(pk_pull.clone()),
+            }],
+        }));
+        let reg_pull = Arc::new(std::sync::Mutex::new(PeerRegistry {
+            peers: vec![Peer {
+                name: "seed".into(),
+                addr: "127.0.0.1:0".parse().unwrap(),
+                priority: 5,
+                models: vec![],
+                pubkey: Some(pk_seed.clone()),
+            }],
+        }));
+
+        let ep_seed =
+            transport::PeerEndpoint::bind("127.0.0.1:0".parse().unwrap(), &id_seed, reg_seed)
+                .unwrap();
+        let ep_pull =
+            transport::PeerEndpoint::bind("127.0.0.1:0".parse().unwrap(), &id_pull, reg_pull)
+                .unwrap();
+        let addr_seed = ep_seed.local_addr().unwrap();
+
+        // Seeder's library: a synthetic GGUF spanning >1 chunk.
+        let model_bytes = synthetic(swarm::CHUNK_SIZE + 9000);
+        let manifest = swarm::ModelManifest::from_bytes(&model_bytes);
+        let digest = manifest.digest.clone();
+        let seed_dir = std::env::temp_dir().join(format!(
+            "unhosted-seed-lib-{}-{}",
+            std::process::id(),
+            digest.replace(':', "_")
+        ));
+        std::fs::create_dir_all(&seed_dir).unwrap();
+        std::fs::write(seed_dir.join("model.gguf"), &model_bytes).unwrap();
+
+        // Seeder accept loop.
+        let endpoint_seed = ep_seed.handle();
+        let seed_dir_for_loop = seed_dir.clone();
+        tokio::spawn(async move {
+            while let Some(incoming) = endpoint_seed.accept().await {
+                if let Ok(conn) = incoming.await {
+                    let dir = seed_dir_for_loop.clone();
+                    tokio::spawn(run_test_seeder(conn, dir));
+                }
+            }
+        });
+
+        // Puller: dial, fetch manifest, pull every chunk via the real
+        // client helpers, reassemble, verify.
+        let conn = ep_pull.connect(addr_seed).await.expect("connect");
+        let fetched = fetch_manifest_via_quic(&conn, &digest)
+            .await
+            .expect("manifest fetch")
+            .expect("seeder has the manifest");
+        assert_eq!(fetched.digest, digest);
+        assert_eq!(fetched.chunk_count(), manifest.chunk_count());
+
+        let mut assembled = Vec::new();
+        for i in 0..fetched.chunk_count() as u32 {
+            let chunk = fetch_chunk_via_quic(&conn, &digest, i, &fetched)
+                .await
+                .expect("chunk fetch + verify");
+            assembled.extend_from_slice(&chunk);
+        }
+        assert!(
+            fetched.verify_whole(&assembled),
+            "whole-file digest must verify"
+        );
+        assert_eq!(assembled, model_bytes);
+
+        // A digest the seeder doesn't have → None, not an error.
+        let missing = swarm::format_digest(&[0xab; 32]);
+        let none = fetch_manifest_via_quic(&conn, &missing).await.unwrap();
+        assert!(none.is_none());
+
+        std::fs::remove_dir_all(&seed_dir).ok();
     }
 }

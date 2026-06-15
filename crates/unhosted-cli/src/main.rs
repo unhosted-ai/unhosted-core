@@ -94,6 +94,10 @@ enum Command {
     },
     /// List known models and what's already cached on this machine.
     Models,
+    /// Show which cached models this node can seed to peers over the
+    /// swarm protocol (ADR-0014), each keyed by its content digest.
+    /// Hashes every local GGUF — slow on a large library, by design.
+    SeedStatus,
     /// Print this node's stable Ed25519 identity (pubkey).
     Identity,
     /// Trusted-peer pairing (v0.1.0). Two-step out-of-band flow.
@@ -433,6 +437,9 @@ async fn main() -> Result<()> {
         }
         Command::Models => {
             list_models()?;
+        }
+        Command::SeedStatus => {
+            seed_status()?;
         }
         Command::Identity => {
             let id = unhosted_core::Identity::load_or_create()?;
@@ -1273,6 +1280,47 @@ fn list_models() -> Result<()> {
 
     println!();
     println!("cache dir: {}", cache.display());
+    Ok(())
+}
+
+fn seed_status() -> Result<()> {
+    let cache = model_cache_dir()?;
+    if !cache.exists() {
+        println!("no models cached yet — nothing to seed.");
+        println!("cache dir: {}", cache.display());
+        return Ok(());
+    }
+
+    // Hashing multi-GB files is slow; tell the user what's happening so a
+    // long pause doesn't read as a hang.
+    eprintln!("hashing cached models (this can take a moment on a large library)…");
+    let seedable = unhosted_core::swarm::seedable_models_in(&cache);
+
+    if seedable.is_empty() {
+        println!("no seedable models found in {}", cache.display());
+        return Ok(());
+    }
+
+    println!(
+        "{} model{} seedable on this node:",
+        seedable.len(),
+        if seedable.len() == 1 { "" } else { "s" }
+    );
+    println!();
+    for m in &seedable {
+        // Show a short digest prefix — the full 64-hex is rarely needed
+        // at a glance, and the prefix is enough to eyeball-match a peer.
+        let short = m.digest.get(..18).unwrap_or(&m.digest);
+        println!(
+            "  {:<40} {:<20} {:>9}",
+            m.file,
+            format!("{short}…"),
+            human_size(m.size_bytes)
+        );
+    }
+    println!();
+    println!("cache dir: {}", cache.display());
+    println!("peers on your network can pull these without re-downloading from the origin.");
     Ok(())
 }
 

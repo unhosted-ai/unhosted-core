@@ -4091,6 +4091,16 @@ if (els.bugReportCopyDiagnostics) {
     return null;
   }
 
+  // Where a download's bytes are coming from (ADR-0014). "origin" is the
+  // huggingface.co fallback and gets no label — it's the default and
+  // calling it out would just add noise. LAN / peer pulls are the
+  // interesting case worth surfacing.
+  function downloadSourceLabel(source) {
+    if (source === "lan") return "↓ from a LAN peer";
+    if (source === "peer") return "↓ from a trusted peer";
+    return ""; // origin (or unknown) — no label
+  }
+
   function renderStatus() {
     const r = snapshot.runtime;
     const d = snapshot.download;
@@ -4110,7 +4120,7 @@ if (els.bugReportCopyDiagnostics) {
       state = "error";
     } else if (d.state === "downloading") {
       const pct = d.bytes_total > 0 ? ` ${(100 * d.bytes_done / d.bytes_total).toFixed(0)}%` : "";
-      text = `downloading ${d.file}…${pct}`;
+      text = `downloading ${d.file} ${downloadSourceLabel(d.source)}…${pct}`;
       state = "running";
     } else if (d.state === "failed") {
       text = `download failed: ${d.error}`;
@@ -4254,10 +4264,18 @@ if (els.bugReportCopyDiagnostics) {
         });
         buttons = [dlBtn];
       }
+      // While downloading, swap the blurb for a source hint when the
+      // bytes come from a peer — that's the moment the swarm is visibly
+      // doing something, and it's more useful than the blurb mid-pull.
+      let sub = `${humanBytes(c.size_bytes)} · ${c.blurb}`;
+      if (isDownloading) {
+        const srcLabel = downloadSourceLabel(dl.source);
+        if (srcLabel) sub = `${humanBytes(c.size_bytes)} · ${srcLabel}`;
+      }
       els.catalogList.appendChild(
         modelRow({
           name: c.name,
-          sub: `${humanBytes(c.size_bytes)} · ${c.blurb}`,
+          sub,
           buttons,
           progressPct,
         }),

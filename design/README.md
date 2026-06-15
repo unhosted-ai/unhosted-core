@@ -55,3 +55,6 @@ See `TEMPLATE.md` for the blank form.
 - [`0008-quic-peer-transport.md`](0008-quic-peer-transport.md) — encrypted peer-to-peer via QUIC + Ed25519-bound certs (no separate Noise layer)
 - [`0009-vram-pooling.md`](0009-vram-pooling.md) — distributed inference across LAN peers via llama.cpp RPC
 - [`0010-custom-llm-pipeline.md`](0010-custom-llm-pipeline.md) — distil a specialist model from open-source bases using Claude or a local daemon as teacher
+- [`0012-agent-runtime.md`](0012-agent-runtime.md) — agent loop, tool-calling runtime, and the tool roadmap
+- [`0013-agent-tool-read-file.md`](0013-agent-tool-read-file.md) — first agent tool: confined file reads
+- [`0014-swarm-model-distribution.md`](0014-swarm-model-distribution.md) — content-addressed peer-to-peer GGUF distribution (the torrent-shaped slice); weights only, not inference

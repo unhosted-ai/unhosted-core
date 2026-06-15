@@ -166,7 +166,7 @@ hr.divider {
   font-size: 13.5px;
 }
 .nav a.nav-cta:hover {
-  background: var(--accent, #16a34a);
+  background: var(--accent, #FF3B30);
   color: var(--bg);
 }
 .nav a.active {
@@ -235,7 +235,7 @@ hr.divider {
   font-family: inherit;
 }
 .hero-install-copy:hover { background: var(--fg, #222); color: var(--bg, #fff); border-color: var(--fg, #222); }
-.hero-install-copy[data-copied="1"] { background: var(--accent, #16a34a); color: var(--bg, #fff); border-color: var(--accent, #16a34a); }
+.hero-install-copy[data-copied="1"] { background: var(--accent, #FF3B30); color: var(--bg, #fff); border-color: var(--accent, #FF3B30); }
 .hero-install-note {
   margin: 8px 4px 0;
   font-size: 12px;

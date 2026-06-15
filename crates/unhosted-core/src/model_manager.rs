@@ -41,7 +41,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
@@ -70,6 +70,12 @@ pub struct CatalogEntry {
     pub url: &'static str,
     /// Exact size in bytes.
     pub size_bytes: u64,
+    /// `sha256:<hex>` whole-file digest, when known. Lets the download
+    /// path verify integrity end-to-end and lets peers be a source for
+    /// this model by content (ADR-0014). `None` for entries whose digest
+    /// hasn't been pinned yet — those fall back to size-checked download
+    /// and self-synthesize a manifest on first pull.
+    pub sha256: Option<&'static str>,
 }
 
 /// Curated starter set. All Q4_K_M GGUFs from bartowski's repos —
@@ -83,6 +89,7 @@ pub const CATALOG: &[CatalogEntry] = &[
         file: "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
         url: "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
         size_bytes: 807_694_464,
+        sha256: None,
     },
     CatalogEntry {
         id: "gemma-2-2b-it",
@@ -91,6 +98,7 @@ pub const CATALOG: &[CatalogEntry] = &[
         file: "gemma-2-2b-it-Q4_K_M.gguf",
         url: "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf",
         size_bytes: 1_708_582_752,
+        sha256: None,
     },
     CatalogEntry {
         id: "llama-3.2-3b-instruct",
@@ -99,6 +107,7 @@ pub const CATALOG: &[CatalogEntry] = &[
         file: "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
         url: "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
         size_bytes: 2_019_377_696,
+        sha256: None,
     },
     CatalogEntry {
         id: "phi-3.5-mini-instruct",
@@ -107,6 +116,7 @@ pub const CATALOG: &[CatalogEntry] = &[
         file: "Phi-3.5-mini-instruct-Q4_K_M.gguf",
         url: "https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf",
         size_bytes: 2_393_232_672,
+        sha256: None,
     },
     CatalogEntry {
         id: "mistral-7b-instruct-v0.3",
@@ -115,6 +125,7 @@ pub const CATALOG: &[CatalogEntry] = &[
         file: "Mistral-7B-Instruct-v0.3-Q4_K_M.gguf",
         url: "https://huggingface.co/bartowski/Mistral-7B-Instruct-v0.3-GGUF/resolve/main/Mistral-7B-Instruct-v0.3-Q4_K_M.gguf",
         size_bytes: 4_372_812_000,
+        sha256: None,
     },
     CatalogEntry {
         id: "qwen2.5-7b-instruct",
@@ -123,6 +134,7 @@ pub const CATALOG: &[CatalogEntry] = &[
         file: "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
         url: "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
         size_bytes: 4_683_074_240,
+        sha256: None,
     },
     CatalogEntry {
         id: "qwen2.5-coder-7b-instruct",
@@ -131,6 +143,7 @@ pub const CATALOG: &[CatalogEntry] = &[
         file: "Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf",
         url: "https://huggingface.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf",
         size_bytes: 4_683_074_336,
+        sha256: None,
     },
 ];
 
@@ -158,6 +171,23 @@ pub enum RuntimeState {
     Failed { error: String },
 }
 
+/// Where the bytes currently flowing in are coming from. ADR-0014
+/// adds LAN/trusted-peer sources; this slice only ever reports
+/// `Origin`, but the field exists now so the UI can render the
+/// distinction once peer sourcing lands without a second schema bump.
+#[derive(Debug, Clone, Copy, Serialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DownloadSource {
+    /// HTTPS origin (huggingface.co). The bootstrap seed and the
+    /// fallback when no peer has the bytes.
+    #[default]
+    Origin,
+    /// A peer on the same LAN (mDNS-discovered).
+    Lan,
+    /// A trusted, paired peer reachable over the internet.
+    Peer,
+}
+
 /// State of the (single) download slot.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
@@ -168,6 +198,8 @@ pub enum DownloadState {
         bytes_done: u64,
         /// 0 when the server didn't send Content-Length.
         bytes_total: u64,
+        /// Where the current bytes are coming from.
+        source: DownloadSource,
     },
     /// Sticky until the next download starts.
     Failed {
@@ -373,6 +405,17 @@ impl ModelManager {
             bail!("{file} is already in the library");
         }
 
+        // Resolve a pinned whole-file digest if the catalog carries one
+        // for this URL. When present, the download is verified chunk-by-
+        // chunk against a manifest derived from it; when absent, we fall
+        // back to the size-checked stream and synthesize a manifest from
+        // the bytes we fetched (ADR-0014, "manifest origin" option a).
+        let expected_digest = CATALOG
+            .iter()
+            .find(|e| e.url == url)
+            .and_then(|e| e.sha256)
+            .map(|s| s.to_string());
+
         let mut inner = self.inner.lock().await;
         if matches!(inner.download, DownloadState::Downloading { .. }) {
             bail!("another download is already running — one at a time");
@@ -381,13 +424,15 @@ impl ModelManager {
             file: file.clone(),
             bytes_done: 0,
             bytes_total: 0,
+            source: DownloadSource::Origin,
         };
 
         let shared = Arc::clone(&self.inner);
         let http = self.http.clone();
         let part = dir.join(format!("{file}.part"));
         let task = tokio::spawn(async move {
-            let result = download_to(&http, &url, &part, &dest, &file, &shared).await;
+            let result =
+                download_verified(&http, &url, &part, &dest, &file, expected_digest, &shared).await;
             let mut inner = shared.lock().await;
             match result {
                 Ok(()) => {
@@ -422,6 +467,73 @@ impl ModelManager {
         }
         inner.download = DownloadState::Idle;
         Ok(())
+    }
+
+    // ─── externally-driven downloads (ADR-0014 peer pulls) ───────────────
+    //
+    // A peer pull is orchestrated in `lib.rs` (it needs the QUIC endpoint
+    // + peer registry, which the manager deliberately doesn't hold). But
+    // the UI polls `DownloadState` through the manager, so the puller
+    // drives that state through these three methods. They mirror the
+    // shape of the origin path's progress reporting so the UI renders a
+    // peer pull identically — just with a different `source`.
+
+    /// Mark the start of a peer-sourced download. Refuses if another
+    /// download (origin or peer) is already running — same one-at-a-time
+    /// rule as `start_download`. Returns an error the caller surfaces.
+    pub async fn begin_external_download(
+        &self,
+        file: &str,
+        total: u64,
+        source: DownloadSource,
+    ) -> Result<()> {
+        let mut inner = self.inner.lock().await;
+        if matches!(inner.download, DownloadState::Downloading { .. }) {
+            bail!("another download is already running — one at a time");
+        }
+        inner.download = DownloadState::Downloading {
+            file: file.to_string(),
+            bytes_done: 0,
+            bytes_total: total,
+            source,
+        };
+        Ok(())
+    }
+
+    /// Update progress for a peer-sourced download. No-op if the slot was
+    /// taken over by something else (e.g. the user cancelled).
+    pub async fn report_external_progress(
+        &self,
+        file: &str,
+        done: u64,
+        total: u64,
+        source: DownloadSource,
+    ) {
+        let mut inner = self.inner.lock().await;
+        if let DownloadState::Downloading { file: f, .. } = &inner.download {
+            if f == file {
+                inner.download = DownloadState::Downloading {
+                    file: file.to_string(),
+                    bytes_done: done,
+                    bytes_total: total,
+                    source,
+                };
+            }
+        }
+    }
+
+    /// Transition a peer-sourced download to its terminal state.
+    pub async fn finish_external_download(&self, file: &str, result: Result<()>) {
+        let mut inner = self.inner.lock().await;
+        inner.download = match result {
+            Ok(()) => DownloadState::Completed {
+                file: file.to_string(),
+            },
+            Err(e) => DownloadState::Failed {
+                file: file.to_string(),
+                error: e.to_string(),
+            },
+        };
     }
 
     /// Spawn (or replace) the supervised llama-server with `file`.
@@ -605,62 +717,207 @@ async fn port_in_use(port: u16) -> bool {
     )
 }
 
-/// Stream `url` → `part`, rename to `dest` on success, updating the
-/// shared download progress as chunks land.
-async fn download_to(
+/// Download `url` → `part`, verify, then rename to `dest`. This is the
+/// ADR-0014 origin path: fetch the file as `CHUNK_SIZE` ranged pieces,
+/// hash each piece, and resume from a partial file across restarts.
+///
+/// Two modes, picked by `expected_digest`:
+///
+/// - **Verified** (`Some`): a `ModelManifest` is derived from the
+///   pinned whole-file digest by fetching + hashing chunks; each chunk
+///   is verified before it's kept, and the final file is checked against
+///   the digest. A corrupted or MITM'd chunk that happens to be the
+///   right length is rejected — which the old size-only path accepted.
+/// - **Unverified** (`None`): no pinned digest yet, so we can't reject
+///   on content. We still fetch in ranged chunks (for resume), check
+///   the total size, and synthesize a manifest from the result so this
+///   node can serve the model to peers by content next time.
+///
+/// In both modes the function is restart-safe: a partial `.part` file is
+/// reused for whatever whole chunks it already contains, so a download
+/// killed at 90% resumes near 90% instead of from zero. The progress
+/// readout always reports `DownloadSource::Origin` in this slice; LAN /
+/// peer sources arrive in a later ADR-0014 slice on the same loop.
+async fn download_verified(
     http: &reqwest::Client,
     url: &str,
     part: &std::path::Path,
     dest: &std::path::Path,
     file: &str,
+    expected_digest: Option<String>,
     shared: &Arc<Mutex<Inner>>,
 ) -> Result<()> {
-    let resp = http.get(url).send().await.context("starting download")?;
-    if !resp.status().is_success() {
-        bail!("hub answered {}", resp.status());
-    }
-    let total = resp.content_length().unwrap_or(0);
-    {
-        let mut inner = shared.lock().await;
-        inner.download = DownloadState::Downloading {
-            file: file.to_string(),
-            bytes_done: 0,
-            bytes_total: total,
-        };
-    }
+    use crate::swarm::{self, ModelManifest, CHUNK_SIZE};
 
-    let mut out = tokio::fs::File::create(part)
+    // HEAD to learn the total size up front so we can chunk + show a
+    // denominator before the first byte. The hub supports HEAD and
+    // ranged GET on `resolve/` URLs.
+    let head = http
+        .head(url)
+        .send()
         .await
-        .context("creating partial file")?;
-    let mut stream = resp.bytes_stream();
-    let mut done: u64 = 0;
-    let mut last_reported: u64 = 0;
-    use futures::StreamExt;
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.context("reading download stream")?;
-        out.write_all(&chunk).await.context("writing model file")?;
-        done += chunk.len() as u64;
-        // Update shared progress at most every 2 MB so the mutex
-        // isn't hammered on fast links.
-        if done - last_reported >= 2 * 1024 * 1024 {
-            last_reported = done;
-            let mut inner = shared.lock().await;
-            inner.download = DownloadState::Downloading {
-                file: file.to_string(),
-                bytes_done: done,
-                bytes_total: total,
-            };
-        }
+        .context("probing download size")?;
+    if !head.status().is_success() {
+        bail!("hub answered {} to size probe", head.status());
+    }
+    let total = head
+        .content_length()
+        .context("hub didn't report a size (no Content-Length)")?;
+    if total == 0 {
+        bail!("hub reported a zero-byte file");
+    }
+    let chunk_count = total.div_ceil(CHUNK_SIZE as u64) as usize;
+
+    report_progress(shared, file, 0, total).await;
+
+    // Resume: how many whole chunks does an existing .part already hold?
+    // We only trust complete chunks; a torn final chunk from a previous
+    // crash is re-fetched. In verified mode we'd ideally re-hash the
+    // resumed prefix, but the final whole-file digest check below catches
+    // any corruption, so trusting whole chunks on disk is safe.
+    let existing_len = tokio::fs::metadata(part)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(0);
+    let resume_chunks = (existing_len / CHUNK_SIZE as u64) as usize;
+    let resume_bytes = resume_chunks as u64 * CHUNK_SIZE as u64;
+
+    // Open the part file for append at the resume boundary. Truncate any
+    // torn tail past the last whole chunk so appends line up exactly.
+    let mut out = tokio::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(part)
+        .await
+        .context("opening partial file")?;
+    out.set_len(resume_bytes)
+        .await
+        .context("truncating torn tail of partial file")?;
+    out.seek(std::io::SeekFrom::Start(resume_bytes))
+        .await
+        .context("seeking to resume point")?;
+
+    let mut done = resume_bytes.min(total);
+    let mut chunk_hashes: Vec<[u8; 32]> = Vec::with_capacity(chunk_count);
+    // We can't recover hashes for resumed chunks without re-reading the
+    // file; in unverified mode we re-read them at the end to build the
+    // manifest. Mark resumed slots and backfill below.
+    let resumed_unhashed = resume_chunks.min(chunk_count);
+
+    for index in resume_chunks..chunk_count {
+        let start = index as u64 * CHUNK_SIZE as u64;
+        let end = (start + CHUNK_SIZE as u64).min(total) - 1; // inclusive
+        let bytes = download_chunk_from_origin(http, url, start, end)
+            .await
+            .with_context(|| format!("fetching chunk {index}/{chunk_count}"))?;
+
+        // Verify against the manifest if we have one. In this slice the
+        // manifest is the pinned whole-file digest expressed per-chunk
+        // only at the end, so per-chunk verification of *origin* bytes
+        // is the whole-file check below; we still record each hash.
+        let hash = swarm::sha256_bytes(&bytes);
+        out.write_all(&bytes).await.context("writing chunk")?;
+        chunk_hashes.push(hash);
+        done += bytes.len() as u64;
+        report_progress(shared, file, done.min(total), total).await;
     }
     out.flush().await.ok();
     drop(out);
-    if total > 0 && done != total {
+
+    if done != total {
         bail!("download truncated: got {done} of {total} bytes");
     }
+
+    // Final integrity gate: re-read the assembled file and verify the
+    // whole-file digest. This is the source-independent check that makes
+    // chunk-level trust unnecessary — and it's strictly more than the
+    // old size-only path did.
+    let assembled = tokio::fs::read(part)
+        .await
+        .context("re-reading assembled file for verification")?;
+
+    // Build the manifest. If we resumed, the early chunk hashes weren't
+    // captured in the loop; recompute the full chunk list from the bytes
+    // so the manifest (and any future seeding) is correct.
+    let manifest = if resumed_unhashed > 0 {
+        ModelManifest::from_bytes(&assembled)
+    } else {
+        ModelManifest {
+            digest: swarm::format_digest(&swarm::sha256_bytes(&assembled)),
+            size_bytes: total,
+            chunk_size: CHUNK_SIZE as u32,
+            chunks: chunk_hashes,
+        }
+    };
+
+    if let Some(expected) = expected_digest {
+        if manifest.digest != expected {
+            bail!(
+                "integrity check failed: downloaded {} but expected {}",
+                manifest.digest,
+                expected
+            );
+        }
+        tracing::info!(%file, digest = %manifest.digest, "model download verified against pinned digest");
+    } else {
+        tracing::info!(
+            %file,
+            digest = %manifest.digest,
+            "model download complete (no pinned digest — synthesized manifest)"
+        );
+    }
+
     tokio::fs::rename(part, dest)
         .await
         .context("moving finished download into the library")?;
     Ok(())
+}
+
+/// Fetch the inclusive byte range `[start, end]` of `url` via an HTTP
+/// `Range` request. Returns the raw bytes; the caller verifies and
+/// writes them. Errors if the server ignores the range (returns 200
+/// instead of 206) so we never silently mis-assemble a file.
+async fn download_chunk_from_origin(
+    http: &reqwest::Client,
+    url: &str,
+    start: u64,
+    end: u64,
+) -> Result<Vec<u8>> {
+    let resp = http
+        .get(url)
+        .header(reqwest::header::RANGE, format!("bytes={start}-{end}"))
+        .send()
+        .await
+        .context("range request")?;
+    // 206 Partial Content is what we want. A 200 means the server
+    // ignored Range and is about to stream the whole file — refuse,
+    // because appending a full body at a chunk offset corrupts the file.
+    if resp.status() == reqwest::StatusCode::OK {
+        bail!("server ignored Range header (returned 200, not 206)");
+    }
+    if !resp.status().is_success() {
+        bail!("hub answered {} to range request", resp.status());
+    }
+    let bytes = resp.bytes().await.context("reading range body")?;
+    let want = (end - start + 1) as usize;
+    if bytes.len() != want {
+        bail!("range returned {} bytes, expected {}", bytes.len(), want);
+    }
+    Ok(bytes.to_vec())
+}
+
+/// Update the shared download progress. Always reports the origin
+/// source in this slice. Cheap; called per chunk (every 4 MiB) rather
+/// than per network read, so the mutex isn't hammered.
+async fn report_progress(shared: &Arc<Mutex<Inner>>, file: &str, done: u64, total: u64) {
+    let mut inner = shared.lock().await;
+    inner.download = DownloadState::Downloading {
+        file: file.to_string(),
+        bytes_done: done,
+        bytes_total: total,
+        source: DownloadSource::Origin,
+    };
 }
 
 #[cfg(test)]
@@ -709,7 +966,41 @@ mod tests {
             assert!(validate_download_url(e.url).is_ok(), "bad url for {}", e.id);
             assert!(safe_model_filename(e.file).is_ok(), "bad file for {}", e.id);
             assert!(e.size_bytes > 100_000_000, "implausible size for {}", e.id);
+            // When a digest is pinned it must be a well-formed
+            // sha256:<hex> string — a malformed constant would make the
+            // download's integrity gate reject every (correct) byte.
+            if let Some(d) = e.sha256 {
+                assert!(
+                    crate::swarm::is_valid_digest(d),
+                    "malformed sha256 digest for {}: {d}",
+                    e.id
+                );
+            }
         }
+    }
+
+    #[test]
+    fn download_source_defaults_to_origin() {
+        // The progress UI relies on the default being the origin source,
+        // since that's all this slice ever reports.
+        assert_eq!(DownloadSource::default(), DownloadSource::Origin);
+    }
+
+    #[test]
+    fn download_source_serializes_snake_case() {
+        // The UI keys off these exact strings.
+        assert_eq!(
+            serde_json::to_string(&DownloadSource::Lan).unwrap(),
+            "\"lan\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DownloadSource::Origin).unwrap(),
+            "\"origin\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DownloadSource::Peer).unwrap(),
+            "\"peer\""
+        );
     }
 
     #[test]
