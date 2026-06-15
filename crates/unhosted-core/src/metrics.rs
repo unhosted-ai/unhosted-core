@@ -90,6 +90,26 @@ pub struct Metrics {
     pub agent_runs_stopped_tool_error: AtomicU64,
     /// Agent runs that aborted because the DLP hook blocked content.
     pub agent_runs_stopped_dlp_blocked: AtomicU64,
+    // ─── swarm model distribution (ADR-0014) ────────────────────────────
+    /// Manifests this node has served to peers (answered `have_manifest`
+    /// with a hit). A non-zero value means peers have asked us for models
+    /// we hold — the first sign this node is acting as a seed.
+    pub swarm_manifests_served_total: AtomicU64,
+    /// Chunks this node has served to peers (answered `get_chunk` with
+    /// data). The clearest "I am actively seeding" signal — it climbs
+    /// while a peer is pulling a model from us.
+    pub swarm_chunks_served_total: AtomicU64,
+    /// Bytes served to peers, summed across all chunks. Pairs with
+    /// chunks_served to show seeding *volume*, not just request count.
+    pub swarm_bytes_served_total: AtomicU64,
+    /// Models this node has successfully pulled *from* a peer (client
+    /// side: a peer pull that passed whole-file verification). Proves the
+    /// download came over the swarm rather than the origin.
+    pub swarm_peer_pulls_total: AtomicU64,
+    /// Unix-seconds of the last time this node served a chunk to a peer.
+    /// 0 = never. Lets a status view answer "is it seeding *right now*"
+    /// (recent timestamp) vs. "merely capable" (zero).
+    pub swarm_last_served_unix: AtomicI64,
     /// Process start time, used to compute uptime on scrape.
     started_at: Instant,
     /// Static build version (Cargo's CARGO_PKG_VERSION). Recorded
@@ -119,6 +139,11 @@ impl Metrics {
             agent_runs_stopped_max_seconds: AtomicU64::new(0),
             agent_runs_stopped_tool_error: AtomicU64::new(0),
             agent_runs_stopped_dlp_blocked: AtomicU64::new(0),
+            swarm_manifests_served_total: AtomicU64::new(0),
+            swarm_chunks_served_total: AtomicU64::new(0),
+            swarm_bytes_served_total: AtomicU64::new(0),
+            swarm_peer_pulls_total: AtomicU64::new(0),
+            swarm_last_served_unix: AtomicI64::new(0),
             started_at: Instant::now(),
             version: env!("CARGO_PKG_VERSION"),
         }
@@ -192,6 +217,24 @@ impl Metrics {
                     .fetch_add(1, Ordering::Relaxed);
             }
         }
+    }
+
+    pub fn inc_swarm_manifests_served(&self) {
+        self.swarm_manifests_served_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+    /// Record a chunk served to a peer: bumps the chunk + byte counters
+    /// and stamps the last-served clock. One call per `get_chunk` hit.
+    pub fn record_swarm_chunk_served(&self, bytes: u64) {
+        self.swarm_chunks_served_total
+            .fetch_add(1, Ordering::Relaxed);
+        self.swarm_bytes_served_total
+            .fetch_add(bytes, Ordering::Relaxed);
+        self.swarm_last_served_unix
+            .store(now_unix(), Ordering::Relaxed);
+    }
+    pub fn inc_swarm_peer_pulls(&self) {
+        self.swarm_peer_pulls_total.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Render the current values as Prometheus text format. Called
@@ -337,7 +380,60 @@ impl Metrics {
             self.agent_runs_stopped_dlp_blocked.load(Ordering::Relaxed)
         ));
 
+        out.push_str(
+            "# HELP unhosted_swarm_manifests_served_total Model manifests served to peers (ADR-0014 seeding).\n",
+        );
+        out.push_str("# TYPE unhosted_swarm_manifests_served_total counter\n");
+        out.push_str(&format!(
+            "unhosted_swarm_manifests_served_total {}\n",
+            self.swarm_manifests_served_total.load(Ordering::Relaxed)
+        ));
+
+        out.push_str("# HELP unhosted_swarm_chunks_served_total Model chunks served to peers.\n");
+        out.push_str("# TYPE unhosted_swarm_chunks_served_total counter\n");
+        out.push_str(&format!(
+            "unhosted_swarm_chunks_served_total {}\n",
+            self.swarm_chunks_served_total.load(Ordering::Relaxed)
+        ));
+
+        out.push_str(
+            "# HELP unhosted_swarm_bytes_served_total Bytes served to peers across all chunks.\n",
+        );
+        out.push_str("# TYPE unhosted_swarm_bytes_served_total counter\n");
+        out.push_str(&format!(
+            "unhosted_swarm_bytes_served_total {}\n",
+            self.swarm_bytes_served_total.load(Ordering::Relaxed)
+        ));
+
+        out.push_str("# HELP unhosted_swarm_peer_pulls_total Models successfully pulled from a peer (verified).\n");
+        out.push_str("# TYPE unhosted_swarm_peer_pulls_total counter\n");
+        out.push_str(&format!(
+            "unhosted_swarm_peer_pulls_total {}\n",
+            self.swarm_peer_pulls_total.load(Ordering::Relaxed)
+        ));
+
+        out.push_str("# HELP unhosted_swarm_last_served_unix Unix time of last chunk served to a peer (0 = never).\n");
+        out.push_str("# TYPE unhosted_swarm_last_served_unix gauge\n");
+        out.push_str(&format!(
+            "unhosted_swarm_last_served_unix {}\n",
+            self.swarm_last_served_unix.load(Ordering::Relaxed)
+        ));
+
         out
+    }
+
+    /// Compact snapshot of the swarm seeding counters, for the
+    /// `/v1/models/seedable` view and the `seed-status` CLI so a user can
+    /// see seeding *activity* (not just *capability*) without scraping
+    /// Prometheus.
+    pub fn swarm_snapshot(&self) -> SwarmSnapshot {
+        SwarmSnapshot {
+            manifests_served: self.swarm_manifests_served_total.load(Ordering::Relaxed),
+            chunks_served: self.swarm_chunks_served_total.load(Ordering::Relaxed),
+            bytes_served: self.swarm_bytes_served_total.load(Ordering::Relaxed),
+            peer_pulls: self.swarm_peer_pulls_total.load(Ordering::Relaxed),
+            last_served_unix: self.swarm_last_served_unix.load(Ordering::Relaxed),
+        }
     }
 }
 
@@ -356,6 +452,29 @@ pub enum TunnelStateCode {
     Starting = 1,
     Live = 2,
     Failed = 3,
+}
+
+/// Serializable snapshot of the swarm seeding counters. Surfaced via the
+/// seedable-models API + `seed-status` so the answer to "is it working?"
+/// is data, not a log grep.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+pub struct SwarmSnapshot {
+    pub manifests_served: u64,
+    pub chunks_served: u64,
+    pub bytes_served: u64,
+    pub peer_pulls: u64,
+    /// 0 = this node has never served a chunk to a peer.
+    pub last_served_unix: i64,
+}
+
+/// Current Unix time in seconds. Saturates to 0 before the epoch (can't
+/// happen in practice) so the gauge never goes negative.
+fn now_unix() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 /// Why an agent run ended. Mirrors `agent::StoppedBecause` but lives
@@ -415,6 +534,34 @@ mod tests {
         assert!(text.contains("unhosted_chat_completions_total 1"));
         assert!(text.contains("unhosted_peer_pairs_total 1"));
         assert!(text.contains("unhosted_tunnel_state 2"));
+    }
+
+    #[test]
+    fn swarm_seeding_counters_track_activity() {
+        let m = Metrics::new();
+        // Fresh node: capable but never served → all zero, never stamped.
+        let s0 = m.swarm_snapshot();
+        assert_eq!(s0.chunks_served, 0);
+        assert_eq!(s0.bytes_served, 0);
+        assert_eq!(s0.last_served_unix, 0, "never served → 0 timestamp");
+
+        m.inc_swarm_manifests_served();
+        m.record_swarm_chunk_served(4096);
+        m.record_swarm_chunk_served(1024);
+        m.inc_swarm_peer_pulls();
+
+        let s = m.swarm_snapshot();
+        assert_eq!(s.manifests_served, 1);
+        assert_eq!(s.chunks_served, 2);
+        assert_eq!(s.bytes_served, 4096 + 1024);
+        assert_eq!(s.peer_pulls, 1);
+        assert!(s.last_served_unix > 0, "serving a chunk stamps the clock");
+
+        // The counters surface in Prometheus text too.
+        let text = m.to_prometheus_text();
+        assert!(text.contains("unhosted_swarm_chunks_served_total 2"));
+        assert!(text.contains("unhosted_swarm_bytes_served_total 5120"));
+        assert!(text.contains("unhosted_swarm_peer_pulls_total 1"));
     }
 
     #[test]

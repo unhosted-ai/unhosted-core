@@ -2729,15 +2729,27 @@ async fn models_manage_handler(
     Ok(axum::Json(state.model_manager.snapshot().await))
 }
 
+/// Response for `GET /v1/models/seedable`: the models this node *can*
+/// seed plus the live activity counters that show whether it actually
+/// *is* seeding. Separating "capable" (models list) from "active"
+/// (activity counters) is the whole point — it's what answers
+/// "how do I know seeding is working?".
+#[derive(Serialize)]
+struct SeedableResponse {
+    models: Vec<swarm::SeedableModel>,
+    activity: metrics::SwarmSnapshot,
+}
+
 /// `GET /v1/models/seedable` — the models this node can serve to peers
-/// over the swarm protocol (ADR-0014), each keyed by content digest.
-/// Hashes every local GGUF, so it runs on a blocking thread and isn't
-/// something to poll on a tight loop. Local-user-only.
+/// over the swarm protocol (ADR-0014), each keyed by content digest,
+/// plus live seeding-activity counters. Hashes every local GGUF, so it
+/// runs on a blocking thread and isn't something to poll on a tight
+/// loop. Local-user-only.
 async fn models_seedable_handler(
     State(state): State<NodeState>,
     axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
     headers: HeaderMap,
-) -> Result<axum::Json<swarm::ListModelsResponse>, ModelApiError> {
+) -> Result<axum::Json<SeedableResponse>, ModelApiError> {
     require_local_user(&state, &headers, remote)?;
     let models = tokio::task::spawn_blocking(|| match model_manager::models_dir() {
         Ok(dir) => swarm::seedable_models_in(&dir),
@@ -2745,7 +2757,10 @@ async fn models_seedable_handler(
     })
     .await
     .map_err(|e| model_api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("seedable: {e}")))?;
-    Ok(axum::Json(swarm::ListModelsResponse { models }))
+    Ok(axum::Json(SeedableResponse {
+        models,
+        activity: state.metrics.swarm_snapshot(),
+    }))
 }
 
 #[derive(Deserialize)]
@@ -2812,6 +2827,7 @@ async fn models_download_handler(
                 model_manager::DownloadSource::Peer
             };
             let manager = state.model_manager.clone();
+            let metrics = state.metrics.clone();
             let digest = digest.clone();
             let file_for_pull = file.clone();
             // Spawn the transfer; the handler returns immediately and the
@@ -2820,8 +2836,11 @@ async fn models_download_handler(
                 let res =
                     pull_model_from_peer(&quic, qaddr, &digest, &file_for_pull, &manager, source)
                         .await;
-                if let Err(e) = &res {
-                    tracing::warn!(error = %e, file = %file_for_pull, "swarm: peer pull failed");
+                match &res {
+                    Ok(()) => metrics.inc_swarm_peer_pulls(),
+                    Err(e) => {
+                        tracing::warn!(error = %e, file = %file_for_pull, "swarm: peer pull failed")
+                    }
                 }
                 manager.finish_external_download(&file_for_pull, res).await;
             });
@@ -4918,15 +4937,18 @@ async fn quic_inbound_handler(conn: quinn::Connection, state: NodeState) {
                 });
             }
             swarm::kind::HAVE_MANIFEST => {
+                let metrics = state.metrics.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_quic_have_manifest(&mut send, &mut recv).await {
+                    if let Err(e) = handle_quic_have_manifest(&mut send, &mut recv, &metrics).await
+                    {
                         tracing::debug!(error = %e, "quic: have_manifest stream errored");
                     }
                 });
             }
             swarm::kind::GET_CHUNK => {
+                let metrics = state.metrics.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_quic_get_chunk(&mut send, &mut recv).await {
+                    if let Err(e) = handle_quic_get_chunk(&mut send, &mut recv, &metrics).await {
                         tracing::debug!(error = %e, "quic: get_chunk stream errored");
                     }
                 });
@@ -5008,6 +5030,7 @@ fn find_local_model_by_digest(digest: &str) -> Option<(std::path::PathBuf, swarm
 async fn handle_quic_have_manifest(
     send: &mut quinn::SendStream,
     recv: &mut quinn::RecvStream,
+    metrics: &Arc<metrics::Metrics>,
 ) -> Result<()> {
     let body = recv.read_to_end(4096).await.context("quic: read body")?;
     let req: swarm::HaveManifestRequest =
@@ -5021,6 +5044,7 @@ async fn handle_quic_have_manifest(
 
     match found {
         Some(manifest) => {
+            metrics.inc_swarm_manifests_served();
             let line = serde_json::to_vec(&manifest).context("serialize manifest")?;
             send.write_all(&line)
                 .await
@@ -5042,6 +5066,7 @@ async fn handle_quic_have_manifest(
 async fn handle_quic_get_chunk(
     send: &mut quinn::SendStream,
     recv: &mut quinn::RecvStream,
+    metrics: &Arc<metrics::Metrics>,
 ) -> Result<()> {
     let body = recv.read_to_end(4096).await.context("quic: read body")?;
     let req: swarm::GetChunkRequest =
@@ -5058,6 +5083,7 @@ async fn handle_quic_get_chunk(
 
     match chunk {
         Some(bytes) => {
+            metrics.record_swarm_chunk_served(bytes.len() as u64);
             let header = swarm::ChunkResponseHeader {
                 found: true,
                 index,

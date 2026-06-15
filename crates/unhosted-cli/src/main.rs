@@ -439,7 +439,7 @@ async fn main() -> Result<()> {
             list_models()?;
         }
         Command::SeedStatus => {
-            seed_status()?;
+            seed_status().await?;
         }
         Command::Identity => {
             let id = unhosted_core::Identity::load_or_create()?;
@@ -1283,45 +1283,119 @@ fn list_models() -> Result<()> {
     Ok(())
 }
 
-fn seed_status() -> Result<()> {
+async fn seed_status() -> Result<()> {
+    // Prefer the running daemon: it can report live seeding *activity*
+    // (chunks served, last-served time, peer pulls) that a cold cache
+    // scan can't. Fall back to a local hash-scan when the daemon's down
+    // — then we can only show what's *capable* of being seeded.
+    if let Some(()) = seed_status_via_daemon().await {
+        return Ok(());
+    }
+
     let cache = model_cache_dir()?;
     if !cache.exists() {
         println!("no models cached yet — nothing to seed.");
         println!("cache dir: {}", cache.display());
         return Ok(());
     }
-
-    // Hashing multi-GB files is slow; tell the user what's happening so a
-    // long pause doesn't read as a hang.
+    eprintln!("(daemon not reachable — showing local library only; start the daemon to see live seeding activity)");
     eprintln!("hashing cached models (this can take a moment on a large library)…");
     let seedable = unhosted_core::swarm::seedable_models_in(&cache);
-
-    if seedable.is_empty() {
-        println!("no seedable models found in {}", cache.display());
-        return Ok(());
-    }
-
-    println!(
-        "{} model{} seedable on this node:",
-        seedable.len(),
-        if seedable.len() == 1 { "" } else { "s" }
-    );
-    println!();
-    for m in &seedable {
-        // Show a short digest prefix — the full 64-hex is rarely needed
-        // at a glance, and the prefix is enough to eyeball-match a peer.
-        let short = m.digest.get(..18).unwrap_or(&m.digest);
-        println!(
-            "  {:<40} {:<20} {:>9}",
-            m.file,
-            format!("{short}…"),
-            human_size(m.size_bytes)
-        );
-    }
-    println!();
+    print_seedable(&seedable, None);
     println!("cache dir: {}", cache.display());
-    println!("peers on your network can pull these without re-downloading from the origin.");
     Ok(())
+}
+
+/// Query the daemon's `/v1/models/seedable`. Returns `Some(())` when the
+/// daemon answered (we printed the full view), `None` when it's
+/// unreachable so the caller falls back to the local scan.
+async fn seed_status_via_daemon() -> Option<()> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .ok()?;
+    let resp = client
+        .get(format!("http://{DEFAULT_NODE_ADDR}/v1/models/seedable"))
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let v: serde_json::Value = resp.json().await.ok()?;
+
+    let models: Vec<unhosted_core::swarm::SeedableModel> =
+        serde_json::from_value(v.get("models")?.clone()).ok()?;
+    print_seedable(&models, v.get("activity"));
+    Some(())
+}
+
+/// Print the seedable-models list and, when present, the live activity
+/// counters that answer "is it actually seeding right now?".
+fn print_seedable(
+    seedable: &[unhosted_core::swarm::SeedableModel],
+    activity: Option<&serde_json::Value>,
+) {
+    if seedable.is_empty() {
+        println!("no seedable models on this node yet.");
+    } else {
+        println!(
+            "{} model{} seedable on this node:",
+            seedable.len(),
+            if seedable.len() == 1 { "" } else { "s" }
+        );
+        println!();
+        for m in seedable {
+            // Short digest prefix — enough to eyeball-match against a peer.
+            let short = m.digest.get(..18).unwrap_or(&m.digest);
+            println!(
+                "  {:<40} {:<20} {:>9}",
+                m.file,
+                format!("{short}…"),
+                human_size(m.size_bytes)
+            );
+        }
+    }
+    println!();
+
+    if let Some(a) = activity {
+        let chunks = a.get("chunks_served").and_then(|x| x.as_u64()).unwrap_or(0);
+        let bytes = a.get("bytes_served").and_then(|x| x.as_u64()).unwrap_or(0);
+        let pulls = a.get("peer_pulls").and_then(|x| x.as_u64()).unwrap_or(0);
+        let last = a
+            .get("last_served_unix")
+            .and_then(|x| x.as_i64())
+            .unwrap_or(0);
+        println!("seeding activity (since daemon start):");
+        println!("  chunks served to peers : {chunks}");
+        println!("  bytes served           : {}", human_size(bytes));
+        println!("  models pulled from peers: {pulls}");
+        if last == 0 {
+            println!("  last served            : never — no peer has pulled from this node yet");
+        } else {
+            println!("  last served            : {}", fmt_unix_ago(last));
+        }
+        println!();
+    }
+    println!("peers on your network can pull these without re-downloading from the origin.");
+}
+
+/// Render a unix timestamp as a short "Ns/m/h ago" relative string.
+fn fmt_unix_ago(unix: i64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let secs = (now - unix).max(0);
+    if secs < 60 {
+        format!("{secs}s ago")
+    } else if secs < 3600 {
+        format!("{}m ago", secs / 60)
+    } else if secs < 86400 {
+        format!("{}h ago", secs / 3600)
+    } else {
+        format!("{}d ago", secs / 86400)
+    }
 }
 
 async fn pull_model(spec: &str) -> Result<()> {
