@@ -8,34 +8,58 @@
 //! Peer protocol is the same HTTP API the CLI uses (`POST /v1/run`), so a
 //! peer is just another `unhosted serve` process. No new transport.
 
-pub mod agent;
-pub mod agent_fs;
-pub mod audit;
-pub mod auth;
-pub mod chats;
-pub mod connectors;
-pub mod critique;
-pub mod discovery;
-pub mod dlp;
-pub mod identity;
-#[cfg(feature = "rail-lightning")]
-pub mod lightning_cfg;
-pub mod memory;
-pub mod metrics;
-pub mod model_manager;
-pub mod paths;
-pub mod peer;
-pub mod public_mode;
-pub mod relay_client;
+// ============================================================================
+// Module seam — see ARCHITECTURE.md (ADR-0002 in unhosted-os).
+//
+// "The core" is the distributed inference ENDPOINT: turn N machines you own
+// into one private, OpenAI-compatible endpoint, with the cluster formation,
+// routing, identity, and self-update that make that safe. Everything below the
+// CORE banner is that. Everything below APP LAYER is a *consumer* of the
+// endpoint (the agent, policy, app state) — scheduled to move into their own
+// crates (unhosted-agent / unhosted-policy / unhosted-payments) in later
+// extraction slices. This grouping is the seam; no code has moved yet.
+// ============================================================================
+
+// ---- CORE: the distributed inference endpoint -----------------------------
+// 1. the endpoint
 pub mod router;
+mod web;
+// 2. cluster formation (discover, pair, pool VRAM, split layers, transport)
+pub mod discovery;
+pub mod peer;
+pub mod relay_client;
 pub mod swarm;
 pub mod transport;
 pub mod tunnel;
-pub mod update_check;
-pub mod upstream;
 pub mod vram_pool;
-mod web;
+// 3. inference orchestration (manage the runtime, route work to the pool)
+pub mod model_manager;
+pub mod upstream;
+// 4. identity & trust (who may use the cluster)
+pub mod audit;
+pub mod auth;
+pub mod identity;
+// 5. self-maintenance
+pub mod update_check;
+// shared plumbing used across the core
+pub mod metrics;
+pub mod paths;
 pub mod web_fetch;
+
+// ---- APP LAYER: consumers of the endpoint (to be extracted) ---------------
+// → unhosted-agent crate (a client of :7777, not the endpoint)
+pub mod agent;
+pub mod agent_fs;
+pub mod chats;
+pub mod critique;
+pub mod memory;
+// → unhosted-policy crate (enforcement layered over the API)
+pub mod connectors;
+pub mod dlp;
+pub mod public_mode;
+// → unhosted-payments (already its own repo); kept feature-gated meanwhile
+#[cfg(feature = "rail-lightning")]
+pub mod lightning_cfg;
 
 pub use auth::{AuthOutcome, LocalToken, ReplayGuard};
 pub use discovery::{default_node_name, DiscoveredPeer, Discovery};
