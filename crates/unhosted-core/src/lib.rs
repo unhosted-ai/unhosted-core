@@ -48,13 +48,12 @@ pub mod update_check;
 pub use unhosted_core_base::dlp;
 pub use unhosted_core_base::{audit, metrics, paths, web_fetch};
 
-// ---- APP LAYER: consumers of the endpoint (to be extracted) ---------------
-// → unhosted-agent crate (a client of :7777, not the endpoint)
-pub mod agent;
-pub mod agent_fs;
-pub mod chats;
-pub mod critique;
-pub mod memory;
+// ---- APP LAYER: consumers of the endpoint -----------------------------------
+// The agent runtime now lives in the `unhosted-agent` crate (a consumer of the
+// :7777 endpoint, ADR-0002). Re-exported so the daemon's handlers keep calling
+// `crate::agent::…`, `crate::memory::…`, etc. unchanged. The daemon depends on
+// the agent; the agent does not depend on the core endpoint internals.
+pub use unhosted_agent::{agent, agent_fs, chats, critique, memory};
 // → unhosted-policy crate (enforcement layered over the API)
 pub mod connectors;
 pub mod public_mode;

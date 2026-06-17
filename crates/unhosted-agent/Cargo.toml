@@ -1,0 +1,32 @@
+[package]
+name = "unhosted-agent"
+description = "The unhosted agent runtime — a consumer of the inference endpoint (ADR-0002). Tool-calling loop, agent filesystem sandbox, critique gate, private memory, and chat store. Depends on unhosted-core-base, not on the core endpoint internals."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+unhosted-core-base = { path = "../unhosted-core-base" }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+reqwest.workspace = true
+futures.workspace = true
+url.workspace = true
+bytes.workspace = true
+toml.workspace = true
+rand.workspace = true
+regex = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+sha2 = "0.10"
+fastembed = { version = "5", default-features = false, features = ["hf-hub-native-tls", "ort-download-binaries-native-tls"] }
+
+[dev-dependencies]
+tokio = { workspace = true }
+tempfile = "3"
+wiremock = "0.6"

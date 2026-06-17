@@ -26,7 +26,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-use crate::paths;
+use unhosted_core_base::paths;
 
 /// What the operator stores in `agent-fs.toml`.
 #[derive(Debug, Clone, Deserialize)]

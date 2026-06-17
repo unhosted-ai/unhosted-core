@@ -22,7 +22,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::paths;
+use unhosted_core_base::paths;
 
 const CHATS_FILE: &str = "chats.json";
 

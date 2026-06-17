@@ -16,7 +16,7 @@
 //! Privacy posture: opt-in by default. A missing or unreadable enable
 //! flag reads as "off", so we can never inject context into upstream
 //! calls without an affirmative user click. Same posture as the
-//! tunnel-autostart file in [`crate::tunnel`].
+//! tunnel-autostart file in unhosted-core's `tunnel` module.
 //!
 //! On-disk shape (`memories.json`):
 //! ```json
@@ -29,7 +29,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// File name under `crate::paths::config_file` for the memory store.
+/// File name under `unhosted_core_base::paths::config_file` for the memory store.
 const MEMORIES_FILE: &str = "memories.json";
 /// File name for the user-clicked enable flag. Sister to
 /// `tunnel-autostart.txt`.
@@ -71,11 +71,11 @@ pub struct MemoryStore {
 }
 
 fn memories_path() -> Result<PathBuf> {
-    crate::paths::config_file(MEMORIES_FILE)
+    unhosted_core_base::paths::config_file(MEMORIES_FILE)
 }
 
 fn enabled_path() -> Result<PathBuf> {
-    crate::paths::config_file(MEMORY_ENABLED_FILE)
+    unhosted_core_base::paths::config_file(MEMORY_ENABLED_FILE)
 }
 
 /// Read the memory store from disk. Returns an empty store on any IO

@@ -5844,6 +5844,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "unhosted-agent"
+version = "0.0.78"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "chrono",
+ "fastembed",
+ "futures",
+ "rand 0.8.6",
+ "regex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "toml 0.8.2",
+ "tracing",
+ "unhosted-core-base",
+ "url",
+ "wiremock",
+]
+
+[[package]]
 name = "unhosted-cli"
 version = "0.0.78"
 dependencies = [
@@ -5889,6 +5913,7 @@ dependencies = [
  "toml 0.8.2",
  "tower-http",
  "tracing",
+ "unhosted-agent",
  "unhosted-core-base",
  "unhosted-payments-core",
  "unhosted-payments-lightning",

@@ -50,11 +50,32 @@ The seam is currently expressed as **grouped, banner-commented module declaratio
 Done as **one shippable slice at a time**, always preserving the public `:7777` contract and
 the auth/audit guarantees:
 
-0. **Draw the seam** (this change) — grouped modules + this doc. No behavior change.
-1. Extract `unhosted-agent` (`agent`/`agent_fs`/`critique`/`memory`/`chats`).
-2. Extract `unhosted-policy` (`dlp`/`public_mode`/`connectors`).
+0. **Draw the seam** ✅ — grouped, banner-commented modules + this doc. No behavior change.
+1. **Extract `unhosted-agent`** ✅ — done in two parts:
+   - *1a:* extract `unhosted-core-base` (`paths`/`audit`/`metrics`/`web_fetch`/`dlp`) — the
+     shared kernel both core and agent depend on, which breaks the agent↔core cycle.
+   - *1b:* move `agent`/`agent_fs`/`critique`/`memory`/`chats` into `unhosted-agent`
+     (depends on `unhosted-core-base`); `unhosted-core` depends on `unhosted-agent` and
+     re-exports the modules so the daemon's handlers are unchanged.
+   - Tests redistributed (base 26 + agent 78 + core 66 = **170**, unchanged).
+2. Extract `unhosted-policy` (`public_mode`/`connectors`; `dlp` already in base — revisit
+   whether it belongs in base or policy).
 3. Evict `lightning_cfg` into `unhosted-payments`.
 4. Shrink `lib.rs` to the inference-fabric core; re-baseline the public API.
+
+### Current crate graph (after slice 1)
+
+```
+unhosted-core-base   (paths, audit, metrics, web_fetch, dlp)
+      ▲          ▲
+      │          │
+unhosted-agent   │   (agent, agent_fs, critique, memory, chats)
+      ▲          │
+      │          │
+unhosted-core ───┘   depends on both; daemon wires agent handlers behind :7777
+      ▲
+unhosted-cli / unhosted-desktop
+```
 
 ## Boundary style
 

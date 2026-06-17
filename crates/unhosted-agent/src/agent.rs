@@ -47,9 +47,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::agent_fs::{self, AgentFsConfig};
-use crate::audit::{AuditBroadcaster, AuditEvent};
-use crate::dlp::{self, DlpConfig, DlpDecision};
-use crate::metrics::{AgentStopReason, Metrics};
+use unhosted_core_base::audit::{AuditBroadcaster, AuditEvent};
+use unhosted_core_base::dlp::{self, DlpConfig, DlpDecision};
+use unhosted_core_base::metrics::{AgentStopReason, Metrics};
 
 /// Default and hard-limit guardrails.
 pub const DEFAULT_MAX_STEPS: u32 = 8;
@@ -1087,11 +1087,11 @@ async fn execute_tool(
                     Some("web_fetch: missing `url` argument".into()),
                 );
             };
-            let fetch_req = crate::web_fetch::WebFetchRequest {
+            let fetch_req = unhosted_core_base::web_fetch::WebFetchRequest {
                 url: url.to_string(),
                 max_bytes: None,
             };
-            match crate::web_fetch::fetch(&ctx.http, fetch_req).await {
+            match unhosted_core_base::web_fetch::fetch(&ctx.http, fetch_req).await {
                 Ok(resp) => {
                     if resp.content.is_empty() {
                         (
@@ -1655,8 +1655,8 @@ mod tests {
         RunContext {
             http: reqwest::Client::new(),
             upstream_url: upstream.into(),
-            audit: Arc::new(crate::audit::AuditBroadcaster::new()),
-            metrics: Arc::new(crate::metrics::Metrics::new()),
+            audit: Arc::new(unhosted_core_base::audit::AuditBroadcaster::new()),
+            metrics: Arc::new(unhosted_core_base::metrics::Metrics::new()),
             dlp: None,
             agent_fs: None,
             caller_label: "test".into(),
