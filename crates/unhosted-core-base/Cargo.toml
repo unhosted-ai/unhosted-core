@@ -1,0 +1,29 @@
+[package]
+name = "unhosted-core-base"
+description = "Shared primitives for unhosted: config paths, audit, metrics, web fetch, DLP. The kernel both unhosted-core and unhosted-agent depend on (breaks the agent↔core cycle)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+reqwest.workspace = true
+url.workspace = true
+bytes.workspace = true
+futures.workspace = true
+toml.workspace = true
+# web_fetch::error_status maps to axum's StatusCode. Heavier than ideal for a
+# kernel crate — candidate to move that one helper back into core later.
+axum.workspace = true
+
+[dev-dependencies]
+wiremock = "0.6"
+tokio = { workspace = true }
+tempfile = "3"

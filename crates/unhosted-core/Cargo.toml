@@ -9,6 +9,7 @@ rust-version.workspace = true
 description = "Core orchestration and inference engine for Unhosted."
 
 [dependencies]
+unhosted-core-base = { path = "../unhosted-core-base" }
 tokio.workspace = true
 tokio-stream.workspace = true
 axum.workspace = true

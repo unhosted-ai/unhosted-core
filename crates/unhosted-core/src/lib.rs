@@ -36,15 +36,17 @@ pub mod vram_pool;
 pub mod model_manager;
 pub mod upstream;
 // 4. identity & trust (who may use the cluster)
-pub mod audit;
 pub mod auth;
 pub mod identity;
 // 5. self-maintenance
 pub mod update_check;
-// shared plumbing used across the core
-pub mod metrics;
-pub mod paths;
-pub mod web_fetch;
+
+// ---- shared kernel: moved to unhosted-core-base, re-exported here ----------
+// audit/metrics/paths/web_fetch/dlp now live in the `unhosted-core-base` crate
+// so `unhosted-agent` can depend on them without a cycle (slice 1). Re-exporting
+// keeps every `crate::audit::…`, `crate::paths::…`, etc. call site unchanged.
+pub use unhosted_core_base::dlp;
+pub use unhosted_core_base::{audit, metrics, paths, web_fetch};
 
 // ---- APP LAYER: consumers of the endpoint (to be extracted) ---------------
 // → unhosted-agent crate (a client of :7777, not the endpoint)
@@ -55,7 +57,6 @@ pub mod critique;
 pub mod memory;
 // → unhosted-policy crate (enforcement layered over the API)
 pub mod connectors;
-pub mod dlp;
 pub mod public_mode;
 // → unhosted-payments (already its own repo); kept feature-gated meanwhile
 #[cfg(feature = "rail-lightning")]
