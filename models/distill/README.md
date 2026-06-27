@@ -21,6 +21,7 @@ Pretraining a 7B model from scratch costs ~$200K of H100 time. Pretraining a 1B 
 | `requirements.txt` | 1 | Python deps |
 | `train.py` | 1 | SFT loop. Reads JSONL, fine-tunes a LoRA, saves to `out/`. |
 | `gen_data.py` | 2 (next) | Synthetic-data generator. Talks to any OpenAI-compatible endpoint, including a local `unhosted serve` daemon. |
+| `from_hf.py` | 2 | Convert an existing HF conversational dataset to `{prompt, response}` JSONL — start from teacher data someone already paid to generate. |
 | `eval.py` | 3 (next) | Eval harness with a hold-out set. |
 | `model-card.template.md` | 1 | Template for the model card to publish alongside the trained adapter. |
 
@@ -31,9 +32,16 @@ cd models/distill
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 1. Build a dataset. For the scaffold, this is left as an exercise —
-#    `gen_data.py` lands in the next slice. For now, hand-supply
-#    `data/train.jsonl` with one {"prompt": ..., "response": ...} per line.
+# 1. Build a dataset. Three ways:
+#
+#    a) Generate your own from a teacher (Opus 4.8 recommended):
+#         python gen_data.py --docs docs/ --out data/train.jsonl --model claude-opus-4-8
+#
+#    b) Start from an existing teacher dataset on the Hub:
+#         python from_hf.py --dataset Roman1111111/claude-opus-4.6-10000x \
+#             --out data/train.jsonl --include-reasoning
+#
+#    c) Hand-supply `data/train.jsonl` with one {"prompt": ..., "response": ...} per line.
 
 # 2. Train. Defaults: TinyLlama-1.1B-Chat, 3 epochs, LoRA r=16.
 python train.py --data data/train.jsonl --out out/adapter
