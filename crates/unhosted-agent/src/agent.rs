@@ -305,7 +305,7 @@ pub fn build_system_prompt(max_steps: u32, now: &str) -> String {
     // reversible, concise, deterministic work. It pairs with the deterministic
     // critique gate (see `crate::critique`), which checks the final answer
     // against these same priorities.
-    format!(
+    let base = format!(
         "You are a local-first operator agent. Use the provided tools when \
          useful. When you have a final answer, reply with prose only and no \
          tool calls. You have at most {max_steps} steps to complete the task.\n\n\
@@ -321,7 +321,21 @@ pub fn build_system_prompt(max_steps: u32, now: &str) -> String {
          The current date and time is {now} (UTC). Treat this as authoritative \
          when reasoning about anything time-sensitive — quarters, recency of news, \
          relative ages, deadlines."
-    )
+    );
+
+    // Cognitive Twin: when the user has enabled a persona, prepend a "WHO YOU
+    // ARE" block so the agent reasons and speaks *as that person*. The block is
+    // empty (and this is a no-op) unless the persona layer is both enabled and
+    // populated — the enable gate lives in `persona::prompt_block`, so the
+    // default neutral operator behavior is unchanged. Persona goes first: it's
+    // the strongest position for steering the model's identity, and the
+    // operating priorities below still apply to how the persona acts.
+    let persona = crate::persona::prompt_block();
+    if persona.is_empty() {
+        base
+    } else {
+        format!("{persona}\n\n{base}")
+    }
 }
 
 /// Wall-clock guardrail timer. Set at run start; `elapsed_seconds()`
@@ -1634,6 +1648,45 @@ mod tests {
         assert!(prompt.contains("local-first"));
         assert!(prompt.contains("reversible"));
         assert!(prompt.contains("concise"));
+    }
+
+    #[test]
+    fn system_prompt_injects_enabled_persona() {
+        // Point config resolution at a temp dir so this test never touches the
+        // real ~/.config/unhosted. `config_file` honors XDG_CONFIG_HOME.
+        // NOTE: env vars are process-global; we set XDG_CONFIG_HOME (which the
+        // other prompt tests don't read) and restore it, so parallel tests that
+        // only read HOME are unaffected.
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var("XDG_CONFIG_HOME").ok();
+        std::env::set_var("XDG_CONFIG_HOME", tmp.path());
+
+        // Disabled persona → base prompt only (no WHO YOU ARE block).
+        crate::persona::set_enabled(false);
+        let base = build_system_prompt(8, "2026-05-21T03:14:15Z");
+        assert!(!base.contains("# WHO YOU ARE"));
+        assert!(base.contains("local-first")); // base operator prompt intact
+
+        // Save + enable a persona → it must be prepended, base prompt preserved.
+        crate::persona::save(&crate::persona::Persona {
+            name: "Anita".into(),
+            traits: vec!["warm".into()],
+            ..Default::default()
+        })
+        .unwrap();
+        crate::persona::set_enabled(true);
+        let with_persona = build_system_prompt(8, "2026-05-21T03:14:15Z");
+        assert!(with_persona.contains("# WHO YOU ARE"));
+        assert!(with_persona.contains("Anita's digital twin"));
+        assert!(with_persona.contains("local-first")); // base still present
+                                                       // persona leads (strongest position for steering identity)
+        assert!(with_persona.starts_with("# WHO YOU ARE"));
+
+        // restore env so we don't leak state to other tests
+        match prev {
+            Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
+            None => std::env::remove_var("XDG_CONFIG_HOME"),
+        }
     }
 
     #[test]
