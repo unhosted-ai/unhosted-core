@@ -118,6 +118,73 @@ impl RpcCapability {
 /// the opt-prefix (we trust the tap install by construction; the
 /// formula's `test` block proves the --rpc flag is present before
 /// install is allowed to succeed).
+/// A snapshot of a machine's memory, used to decide whether a model
+/// fits locally or needs a VRAM pool — and, across peers, how to split it.
+///
+/// `total_bytes` is physical RAM. `available_bytes` is what's actually
+/// free right now (best-effort: not every platform reports it, so it's
+/// optional). On Apple Silicon, unified memory means this RAM figure is
+/// also the GPU budget, which is exactly what matters for model loading.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryInfo {
+    pub total_bytes: u64,
+    pub available_bytes: Option<u64>,
+}
+
+/// Read this machine's memory without pulling in an extra crate.
+/// macOS: `sysctl` for total + `vm_stat` for free pages. Linux:
+/// `/proc/meminfo` (MemTotal + MemAvailable). Returns None only if the
+/// platform is unsupported or the total can't be read.
+pub fn local_memory() -> Option<MemoryInfo> {
+    #[cfg(target_os = "macos")]
+    {
+        let total = Command::new("sysctl")
+            .args(["-n", "hw.memsize"])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse::<u64>().ok())?;
+        // Free memory: `vm_stat` reports page counts; page size is 16384 on
+        // Apple Silicon, 4096 on Intel. Parse the page size from the header.
+        let available = (|| {
+            let out = Command::new("vm_stat").output().ok()?;
+            let text = String::from_utf8_lossy(&out.stdout);
+            let page_size = text
+                .lines()
+                .next()
+                .and_then(|l| l.split("page size of").nth(1))
+                .and_then(|s| s.split_whitespace().next())
+                .and_then(|n| n.parse::<u64>().ok())
+                .unwrap_or(4096);
+            let mut free_pages = 0u64;
+            for line in text.lines() {
+                // "Pages free:" + "Pages inactive:" approximate reclaimable RAM.
+                if let Some(rest) = line.strip_prefix("Pages free:").or_else(|| line.strip_prefix("Pages inactive:")) {
+                    let n: u64 = rest.trim().trim_end_matches('.').parse().ok()?;
+                    free_pages += n;
+                }
+            }
+            Some(free_pages * page_size)
+        })();
+        return Some(MemoryInfo { total_bytes: total, available_bytes: available });
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
+        let mut total = None;
+        let mut available = None;
+        for line in meminfo.lines() {
+            if let Some(rest) = line.strip_prefix("MemTotal:") {
+                total = rest.split_whitespace().next().and_then(|n| n.parse::<u64>().ok()).map(|kb| kb * 1024);
+            } else if let Some(rest) = line.strip_prefix("MemAvailable:") {
+                available = rest.split_whitespace().next().and_then(|n| n.parse::<u64>().ok()).map(|kb| kb * 1024);
+            }
+        }
+        return total.map(|t| MemoryInfo { total_bytes: t, available_bytes: available });
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
 pub fn probe() -> RpcCapability {
     let llama_server_path = resolve_with_tap_priority("llama-server");
     let rpc_server_path = resolve_with_tap_priority("rpc-server");
