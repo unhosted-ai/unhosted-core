@@ -53,7 +53,7 @@ pub use unhosted_core_base::{audit, metrics, paths, web_fetch};
 // :7777 endpoint, ADR-0002). Re-exported so the daemon's handlers keep calling
 // `crate::agent::…`, `crate::memory::…`, etc. unchanged. The daemon depends on
 // the agent; the agent does not depend on the core endpoint internals.
-pub use unhosted_agent::{agent, agent_fs, chats, critique, memory};
+pub use unhosted_agent::{agent, agent_fs, chats, critique, memory, persona, voice};
 // → unhosted-policy crate (enforcement layered over the API)
 pub mod connectors;
 pub mod public_mode;
@@ -598,6 +598,25 @@ pub async fn serve(node: Node) -> Result<()> {
         )
         .route("/v1/memory/clear", post(memory_clear_handler))
         .route("/v1/memory/enable", post(memory_enable_handler))
+        // Cognitive Twin persona — the optional "who the assistant is" layer.
+        // Local-user-only; default off. When enabled, the persona is prepended
+        // to the agent system prompt so it reasons/speaks as that person. See
+        // `persona.rs` in unhosted-agent.
+        .route(
+            "/v1/twin/persona",
+            get(twin_persona_get_handler).put(twin_persona_put_handler),
+        )
+        .route("/v1/twin/persona/enable", post(twin_persona_enable_handler))
+        .route("/v1/twin/persona/clear", post(twin_persona_clear_handler))
+        // Render a line in the twin's cloned voice. Gated behind the persona
+        // being enabled; returns audio/wav bytes. See `voice.rs`.
+        .route("/v1/twin/speak", post(twin_speak_handler))
+        // Upload (PUT, raw audio body) / remove (DELETE) the cloned-voice
+        // reference sample. Local-user-only.
+        .route(
+            "/v1/twin/voice",
+            axum::routing::put(twin_voice_put_handler).delete(twin_voice_delete_handler),
+        )
         // Consent connectors (OAuth-style integrations). Local-user-only:
         // consent + token-vault are operator data, never peer-facing.
         .route(
@@ -3470,6 +3489,163 @@ async fn memory_enable_handler(
     require_auth(&outcome, true)?;
     memory::set_enabled(req.enabled);
     Ok(axum::Json(serde_json::json!({ "enabled": req.enabled })))
+}
+
+// ─── Cognitive Twin persona ────────────────────────────────────────────────
+// The optional "who the assistant is" layer. Local-user-only (loopback auth),
+// default off — same privacy posture as private memory. The persona only ever
+// influences the locally-assembled system prompt; nothing is uploaded.
+
+#[derive(serde::Serialize)]
+struct TwinPersonaResponse {
+    enabled: bool,
+    persona: persona::Persona,
+    /// Whether a cloned-voice reference sample is set up. The UI uses this to
+    /// show "voice ready" vs. "add a recording".
+    has_voice: bool,
+}
+
+async fn twin_persona_get_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<axum::Json<TwinPersonaResponse>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    Ok(axum::Json(TwinPersonaResponse {
+        enabled: persona::is_enabled(),
+        persona: persona::load(),
+        has_voice: voice::has_reference(),
+    }))
+}
+
+async fn twin_persona_put_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    axum::Json(req): axum::Json<persona::Persona>,
+) -> Result<axum::Json<persona::Persona>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    persona::save(&req).map_err(|e| {
+        tracing::error!(error = %e, "twin: persona save failed");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    Ok(axum::Json(persona::load()))
+}
+
+#[derive(serde::Deserialize)]
+struct TwinPersonaEnableRequest {
+    enabled: bool,
+}
+
+async fn twin_persona_enable_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    axum::Json(req): axum::Json<TwinPersonaEnableRequest>,
+) -> Result<axum::Json<serde_json::Value>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    persona::set_enabled(req.enabled);
+    Ok(axum::Json(serde_json::json!({ "enabled": req.enabled })))
+}
+
+async fn twin_persona_clear_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<StatusCode, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    persona::clear().map_err(|e| {
+        tracing::error!(error = %e, "twin: persona clear failed");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(serde::Deserialize)]
+struct TwinSpeakRequest {
+    text: String,
+}
+
+/// Render a line in the twin's cloned voice and return the WAV bytes.
+/// Local-user-only. Requires the persona layer to be enabled (the voice is part
+/// of the twin identity) and the voice bridge to be configured + have a
+/// reference sample — otherwise the caller should fall back to a text reply.
+async fn twin_speak_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    axum::Json(req): axum::Json<TwinSpeakRequest>,
+) -> Result<axum::response::Response, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+
+    let text = req.text.trim();
+    if text.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    // The cloned voice is part of the twin identity — only speak when the user
+    // has enabled the persona, and only when the voice bridge is set up.
+    if !persona::is_enabled() || !voice::is_ready() {
+        return Err(StatusCode::CONFLICT);
+    }
+
+    let wav_path = voice::synthesize(text).await.map_err(|e| {
+        tracing::error!(error = %e, "twin: voice synth failed");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let bytes = tokio::fs::read(&wav_path).await.map_err(|e| {
+        tracing::error!(error = %e, "twin: read rendered wav failed");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    use axum::response::IntoResponse;
+    Ok(([(axum::http::header::CONTENT_TYPE, "audio/wav")], bytes).into_response())
+}
+
+/// Upload the cloned-voice reference sample (raw audio bytes in the body).
+/// Local-user-only. The sample is cleaned to XTTS-native 24 kHz mono (when
+/// ffmpeg is present) and stored owner-only at
+/// `~/.config/unhosted/voice/reference.wav`. Cap the body so a stray huge
+/// upload can't exhaust memory — a reference clip is seconds long.
+const MAX_VOICE_UPLOAD_BYTES: usize = 25 * 1024 * 1024; // 25 MB
+
+async fn twin_voice_put_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: bytes::Bytes,
+) -> Result<axum::Json<serde_json::Value>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    if body.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if body.len() > MAX_VOICE_UPLOAD_BYTES {
+        return Err(StatusCode::PAYLOAD_TOO_LARGE);
+    }
+    voice::save_reference(&body).map_err(|e| {
+        tracing::error!(error = %e, "twin: save voice reference failed");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    Ok(axum::Json(serde_json::json!({ "has_voice": true })))
+}
+
+async fn twin_voice_delete_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<StatusCode, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, true)?;
+    voice::clear_reference().map_err(|e| {
+        tracing::error!(error = %e, "twin: clear voice reference failed");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // ─── consent connectors ───────────────────────────────────────────────────
