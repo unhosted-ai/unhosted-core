@@ -304,6 +304,17 @@ enum DistillAction {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// End-to-end "pick a model and teach it": run the whole recipe in
+    /// one shot (data -> train -> eval) via pipeline.py. This is the
+    /// high-level path; `data`/`train`/`eval` above are the stages it
+    /// wraps. Generate from a teacher (`-- --docs ./notes
+    /// --teacher claude-opus-4-8`) or reuse a dataset (`-- --data
+    /// pairs.jsonl`); set the student with `--base-model`. All args
+    /// after `--` forward to pipeline.py.
+    Run {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -678,6 +689,7 @@ fn run_distill(action: DistillAction) -> Result<()> {
         DistillAction::Train { args } => ("train.py", args),
         DistillAction::Eval { args } => ("eval.py", args),
         DistillAction::Push { args } => ("push_to_hub.py", args),
+        DistillAction::Run { args } => ("pipeline.py", args),
     };
     let script_path = locate_distill_script(script)?;
     let python = python_executable();

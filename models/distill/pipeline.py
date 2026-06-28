@@ -56,8 +56,14 @@ def parse_args() -> argparse.Namespace:
         description="end-to-end distillation pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--docs", type=Path, required=True,
-                   help="Directory of .txt/.md documents to learn from")
+    p.add_argument("--docs", type=Path, default=None,
+                   help="Directory of .txt/.md documents to learn from "
+                        "(teacher generates Q/A pairs grounded in them). "
+                        "Mutually exclusive with --data; one is required.")
+    p.add_argument("--data", type=Path, default=None,
+                   help="Existing JSONL of {prompt, response} pairs to train on "
+                        "directly, skipping teacher generation. Use this to reuse "
+                        "a hand-authored or Hub-sourced dataset (see from_hf.py).")
     p.add_argument("--out-dir", type=Path, required=True,
                    help="Root directory for all stage outputs")
     p.add_argument("--teacher",
@@ -114,6 +120,12 @@ def split_jsonl(src: Path, train_out: Path, test_out: Path,
 
 def main() -> None:
     args = parse_args()
+
+    # Exactly one data source: generate from --docs, or reuse --data.
+    if bool(args.docs) == bool(args.data):
+        sys.exit("error: pass exactly one of --docs (generate from a teacher) "
+                 "or --data (reuse an existing {prompt, response} JSONL).")
+
     out = args.out_dir
     out.mkdir(parents=True, exist_ok=True)
 
@@ -126,10 +138,16 @@ def main() -> None:
 
     python = sys.executable
 
-    # ── Stage 1: generate data ────────────────────────────────────────────
-    stage_header("Stage 1 / 3  — generate training data")
+    # ── Stage 1: obtain data ──────────────────────────────────────────────
+    stage_header("Stage 1 / 3  — obtain training data")
 
-    if args.resume and raw_jsonl.exists():
+    if args.data:
+        # Reuse an existing dataset: copy it in as raw.jsonl, skip generation.
+        data_dir.mkdir(parents=True, exist_ok=True)
+        import shutil
+        shutil.copyfile(args.data, raw_jsonl)
+        print(f"[pipeline] using existing dataset {args.data} ({raw_jsonl})")
+    elif args.resume and raw_jsonl.exists():
         print(f"[pipeline] skipping gen_data (found {raw_jsonl})")
     else:
         cmd = [
