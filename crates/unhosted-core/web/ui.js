@@ -288,6 +288,30 @@ const els = {
   memoryStatus: $("#memory-status-line"),
   memoryManage: $("#memory-manage"),
   memoryModal: $("#memory-modal"),
+  twinSection: $("#twin-section"),
+  twinNameInput: $("#twin-name-input"),
+  twinToggle: $("#twin-toggle"),
+  twinToggleLabel: $("#twin-toggle-label"),
+  twinStatus: $("#twin-status-line"),
+  twinSpeakTest: $("#twin-speak-test"),
+  twinEdit: $("#twin-edit"),
+  twinModal: $("#twin-modal"),
+  twinModalClose: $("#twin-modal-close"),
+  twinSave: $("#twin-save"),
+  twinF: {
+    name: $("#twin-f-name"),
+    about: $("#twin-f-about"),
+    traits: $("#twin-f-traits"),
+    likes: $("#twin-f-likes"),
+    dislikes: $("#twin-f-dislikes"),
+    values: $("#twin-f-values"),
+    style: $("#twin-f-style"),
+    expertise: $("#twin-f-expertise"),
+  },
+  twinVoiceStatus: $("#twin-voice-status"),
+  twinVoiceFile: $("#twin-voice-file"),
+  twinVoiceUpload: $("#twin-voice-upload"),
+  twinVoiceRemove: $("#twin-voice-remove"),
   memoryModalClose: $("#memory-modal-close"),
   memoryList: $("#memory-list"),
   memoryClearAll: $("#memory-clear-all"),
@@ -1660,6 +1684,249 @@ if (els.memoryToggle) {
   });
 }
 
+// ---------------------------------------------------------------- cognitive twin
+// Optional persona the assistant adopts (reason + speak as a specific person).
+// Sidebar toggle persists server-side at `~/.config/unhosted/persona.json` +
+// `persona-enabled.txt`; when on, the daemon prepends a "WHO YOU ARE" block to
+// the agent system prompt. If a cloned-voice reference is configured, replies
+// can be spoken in that voice via POST /v1/twin/speak. All local.
+
+async function fetchTwin() {
+  try {
+    const r = await fetch("/v1/twin/persona", { cache: "no-store" });
+    return r.ok ? await r.json() : null;
+  } catch (e) { return null; }
+}
+
+async function saveTwinPersona(persona) {
+  try {
+    const r = await fetch("/v1/twin/persona", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(persona),
+    });
+    return r.ok ? await r.json() : null;
+  } catch (e) { return null; }
+}
+
+async function setTwinEnabled(enabled) {
+  try {
+    const r = await fetch("/v1/twin/persona/enable", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    return r.ok ? await r.json() : null;
+  } catch (e) { return null; }
+}
+
+let lastTwinEnabled = null;
+let lastTwinHasVoice = false;
+
+function renderTwin({ enabled, persona, has_voice }) {
+  if (!els.twinToggle) return;
+  lastTwinEnabled = enabled;
+  lastTwinHasVoice = !!has_voice;
+  if (els.twinNameInput && document.activeElement !== els.twinNameInput) {
+    els.twinNameInput.value = (persona && persona.name) || "";
+  }
+  els.twinToggleLabel.textContent = enabled ? "disable" : "enable";
+  // The edit button is always available so a persona can be built before
+  // enabling; the voice-test only makes sense once enabled + a sample exists.
+  if (els.twinEdit) els.twinEdit.hidden = false;
+  if (enabled) {
+    const who = (persona && persona.name) ? persona.name : "a persona";
+    els.twinStatus.textContent = `on — the assistant reasons and speaks as ${who}.`;
+    els.twinStatus.dataset.state = "running";
+    if (els.twinSpeakTest) els.twinSpeakTest.hidden = !lastTwinHasVoice;
+  } else {
+    els.twinStatus.textContent = "off — the assistant uses its default neutral persona.";
+    els.twinStatus.dataset.state = "idle";
+    if (els.twinSpeakTest) els.twinSpeakTest.hidden = true;
+  }
+}
+
+// Populate the editor modal fields + voice status from the server persona.
+function fillTwinEditor({ persona, has_voice }) {
+  const p = persona || {};
+  const csv = (a) => (Array.isArray(a) ? a.join(", ") : "");
+  if (!els.twinF) return;
+  els.twinF.name.value = p.name || "";
+  els.twinF.about.value = p.about || "";
+  els.twinF.traits.value = csv(p.traits);
+  els.twinF.likes.value = csv(p.likes);
+  els.twinF.dislikes.value = csv(p.dislikes);
+  els.twinF.values.value = csv(p.values);
+  els.twinF.style.value = p.style || "";
+  els.twinF.expertise.value = csv(p.expertise);
+  if (els.twinVoiceStatus) {
+    els.twinVoiceStatus.textContent = has_voice
+      ? "voice sample set — replies can be spoken in this voice."
+      : "no voice sample yet.";
+  }
+  if (els.twinVoiceRemove) els.twinVoiceRemove.hidden = !has_voice;
+}
+
+// Read the editor fields back into a Persona payload.
+function readTwinEditor() {
+  const list = (v) => v.split(",").map((s) => s.trim()).filter(Boolean);
+  const f = els.twinF;
+  return {
+    name: f.name.value.trim(),
+    about: f.about.value.trim(),
+    traits: list(f.traits.value),
+    likes: list(f.likes.value),
+    dislikes: list(f.dislikes.value),
+    values: list(f.values.value),
+    style: f.style.value.trim(),
+    expertise: list(f.expertise.value),
+  };
+}
+
+async function refreshTwinUI() {
+  const s = await fetchTwin();
+  if (!s) return;
+  renderTwin(s);
+  if (els.twinModal && !els.twinModal.hidden) fillTwinEditor(s);
+}
+
+if (els.twinToggle) {
+  els.twinToggle.addEventListener("click", async () => {
+    const next = !lastTwinEnabled;
+    els.twinToggle.disabled = true;
+    // Save the name first so enabling immediately has a populated persona.
+    const name = (els.twinNameInput && els.twinNameInput.value.trim()) || "";
+    if (next && name) await saveTwinPersona({ name });
+    // Optimistic UI, reconcile with the server — matches the memory toggle.
+    renderTwin({ enabled: next, persona: { name } });
+    notify(next ? `twin on — speaking as ${name || "your persona"}` : "twin off", {
+      level: "info",
+      key: "twin",
+      duration: 2500,
+    });
+    const resp = await setTwinEnabled(next);
+    if (resp === null) {
+      notify("couldn't save twin setting", { level: "error", key: "twin" });
+    }
+    await refreshTwinUI();
+    els.twinToggle.disabled = false;
+  });
+}
+
+if (els.twinNameInput) {
+  // Persist the name on blur so the persona is up to date even without toggling.
+  els.twinNameInput.addEventListener("blur", async () => {
+    const name = els.twinNameInput.value.trim();
+    if (name) await saveTwinPersona({ name });
+  });
+}
+
+if (els.twinSpeakTest) {
+  els.twinSpeakTest.addEventListener("click", async () => {
+    els.twinSpeakTest.disabled = true;
+    const name = (els.twinNameInput && els.twinNameInput.value.trim()) || "there";
+    try {
+      const r = await fetch("/v1/twin/speak", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: `Hello, this is ${name}.` }),
+      });
+      if (r.status === 409) {
+        notify("no cloned voice set up yet — add a reference sample to hear it", {
+          level: "info", key: "twin",
+        });
+      } else if (!r.ok) {
+        notify("couldn't render the voice", { level: "error", key: "twin" });
+      } else {
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audio.addEventListener("ended", () => URL.revokeObjectURL(url));
+        await audio.play();
+      }
+    } catch (e) {
+      notify("couldn't render the voice", { level: "error", key: "twin" });
+    }
+    els.twinSpeakTest.disabled = false;
+  });
+}
+
+// Persona editor modal: open → fill from server; save → PUT full persona.
+if (els.twinEdit && els.twinModal) {
+  const closeTwin = () => { els.twinModal.hidden = true; };
+  els.twinEdit.addEventListener("click", async () => {
+    els.twinModal.hidden = false;
+    const s = await fetchTwin();
+    if (s) fillTwinEditor(s);
+  });
+  if (els.twinModalClose) els.twinModalClose.addEventListener("click", closeTwin);
+  els.twinModal.addEventListener("click", (e) => {
+    if (e.target === els.twinModal) closeTwin();
+  });
+}
+
+if (els.twinSave) {
+  els.twinSave.addEventListener("click", async () => {
+    els.twinSave.disabled = true;
+    const resp = await saveTwinPersona(readTwinEditor());
+    if (resp === null) {
+      notify("couldn't save persona", { level: "error", key: "twin" });
+    } else {
+      notify("persona saved", { level: "info", key: "twin", duration: 2000 });
+      // reflect the new name in the sidebar input + status
+      await refreshTwinUI();
+    }
+    els.twinSave.disabled = false;
+  });
+}
+
+// Voice reference upload / remove (raw audio body to PUT /v1/twin/voice).
+if (els.twinVoiceUpload && els.twinVoiceFile) {
+  els.twinVoiceUpload.addEventListener("click", () => els.twinVoiceFile.click());
+  els.twinVoiceFile.addEventListener("change", async () => {
+    const file = els.twinVoiceFile.files && els.twinVoiceFile.files[0];
+    if (!file) return;
+    els.twinVoiceUpload.disabled = true;
+    if (els.twinVoiceStatus) els.twinVoiceStatus.textContent = "uploading + cleaning…";
+    try {
+      const r = await fetch("/v1/twin/voice", {
+        method: "PUT",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: file,
+      });
+      if (r.status === 413) {
+        notify("that recording is too large (25 MB max)", { level: "error", key: "twin" });
+      } else if (!r.ok) {
+        notify("couldn't process the recording", { level: "error", key: "twin" });
+      } else {
+        notify("voice sample saved — cloned locally", { level: "info", key: "twin", duration: 2500 });
+      }
+    } catch (e) {
+      notify("couldn't upload the recording", { level: "error", key: "twin" });
+    }
+    els.twinVoiceFile.value = "";
+    els.twinVoiceUpload.disabled = false;
+    await refreshTwinUI();
+  });
+}
+
+if (els.twinVoiceRemove) {
+  els.twinVoiceRemove.addEventListener("click", async () => {
+    const ok = await confirmDialog({
+      title: "remove voice sample?",
+      message: "delete the cloned-voice reference? you can upload a new one anytime.",
+      confirmLabel: "remove",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await fetch("/v1/twin/voice", { method: "DELETE" });
+      notify("voice sample removed", { level: "info", key: "twin", duration: 2000 });
+    } catch (e) { /* best-effort */ }
+    await refreshTwinUI();
+  });
+}
+
 if (els.memoryManage && els.memoryModal) {
   const closeMemory = () => { els.memoryModal.hidden = true; };
   els.memoryManage.addEventListener("click", async () => {
@@ -2298,6 +2565,8 @@ renderRoutingPreview(transcriptText());
 // Initial paint of the memory panel — runs alongside the first status
 // poll so the sidebar reflects the persisted state on every page load.
 refreshMemoryUI();
+// Same for the Cognitive Twin persona panel.
+refreshTwinUI();
 
 // ---------------------------------------------------------------- sidebar collapsibles
 // Sidebar sections wrapped in <details class="sidebar-collapsible">

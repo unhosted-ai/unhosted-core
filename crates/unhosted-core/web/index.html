@@ -607,6 +607,60 @@
     </div>
   </div>
 
+  <!-- Cognitive Twin persona editor. Opens from "edit persona" in the sidebar.
+       Full profile (name + traits/likes/dislikes/values/style/expertise) plus
+       the cloned-voice reference upload. All local; persona at
+       ~/.config/unhosted/persona.json, voice at …/voice/reference.wav. -->
+  <div class="modal-backdrop" id="twin-modal" hidden>
+    <div class="modal modal-developer">
+      <header class="modal-head">
+        <h2>cognitive twin</h2>
+        <button class="modal-close" id="twin-modal-close" aria-label="close">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+            <line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/>
+          </svg>
+        </button>
+      </header>
+      <div class="modal-body">
+        <section class="dev-section">
+          <p class="muted small">describe who the twin is — comma-separated where there's more than one. the assistant reasons and speaks as this person while enabled.</p>
+          <label class="muted small" for="twin-f-name">name</label>
+          <input type="text" id="twin-f-name" class="vram-pool-model-input" placeholder="Anita" autocomplete="off" />
+          <label class="muted small" for="twin-f-about">about (one line)</label>
+          <textarea id="twin-f-about" class="memory-add-input" rows="2" placeholder="a warm, practical mother who loves cooking and gardening"></textarea>
+          <label class="muted small" for="twin-f-traits">personality traits</label>
+          <input type="text" id="twin-f-traits" class="vram-pool-model-input" placeholder="warm, direct, patient" autocomplete="off" />
+          <label class="muted small" for="twin-f-likes">likes</label>
+          <input type="text" id="twin-f-likes" class="vram-pool-model-input" placeholder="chai, old film songs" autocomplete="off" />
+          <label class="muted small" for="twin-f-dislikes">dislikes</label>
+          <input type="text" id="twin-f-dislikes" class="vram-pool-model-input" placeholder="waste, rudeness" autocomplete="off" />
+          <label class="muted small" for="twin-f-values">values</label>
+          <input type="text" id="twin-f-values" class="vram-pool-model-input" placeholder="family, honesty" autocomplete="off" />
+          <label class="muted small" for="twin-f-style">communication style</label>
+          <input type="text" id="twin-f-style" class="vram-pool-model-input" placeholder="gentle, brief, a little teasing" autocomplete="off" />
+          <label class="muted small" for="twin-f-expertise">areas of depth</label>
+          <input type="text" id="twin-f-expertise" class="vram-pool-model-input" placeholder="home cooking, raising kids" autocomplete="off" />
+          <div class="memory-add-actions">
+            <button class="btn-primary" id="twin-save">save persona</button>
+          </div>
+        </section>
+        <section class="dev-section">
+          <h3 class="settings-h3">her voice (optional)</h3>
+          <p class="muted small">upload a clean recording (wav/mp3/m4a, ~6–30s) to clone the voice locally. it's cleaned to 24 kHz and stored on this machine only — never uploaded anywhere.</p>
+          <div class="tunnel-status" id="twin-voice-status">no voice sample yet.</div>
+          <input type="file" id="twin-voice-file" accept="audio/*,.wav,.mp3,.m4a" hidden />
+          <button class="pair-btn pair-btn-secondary" id="twin-voice-upload">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M8 11V3M5 6l3-3 3 3"/><path d="M3 12h10"/>
+            </svg>
+            <span>upload a recording</span>
+          </button>
+          <button class="btn-danger" id="twin-voice-remove" hidden>remove voice sample</button>
+        </section>
+      </div>
+    </div>
+  </div>
+
   <!-- VRAM-pool details modal. Opens from the cluster section in the
        sidebar; shows resolved binary paths + the targeted install
        hint when capability is missing. Populated from /v1/status's
@@ -797,6 +851,45 @@
                 <path d="M4.5 6h7M4.5 9h7M4.5 12h4"/>
               </svg>
               <span id="memory-manage-label">manage</span>
+            </button>
+          </div>
+
+          <!-- Cognitive Twin: an optional persona the assistant adopts. When
+               enabled, a "WHO YOU ARE" block is prepended to the agent system
+               prompt so it reasons and speaks as that person; if a cloned-voice
+               reference is set up, replies can be spoken in that voice. All
+               local; persona stored at ~/.config/unhosted/persona.json. -->
+          <div class="settings-section" id="twin-section">
+            <h3 class="settings-h3">cognitive twin</h3>
+            <p class="settings-blurb">give the assistant a persona — reason and speak as a specific person (e.g. a loved one). optional, off by default, stored locally.</p>
+            <input
+              type="text"
+              id="twin-name-input"
+              class="vram-pool-model-input"
+              placeholder="name (e.g. Anita)"
+              autocomplete="off"
+            />
+            <button class="pair-btn" id="twin-toggle">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 8h10"/>
+                <path d="M9 4l4 4-4 4"/>
+              </svg>
+              <span id="twin-toggle-label">enable</span>
+            </button>
+            <div class="tunnel-status" id="twin-status-line">off — the assistant uses its default neutral persona.</div>
+
+            <button class="pair-btn pair-btn-secondary" id="twin-edit" hidden>
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M11.5 2.5l2 2L6 12l-2.5.5L4 10z"/>
+              </svg>
+              <span>edit persona</span>
+            </button>
+            <button class="pair-btn pair-btn-secondary" id="twin-speak-test" hidden>
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 6v4h2.5L9 13V3L5.5 6H3z"/>
+                <path d="M11 6.5a2.5 2.5 0 0 1 0 3"/>
+              </svg>
+              <span id="twin-speak-test-label">hear the voice</span>
             </button>
           </div>
 
