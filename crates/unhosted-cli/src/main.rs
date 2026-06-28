@@ -324,6 +324,26 @@ enum VramPoolAction {
     /// Prints a status line plus an install hint pinned to the
     /// actual gap detected. Safe to run with no daemon running.
     Detect,
+    /// Advise whether a model fits in this machine's memory or wants a
+    /// VRAM pool. Estimates the model's memory need (from a cached GGUF,
+    /// a known model's size, or --size-gb), compares it to total RAM
+    /// minus a headroom margin, and prints a recommendation plus a rough
+    /// peer count if pooling is needed. A heuristic, not a guarantee —
+    /// quantization, context length, and KV-cache all move the real
+    /// number. Safe to run with no daemon running.
+    Fit {
+        /// Model name/short-id (e.g. llama3.1:8b), a path to a local
+        /// .gguf, or a full GGUF URL. Used to estimate memory need.
+        #[arg(long)]
+        model: Option<String>,
+        /// Override the model size estimate, in gigabytes. Use when the
+        /// model isn't cached/known and you only know its rough size.
+        #[arg(long)]
+        size_gb: Option<f64>,
+        /// Memory to leave free for the OS and other apps, in gigabytes.
+        #[arg(long, default_value_t = 4.0)]
+        headroom_gb: f64,
+    },
     /// (v0.1.0+ — not yet implemented in this slice.) Start a
     /// layer-split inference cluster across this machine and the
     /// specified peers.
@@ -832,6 +852,13 @@ async fn run_vram_pool(action: VramPoolAction) -> Result<()> {
         VramPoolAction::Detect => {
             print_capability(&cap);
         }
+        VramPoolAction::Fit {
+            model,
+            size_gb,
+            headroom_gb,
+        } => {
+            vram_pool_fit(model.as_deref(), size_gb, headroom_gb)?;
+        }
         VramPoolAction::Start { model, peers } => {
             // 1. Build the plan locally so a bad request fails before
             //    any HTTP round-trip.
@@ -932,6 +959,158 @@ async fn run_vram_pool(action: VramPoolAction) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Advise whether a model fits in local memory or wants a VRAM pool.
+///
+/// This is deliberately a heuristic. The real footprint depends on
+/// quantization, context length, and KV-cache growth — none of which we
+/// can know from a file size alone. We estimate the *weights* footprint
+/// from the model size and add a modest runtime overhead factor, then
+/// compare to total RAM minus headroom. The output is guidance, framed
+/// as such, not a guarantee.
+fn vram_pool_fit(model: Option<&str>, size_gb: Option<f64>, headroom_gb: f64) -> Result<()> {
+    const BYTES_PER_GB: f64 = 1_073_741_824.0;
+    // Weights + a runtime overhead allowance (activations, KV-cache at a
+    // modest context). 1.3x is a rough, slightly-conservative middle.
+    const RUNTIME_OVERHEAD: f64 = 1.3;
+
+    // 1. Determine the model's on-disk size in GB.
+    let (model_gb, source) = if let Some(g) = size_gb {
+        (g, "from --size-gb".to_string())
+    } else if let Some(m) = model {
+        estimate_model_size_gb(m)?
+    } else {
+        anyhow::bail!(
+            "vram-pool fit needs a model: pass --model <name|path|url> or --size-gb <n>."
+        );
+    };
+
+    let need_gb = model_gb * RUNTIME_OVERHEAD;
+
+    // 2. Read total system RAM.
+    let total_gb = match total_ram_bytes() {
+        Some(b) => b as f64 / BYTES_PER_GB,
+        None => {
+            anyhow::bail!("could not read this machine's total memory on this platform.");
+        }
+    };
+    let usable_gb = (total_gb - headroom_gb).max(0.0);
+
+    // 3. Report.
+    println!("vram-pool fit");
+    println!("  model size       : {model_gb:.1} GB ({source})");
+    println!("  est. memory need : {need_gb:.1} GB (weights x{RUNTIME_OVERHEAD} runtime overhead)");
+    println!("  this machine RAM : {total_gb:.1} GB total, {usable_gb:.1} GB usable (after {headroom_gb:.0} GB headroom)");
+    println!();
+
+    if need_gb <= usable_gb {
+        println!("  ✅ fits locally — no pool needed.");
+        println!("     run it directly (e.g. `unhosted pull` + serve, or load it in LM Studio).");
+    } else {
+        // How many *additional* equally-sized peers would cover the gap.
+        // Each peer contributes roughly `usable_gb` (assume similar machines;
+        // a real planner would use per-peer probed memory — not built yet).
+        let deficit = need_gb - usable_gb;
+        let extra_peers = if usable_gb > 0.0 {
+            (deficit / usable_gb).ceil() as u64
+        } else {
+            // No usable local memory at all — can't anchor an estimate.
+            0
+        };
+        println!("  ⚠️  does NOT fit locally — needs a VRAM pool.");
+        if extra_peers > 0 {
+            println!(
+                "     roughly {extra_peers} more peer(s) of similar memory would cover the {deficit:.1} GB gap."
+            );
+            println!("     (heuristic — assumes peers ~as capable as this machine; per-peer");
+            println!("      memory probing is not implemented yet, so treat as a ballpark.)");
+        } else {
+            println!("     this machine has no usable memory headroom to anchor an estimate;");
+            println!("     enlist peers and try `unhosted vram-pool start --model <m> --peers <…>`.");
+        }
+        println!();
+        println!("     next: `unhosted vram-pool detect` to confirm RPC capability, then");
+        println!("           `unhosted vram-pool start --model <m> --peers <names>`.");
+    }
+    Ok(())
+}
+
+/// Estimate a model's on-disk size in GB from a name, path, or URL.
+/// Order: a local .gguf path -> a cached file matching the name ->
+/// a known entry in MODELS. Returns (size_gb, human-readable source).
+fn estimate_model_size_gb(model: &str) -> Result<(f64, String)> {
+    const BYTES_PER_GB: f64 = 1_073_741_824.0;
+
+    // A direct path to a .gguf on disk.
+    let p = std::path::Path::new(model);
+    if p.is_file() {
+        let bytes = std::fs::metadata(p)
+            .with_context(|| format!("reading {model}"))?
+            .len();
+        return Ok((bytes as f64 / BYTES_PER_GB, format!("from file {model}")));
+    }
+
+    // A known model in the built-in table.
+    if let Some((_, _, size)) = MODELS.iter().find(|(n, _, _)| *n == model) {
+        if *size > 0 {
+            return Ok((*size as f64 / BYTES_PER_GB, format!("known model {model}")));
+        }
+    }
+
+    // A cached GGUF whose filename contains the requested name.
+    if let Ok(cache) = model_cache_dir() {
+        if cache.exists() {
+            if let Ok(entries) = std::fs::read_dir(&cache) {
+                for e in entries.flatten() {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    if name.ends_with(".gguf")
+                        && name.to_lowercase().contains(&model.to_lowercase())
+                    {
+                        if let Ok(meta) = e.metadata() {
+                            return Ok((
+                                meta.len() as f64 / BYTES_PER_GB,
+                                format!("cached file {name}"),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    anyhow::bail!(
+        "couldn't determine the size of '{model}'. Pass --size-gb <n>, a path to a \
+         local .gguf, or a known model name (`unhosted models`)."
+    )
+}
+
+/// Total physical RAM in bytes, read from the OS without extra crates.
+/// macOS: `sysctl -n hw.memsize`. Linux: `/proc/meminfo` MemTotal.
+/// Returns None on unsupported platforms or read failure.
+fn total_ram_bytes() -> Option<u64> {
+    #[cfg(target_os = "macos")]
+    {
+        let out = std::process::Command::new("sysctl")
+            .args(["-n", "hw.memsize"])
+            .output()
+            .ok()?;
+        return String::from_utf8_lossy(&out.stdout).trim().parse::<u64>().ok();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
+        for line in meminfo.lines() {
+            if let Some(rest) = line.strip_prefix("MemTotal:") {
+                // Format: "MemTotal:       32788516 kB"
+                let kb: u64 = rest.split_whitespace().next()?.parse().ok()?;
+                return Some(kb * 1024);
+            }
+        }
+        return None;
+    }
+    #[allow(unreachable_code)]
+    None
 }
 
 async fn run_doctor() -> Result<()> {
