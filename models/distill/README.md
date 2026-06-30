@@ -40,7 +40,17 @@ python train.py --data data/train.jsonl --out out/adapter
 
 # 3. Inference smoke-test (loads adapter, prompts the model, prints output).
 python train.py --inference --adapter out/adapter --prompt "your question here"
+
+# 4. Export to a runnable GGUF and install it in LM Studio. This is the
+#    step from "trained adapter" to "a model I can actually load and use":
+#    merge -> convert -> quantize -> install. Needs a llama.cpp checkout.
+python export_gguf.py --adapter out/adapter --base-model <base> \
+    --name my-model --llama-cpp /path/to/llama.cpp --install-lmstudio
 ```
+
+Steps 1–4 are also exposed through the daemon CLI:
+`unhosted distill run` (the whole recipe in one shot) and
+`unhosted distill export` (step 4 — adapter → runnable GGUF).
 
 Expected times on common hardware:
 

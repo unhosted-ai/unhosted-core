@@ -315,6 +315,16 @@ enum DistillAction {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Turn a trained adapter into a runnable GGUF — the last step from
+    /// "training finished" to "I can load this in LM Studio". Merges the
+    /// LoRA into its base, converts to GGUF, quantizes, and (with
+    /// `--install-lmstudio`) drops it into LM Studio's models folder.
+    /// Needs a llama.cpp checkout (`--llama-cpp` or $LLAMA_CPP_DIR). All
+    /// args after `--` forward to export_gguf.py.
+    Export {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -690,6 +700,7 @@ fn run_distill(action: DistillAction) -> Result<()> {
         DistillAction::Eval { args } => ("eval.py", args),
         DistillAction::Push { args } => ("push_to_hub.py", args),
         DistillAction::Run { args } => ("pipeline.py", args),
+        DistillAction::Export { args } => ("export_gguf.py", args),
     };
     let script_path = locate_distill_script(script)?;
     let python = python_executable();
