@@ -353,6 +353,17 @@ enum VramPoolAction {
     /// (v0.1.0+ — not yet implemented.) Show cluster topology and
     /// per-peer VRAM utilization. For now reports local capability.
     Status,
+    /// Survey memory across this machine and trusted peers by querying
+    /// each peer's /v1/sysinfo. Reports real per-peer total/available RAM
+    /// and total poolable memory — the data the planner needs to split a
+    /// model across the network instead of assuming peers match this
+    /// machine. Peers that don't answer are shown as unreachable.
+    Survey {
+        /// Peers to query (names from `peer list`). Defaults to all
+        /// paired peers in ~/.config/unhosted/peers.toml.
+        #[arg(long, value_delimiter = ',', num_args = 1..)]
+        peers: Vec<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -941,7 +952,100 @@ async fn run_vram_pool(action: VramPoolAction) -> Result<()> {
             }
             return Ok(());
         }
+        VramPoolAction::Survey { peers } => {
+            survey_memory(&peers).await?;
+            return Ok(());
+        }
     }
+    Ok(())
+}
+
+/// Query memory across this machine and trusted peers, and report the
+/// total poolable RAM. This is the per-peer probing the VRAM-pool planner
+/// needs — it replaces "assume peers match me" with real numbers read
+/// from each peer's /v1/sysinfo endpoint.
+async fn survey_memory(requested: &[String]) -> Result<()> {
+    use unhosted_core::vram_pool;
+    const GB: f64 = 1_073_741_824.0;
+
+    println!("vram-pool survey — memory across the network\n");
+
+    let mut total_poolable: u64 = 0;
+
+    // Local machine first, read directly (no HTTP round-trip to ourselves).
+    match vram_pool::local_memory() {
+        Some(m) => {
+            total_poolable += m.total_bytes;
+            let avail = m
+                .available_bytes
+                .map(|b| format!("{:.1} GB free", b as f64 / GB))
+                .unwrap_or_else(|| "free unknown".to_string());
+            println!(
+                "  this machine     : {:.1} GB total, {avail}",
+                m.total_bytes as f64 / GB
+            );
+        }
+        None => println!("  this machine     : (memory unreadable on this platform)"),
+    }
+
+    // Which peers to query: the requested set, or all paired peers.
+    let registry = PeerRegistry::load().context("loading peer registry")?;
+    let targets: Vec<_> = if requested.is_empty() {
+        registry.peers.iter().cloned().collect()
+    } else {
+        registry
+            .peers
+            .iter()
+            .filter(|p| requested.contains(&p.name))
+            .cloned()
+            .collect()
+    };
+
+    if targets.is_empty() {
+        println!("\n  no peers to survey (none paired, or none matched --peers).");
+        println!("  pair one with `unhosted pair`, then re-run.");
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .context("building http client")?;
+
+    for peer in &targets {
+        let url = format!("http://{}/v1/sysinfo", peer.addr);
+        match client.get(&url).send().await {
+            Ok(r) if r.status().is_success() => {
+                let v: serde_json::Value = r.json().await.unwrap_or_default();
+                let total = v["memory"]["total_bytes"].as_u64();
+                let avail = v["memory"]["available_bytes"].as_u64();
+                let rpc = v["rpc_capable"].as_bool().unwrap_or(false);
+                match total {
+                    Some(t) => {
+                        total_poolable += t;
+                        let availstr = avail
+                            .map(|b| format!("{:.1} GB free", b as f64 / GB))
+                            .unwrap_or_else(|| "free unknown".to_string());
+                        let rpcstr = if rpc { "rpc-ready" } else { "NOT rpc-ready" };
+                        println!(
+                            "  {:<16} : {:.1} GB total, {availstr} ({rpcstr})",
+                            peer.name,
+                            t as f64 / GB
+                        );
+                    }
+                    None => println!("  {:<16} : reachable, but memory not reported", peer.name),
+                }
+            }
+            Ok(r) => println!("  {:<16} : unreachable (HTTP {})", peer.name, r.status()),
+            Err(_) => println!("  {:<16} : unreachable (no response at {})", peer.name, peer.addr),
+        }
+    }
+
+    println!(
+        "\n  total poolable   : {:.1} GB across this machine + {} peer(s)",
+        total_poolable as f64 / GB,
+        targets.len()
+    );
+    println!("  (totals are physical RAM; on Apple Silicon that is also the GPU budget.)");
     Ok(())
 }
 
