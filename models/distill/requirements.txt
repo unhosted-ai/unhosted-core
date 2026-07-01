@@ -31,6 +31,10 @@ accelerate>=1.0,<2.0
 safetensors>=0.4
 huggingface-hub>=0.26
 
+# GGUF export (export_gguf.py): llama.cpp's convert_hf_to_gguf.py imports
+# this to write the GGUF. Required for the `distill export` step.
+gguf>=0.10
+
 # Optional: required only when using a Claude model as the teacher
 # (--model claude-opus-4-7, --model claude-sonnet-4-6, etc.)
 anthropic>=0.40
