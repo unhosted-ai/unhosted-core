@@ -97,25 +97,56 @@ def merge_adapter(base_model: str, adapter: Path, merged_dir: Path) -> None:
     print(f"[export] merged model -> {merged_dir}")
 
 
+# Common places a user is likely to have cloned llama.cpp. Checked when
+# --llama-cpp / $LLAMA_CPP_DIR isn't given, so the tool "just works" for the
+# common case instead of failing on a fresh setup.
+def _autodetect_llama_cpp() -> Path | None:
+    candidates = [
+        Path.home() / "llama.cpp",
+        Path.home() / "src" / "llama.cpp",
+        Path.home() / "code" / "llama.cpp",
+        Path("/tmp/llama.cpp"),
+        Path("llama.cpp"),  # cwd
+    ]
+    for c in candidates:
+        if (c / "convert_hf_to_gguf.py").is_file():
+            return c
+    return None
+
+
 def find_converter(llama_cpp: Path | None) -> Path:
-    if llama_cpp:
-        conv = Path(llama_cpp) / "convert_hf_to_gguf.py"
+    # Explicit path wins; otherwise try to auto-detect a checkout.
+    search = [llama_cpp] if llama_cpp else []
+    auto = _autodetect_llama_cpp()
+    if auto:
+        search.append(auto)
+    for base in search:
+        conv = Path(base) / "convert_hf_to_gguf.py"
         if conv.is_file():
+            if not llama_cpp:
+                print(f"[export] auto-detected llama.cpp at {base}")
             return conv
     sys.exit(
         "error: convert_hf_to_gguf.py not found. Pass --llama-cpp <checkout> "
         "(or set $LLAMA_CPP_DIR) pointing at a llama.cpp source tree.\n"
-        "  git clone https://github.com/ggerganov/llama.cpp"
+        "  git clone https://github.com/ggerganov/llama.cpp\n"
+        "(auto-checked ~/llama.cpp, ~/src/llama.cpp, ~/code/llama.cpp, "
+        "/tmp/llama.cpp, ./llama.cpp)"
     )
 
 
 def find_quantizer(llama_cpp: Path | None) -> str:
     """Prefer a built llama-quantize in the checkout; fall back to PATH."""
-    if llama_cpp:
-        for cand in (Path(llama_cpp) / "build/bin/llama-quantize",
-                     Path(llama_cpp) / "llama-quantize"):
+    bases = [llama_cpp] if llama_cpp else []
+    auto = _autodetect_llama_cpp()
+    if auto:
+        bases.append(auto)
+    for base in bases:
+        for cand in (Path(base) / "build/bin/llama-quantize",
+                     Path(base) / "llama-quantize"):
             if cand.is_file():
                 return str(cand)
+    # PATH (e.g. `brew install llama.cpp` puts llama-quantize on PATH).
     found = shutil.which("llama-quantize")
     if found:
         return found
