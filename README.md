@@ -85,6 +85,24 @@ unhosted run llama3.1:70b "explain quantum tunneling"
 unhosted config set public.max-usd-per-month 5
 ```
 
+## Try it today: train your own local model
+
+The networking quickstart above is aspirational — but **one thing works
+end-to-end right now**: turning a big model into a small, private, specialized
+one that runs on your own machine (no subscription, no cloud inference).
+
+```bash
+cd models/distill
+./setup.sh                       # venv + deps + llama.cpp, one command
+# then follow QUICKSTART.md: give it your data, train, export to a GGUF,
+# load it in LM Studio.
+```
+
+Full walkthrough: **[models/distill/QUICKSTART.md](models/distill/QUICKSTART.md)**
+— from zero to your own model in about an hour, most of it unattended training.
+This is the same flow used to build a working orchestration model on an
+Apple-Silicon laptop.
+
 ## What's honest
 
 This section replaces the typical "Features" list. It's the truth about what works:
