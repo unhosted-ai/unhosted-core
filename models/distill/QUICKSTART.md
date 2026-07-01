@@ -31,16 +31,27 @@ answering in the style you trained it on.
 
 ## 1. Set up the Python environment
 
+**One command** — creates the venv, installs PyTorch + training deps, and sets
+up llama.cpp for the export step:
+
 ```bash
 cd models/distill
-python3.12 -m venv .venv && source .venv/bin/activate
+./setup.sh
+```
 
-# Install PyTorch first — the right build depends on your platform:
+(NVIDIA users: install your CUDA `torch` first, then run `./setup.sh`. Set
+`SKIP_LLAMA=1` to skip the llama.cpp build and set it up yourself later.)
+
+<details>
+<summary>…or do it manually</summary>
+
+```bash
+python3.12 -m venv .venv && source .venv/bin/activate
 pip install torch                      # macOS (MPS) / CPU
 # pip install torch --index-url https://download.pytorch.org/whl/cu121   # NVIDIA
-
 pip install -r requirements.txt
 ```
+</details>
 
 ## 2. Get your training data
 
