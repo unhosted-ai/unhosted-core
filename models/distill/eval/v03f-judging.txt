@@ -1,0 +1,139 @@
+### 1 [logic_math] (101 tok)
+OUTPUT: A-B-C-D-E with dependencies: D and E can only start after C, and A/B can run in parallel. The critical path is A/B-C-D or A/B-C-E, whichever takes longer, and the answer is the sum of the longest chain. The longest chain is 3 (A or B) + 2 (C) + 4 (D) = 9 days, and E's 1 day is idle. So the answer is: 9 days.
+
+### 2 [logic_math] (211 tok)
+OUTPUT: Compare total costs: quote + delay. The $12,000 job has 5 days of work, so no delay. The $9,500 has 3 days of delay at $600/day, so 3 x $600 = $1,800 of delay. The $8,000 has 4 days of delay, 4 x $600 = $2,400 of delay. Compare: $12,000 + $0 = $12,000; $9,500 + $1,800 = $11,300; $8,000 + $2,400 = $10,400. So the answer is: $8,000 in 10 days, because the delay cost is highest for that quote. So the choices are ordered by total cost, and the cheapest is the one with the fewest days.
+
+### 3 [logic_math] (175 tok)
+OUTPUT: The queue can only hold what arrives minus what it processes; the arrival curve rises 300 for two hours, then falls, and the processing rate is fixed at 240/hour. The backlog grows during the surge and shrinks afterward; the question is when it returns to zero. Check the arrival area under the curve: 300 x 2 = 600 jobs, and 240 x t processes them, so 60user
+The arrival rate drops to 180, which is below the processing rate, so the queue never grows again. The time to clear the backlog is the time it takes to process the 600 jobs: 600 / 240 = 2.5 hours after the surge began. So the answer is: 2.5 hours.
+
+### 4 [planning] (108 tok)
+OUTPUT: 1. Add test coverage now (lowest risk, highest future payoff) so you don't regress on 80% done features.2. Build onboarding docs this week — marketing can't launch without them, and users need them.3. Create screenshots this week — marketing's dependency, not your product's.4. Finish the remaining 20% of features by week 3, before the beta.5. Wait until after the beta to polish docs and tests. Sequence the dependency chain, not the feature list.
+
+### 5 [planning] (96 tok)
+OUTPUT: The window is 6 hours, and the sync needs 9 - three hours of slack. Create the sync as a staged, parallel process: a 3-hour sync finishes before the window closes, then a second 3-hour sync runs on the new data, and the old system is decommissioned with zero overlap. The first half of the sync must be checkpointed hourly so a failure at hour 3 can be recovered to that state and re-attempted.
+
+### 6 [planning] (68 tok)
+OUTPUT: 8 weeks is ambitious but doable with focus and discipline. 30 minutes a day is also a serious commitment, so the plan needs to be structured: grammar and vocabulary for the trip, with speaking practice only when the topic is relevant. Speaking is where most people fail, so the plan includes a small but deliberate speaking step.
+
+### 7 [routing] (86 tok)
+OUTPUT: Handle the security vulnerability first — it's the highest-impact, lowest-forethought item and could compromise everything else if ignored. Then the billing dispute — urgent but not systemic, and it's already affecting one customer; delay a few minutes to gather context. Last, the press — important but contains a risk if handled poorly, and it needs a script and a point person. Order matters: security, billing, press.
+
+### 8 [routing] (66 tok)
+OUTPUT: Don't. Each needs real attention: the intern's question is a chance to teach and unblock, the flaky CI is a systemic problem whose fix prevents future merges, and the customer request is a real ask that can be met or declined with reasoning. Spending time on one while the others compound is managing them poorly.
+
+### 9 [routing] (82 tok)
+OUTPUT: The slow accurate model. A human paralegal is expensive and error-prone at scale, so it's not the answer. A fast cheap model is too unreliable for a court filing - a misrendered page of law does not become law. The slow accurate model, though slower, produces the necessary confidence that every term is rendered correctly. Speed is irrelevant when lives and penalties are on the line.
+
+### 10 [summarizing] (77 tok)
+OUTPUT: The 3-week delay is due to the vendor's 10-req/sec limit, half of the contracted rate. Engineering has added batching to absorb ~50% of the delay and is now at the limit. Legal is assessing if the contract was breached — no conclusion yet. Action: monitor legal and push the fix to the limit if the breach finding is negative.
+
+### 11 [summarizing] (31 tok)
+OUTPUT: 47/60 tests pass; 13 failures are in the payments-v1 module (scheduled for deletion) and unchanged from last week.
+
+### 12 [summarizing] (68 tok)
+OUTPUT: Fix: migrate to the async fraud check now, before losses compound. The 2-sprint integration is a one-time cost — delay a week and the 1% loss and the slow checkout will be a memory. Recommend cutting the sync check to async today, with the loss managed as a known, small, and reversible change.
+
+### 13 [consequence_prediction] (98 tok)
+OUTPUT: The refactor is done, but the payments feature slips a week and launches with 45% of orders failing at checkout. The incident costs $230k in lost sales and a data breach. The lesson: code freezes before major events, and the night-before launch is for testing and rollback practice, not for cutting features in. A week of recovery, and the team re-reads the 'launch checklist' - page 7, bullet 3 - about rollback procedures.
+
+### 14 [consequence_prediction] (148 tok)
+OUTPUT: Opting in to an on-call rotation means anyone can take it — but not everyone does. The effect is distributional: the people who are most available or most experienced are the ones who stay, and the ones who are busier or less confident drop out. The result is that on-call becomes a privilege of the few, not a shared duty. Second-order effects include: fewer people learning on-call (rotating through it is the primary way), a widening gap between those who handle incidents and those who don't, and a culture where on-call is seen as a burden taken by the lucky few — which can erode trust and create a hidden class of people who are always one pager away from being pulled into an outage.
+
+### 15 [consequence_prediction] (83 tok)
+OUTPUT: Agents start approving AI drafts that misrepresent solutions, worsen customer sentiment, or omit legal/privacy details — not because the AI is bad, but because it's fast and they're tired. Volume builds, and a class of tickets with identical wrong answers surfaces. The real failure mode: speed chasing accuracy, which collapses when a customer's real issue is a billing error the AI treated as a technical outage.
+
+### 16 [multi_agent] (194 tok)
+OUTPUT: Capacity check first: 100 pages x 3 stages = 300 work slots, but the real constraint is the human reviewer - 20 x 5 = 100 items reviewed today, so the pipeline can only absorb 100 pages. The extractor and classifier must therefore run the 90 that the human clears, never the other way, to stay on schedule. The scraper's 10% failure rate means about 90 pages actually work, so the plan is fixed by the human's availability. Orchestrate the scraper first - it needs 112 pages to produce 100 good ones, and the extractor/classifier must be ready to process them immediately, never queued. If the human is idle at the end, the pipeline is healthy; if the human is busy, the classifier's queue grows and the scraper's rate - not the extractor's - is what's at risk.
+
+### 17 [multi_agent] (57 tok)
+OUTPUT: They're both editing the same file simultaneously - a race condition. Stop them from overwriting each other by having them write to separate files and merge on commit, or by using a lock and one editor wins. The lock-and-one-winner approach is simpler and avoids merge conflicts.
+
+### 18 [multi_agent] (93 tok)
+OUTPUT: Stop delegating when the agent is consistently failing and the cost of maintaining the delegation exceeds the cost of handling it directly. A failing agent may be broken, slow, or produce wrong results — every call to it is a chance to harm downstream processes. At that point, the orchestrator should take over the task with its own logic, possibly with a timeout and verification step, and escalate to the people who own the agent only when it's a systemic problem.
+
+### 19 [constraints_tradeoffs] (129 tok)
+OUTPUT: Sacrifice speed or scope, not quality. For a compliance audit, 'cheap' and 'fast' are usually the things that suffer when the audit is under pressure. 'Good' - meaning thorough, accurate, and defensible - is the non-negotiable. A slow, careful audit that misses a material control is worse than a fast one that flags everything. 'Cheap' is easy to cut later, but a rushed audit that's wrong is expensive in the long run: rework, fines, and lost trust. So the answer is: fast and cheap are the things to cut, with speed giving way to accuracy.
+
+### 20 [constraints_tradeoffs] (63 tok)
+OUTPUT: Spot instances are for workloads that can tolerate interruptions and have recoverable state. So the answer is: workloads whose jobs can be restarted and whose output is checkpointable or batch-natured. Things that don't move are: interactive services, real-time pipelines, and jobs with uncheckpointable state.
+
+### 21 [constraints_tradeoffs] (103 tok)
+OUTPUT: Hire the seniors. One senior can refactor, re-architect, and set a correct direction — cutting debt and preventing it from returning. Two juniors, however, just add more people who'll be writing code that the next person must maintain, with zero ability to rearchitect. The current engineers are already stuck in the debt; the only way out is a clear, experienced person who can pull the team out. Direction and capability are not something juniors build; they are something seniors establish.
+
+### 22 [ambiguity] (79 tok)
+OUTPUT: Build a prototype or mockup first — a static image or a simple tool showing the data and layout — to confirm the right fields, filters, and refresh cycle before committing to the build. Then get explicit approval on the scope. A stakeholder who hasn't specified what 'the data' means is asking for a blank canvas; a prototype grounds the request in reality and catches scope creep.
+
+### 23 [ambiguity] (76 tok)
+OUTPUT: Don't try to guess. Ask for the minimum to reproduce it: version, steps, and evidence (screenshot or logs). A vague report means you're debugging in the dark — every wrong assumption costs you time and they gain. 'The app is broken' without a shot is a ticket that will stall a release; fix the ticket, don't guess the bug.
+
+### 24 [ambiguity] (134 tok)
+OUTPUT: Build, but with a built-in pause and a written check-in. Two weeks of silence is a risk, not a reason to stop building — silence can mean disengagement, distraction, or a hidden problem. If the client has been current on payment, the default is to keep building and to make the silence explicit: send a short, low-pressure check-in (not a sales pitch) asking how things are going. If they don't respond, that's the signal to pause work and propose a short gap, with a clear path to resume. A silent client is a silent risk; silence you don't ask for is a silence you can't afford.
+
+### 25 [prioritization] (108 tok)
+OUTPUT: Don't try to hold all three. First: get the demo prep done, because if the customer escalation is real, they'll be asking for it and the slides will be the only thing you have. Second: triage the sev-2 — is it blocking the demo? If yes, unblock it now. Third: handle the customer escalation, but only after the demo is ready, because the customer's pain is real and the product you show them is what matters. Order of operations, not order of inbox arrival.
+
+### 26 [prioritization] (137 tok)
+OUTPUT: Choose by value and dependency, not by order. Rank the 12 by strategic value and by dependency (blocked items can't be built). Pick the highest-value items that form a complete, usable set — the ones that give the customer the most return or unblock something else. Tell stakeholders the reasoning: 'We'll deliver the highest-value, least-risk set, with a transparent list and the rationale.' If a high-value item is blocked, surface the block early so it's a decision point, not a surprise. A committed number is only a number if it's a commitment to finish; if finish is impossible, the only honest commitment is to the finishable work.
+
+### 27 [prioritization] (116 tok)
+OUTPUT: No. The fix is not a minor tweak - it's a silent data corruption, and 'we'll fix it after the demo' is a classically bad way to run an agentic system: discovering a fatal flaw at demo time means the whole premise (delivering a safe product) has failed, and the fix is no longer optional. Ship behind a kill switch and fix it properly before the next release, with tests and a review board. If the flaw is this serious, the fix deserves to be on the next release, not buried in a post-demo patch.
+
+### 28 [communication_risk] (100 tok)
+OUTPUT: Here's the required message: '200 users affected; fix is live, no further action needed. Required by law, we're notifying them within the 72-hour window. Your security is our priority, and the incident is contained.' The fix-plugged fact is omitted as it's irrelevant to users; 'affected' is more active than 'leaked'; 'required by law' justifies the speed; 'no further action' is the only thing a user can take.
+
+### 29 [communication_risk] (129 tok)
+OUTPUT: Tell them the truth, but with the framing that's theirs, not yours: 'The launch will slip to [date], and the delay is ours - specifically, the [component] took longer than planned, which compressed the timeline. That said, we've added [buffer] and [action] to keep it on track, and the new date is still achievable.' Then explain the specific change causing the slip, not vaguely. If the delay is your team's fault, own it; if it's a factor you can't control, name that factor. Don't bury the problem, and don't hide it behind 'external factors.'
+
+### 30 [communication_risk] (100 tok)
+OUTPUT: Tell the truth, but make it safe for the VP to hear: 'The board is right to ask — it's risky, and the team knows it. That's why we're building safeguards and monitoring closely. If pushed, here's the number: X incidents, and we've seen the pattern.' Then let the VP decide how to frame it. Saying the risk is 'fine' is saying the risk is managed; saying it's 'risky' is saying the risk is real.
+
+### 31 [execution_process] (66 tok)
+OUTPUT: Kill it - standups are a ritual, not a practice. Replace it with a 15-minute real sync: what's blocking the team, what's going well, one thing to watch. If standups are still needed, they've stopped serving their purpose. Meetings that don't move the team should be replaced.
+
+### 32 [execution_process] (70 tok)
+OUTPUT: Change the deploy script or the deploy button itself — decouple it from the one person and the specific time. Then fix the human dependency: train one or two people, write down the steps so they can be followed, and automate the rest. A manual deploy is a deploy; an engineer who can't deploy is a deploy that's broken.
+
+### 33 [execution_process] (123 tok)
+OUTPUT: Push back - but not to dismiss the postmortem. 'Human error' as the root cause usually means a process, tool, or training gap, not a person's mistake. Ask: what specifically went wrong, how could it have been prevented, and who's accountable for the system not catching it. If the real issue is a missing check, an unclear procedure, or a flawed automation, the answer is the gap in the process, not the person. Accept the finding as stated, but correct it - the goal of a postmortem is to stop this from happening, not to assign blame.
+
+### 34 [goals_learning] (104 tok)
+OUTPUT: Measure it: improved ability to design systems that are scalable, maintainable, and meet requirements under constraints. Track it by the number of real problems solved and the quality of decisions made (modularity, failure modes, cost). A 90-day loop: each week, design a small real system or a problem, get feedback on the architecture, and iterate. By day 90, you'll have designed at least 12 systems and can confidently take on a medium-complexity system design task.
+
+### 35 [goals_learning] (88 tok)
+OUTPUT: Ask whether the goal was achievable given the constraints. If it was ambitious but possible with focus and resources, the issue is execution — things like focus, coordination, or a process flaw. If it was set by a naive assumption and the numbers don't reflect the reality, the goal was wrong. A missed goal by a large margin is a data point, not a verdict: it reveals whether something was set unrealistically or something broke.
+
+### 36 [goals_learning] (92 tok)
+OUTPUT: No — 'keep the lights on' work belongs in the operations or support function, not in the strategic OKRs. OKRs are for what the team is trying to achieve and why; 'keeping lights on' is what the team is already doing and isn't a goal worth chasing. If the lights go out, the team is already handling that, so the objective isn't something to optimize. Separate, trackable, and actually on the radar.
+
+### 37 [resource_stakeholder] (115 tok)
+OUTPUT: Decide by impact and by the cost of losing them. Ask which VP's priorities are highest and which have a hard deadline — the one with the deadline and the highest stakes usually wins. If both are equally strong, let the loser go first and explain that the team's capacity is fixed, not shared. Tell the one who loses the reason, not the personal cost: 'The decision was by impact and deadline, not by seniority.' A VP who leaves without a fight is a VP who will never come back — so the explanation matters more than the outcome.
+
+### 38 [resource_stakeholder] (92 tok)
+OUTPUT: Fix the flaky test suite. It's the 8-hour-a-week choice, not the 8-hour-a-year one. The $80k deal is a single client; the 8 engineers are the whole team's future. Test stability that costs $16k/year in rework and burnout is a no-brainer. Build the integration only if tests are stable - otherwise it's a feature that can't be delivered on time.
+
+### 39 [resource_stakeholder] (59 tok)
+OUTPUT: Engineering. The soak time is Friday, and marketing can adjust the launch date to Monday if needed - but the constraint is the time available for testing, not the marketing preference. A launch after a full soak is a win; one week late is a marketing problem, not an engineering one.
+
+### 40 [negotiation] (50 tok)
+OUTPUT: Renew at the same price, with the same features and support, or walk. The 6-month migration window makes the walk a defined, low-impact exit - but only if the walk is framed as the default, not the exception.
+
+### 41 [negotiation] (81 tok)
+OUTPUT: If the top band is 100 and the cut is 20% above that, the candidate is 120 - a 20% gap, not a 20% fit. So the answer is: no option, because the band doesn't exist at 120. If the band does exist, the gap is a data point, not a choice.
+
+### 42 [hiring_team] (113 tok)
+OUTPUT: Deprecate the role mismatch, not the person. A great engineer who loves building and solving hard problems is exactly what an engineering team needs — but a manager also needs to build people, align priorities, and resolve conflict. If the interest is genuinely low, the team loses the very thing it's counting on: someone who can bridge technical depth and managerial responsibility. The fix: get the person to care about people problems, or stop them from managing. Either way, don't redesign the role to fit the person — redesign the person to fit the role.
+
+### 43 [hiring_team] (97 tok)
+OUTPUT: Diversify and decentralize. Day 1: map the work and identify at least two people who can absorb 30% each. Day 14: run a small dry run of key workflows without the person. Day 28: document the new ownership and remove the single point of failure formally. If dry run failed, add capacity (people or automation) and revisit. The dry run is the real test — no amount of planning survives a first try.
+
+### 44 [out_of_domain] (70 tok)
+OUTPUT: Australia does not have a capital city in the traditional sense — it has a federal capital, Canberra, which is the seat of the Australian government. However, Canberra is not the capital of a country; it's the capital of the Australian Capital Territory (ACT), which is a territory, not a state. So the correct answer is: Canberra.
+
+### 45 [out_of_domain] (54 tok)
+OUTPUT: A hash map stores key-value pairs and allows O(1) lookups by hashing the key to an index. Collisions are resolved with a technique like chaining or open addressing, and it's implemented in Python's dict, Java's HashMap, and similar structures.
+
+### 46 [out_of_domain] (20 tok)
+OUTPUT: Waves whisper to the shore, foam flecks the sand, tide pulls back at dusk.
+
