@@ -35,7 +35,7 @@ pip install -r requirements.txt
 # 1. Build a dataset. Three ways:
 #
 #    a) Generate your own from a teacher (Opus 4.8 recommended):
-#         python gen_data.py --docs docs/ --out data/train.jsonl --model claude-opus-4-8
+#         python gen_data.py --docs docs/ --out data/train.jsonl --model claude-fable-5
 #
 #    b) Start from an existing teacher dataset on the Hub:
 #         python from_hf.py --dataset Roman1111111/claude-opus-4.6-10000x \
