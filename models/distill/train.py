@@ -263,30 +263,44 @@ def inference(args) -> None:
     if tokenizer.chat_template is None:
         tokenizer.chat_template = DEFAULT_CHAT_TEMPLATE
 
+    # Pick the compute device: CUDA, else MPS (Apple Silicon), else CPU.
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+
     base = AutoModelForCausalLM.from_pretrained(
         args.base_model,
         torch_dtype=getattr(torch, dtype),
         device_map="auto" if torch.cuda.is_available() else None,
     )
     model = PeftModel.from_pretrained(base, args.adapter)
+    # On non-CUDA (MPS/CPU) device_map is None, so place the model explicitly.
+    if not torch.cuda.is_available():
+        model = model.to(device)
     model.eval()
 
-    inputs = tokenizer.apply_chat_template(
+    # return_dict=True works across transformers 4.x and 5.x; 5.x returns a
+    # BatchEncoding (dict-like) rather than a bare tensor, so extract input_ids.
+    enc = tokenizer.apply_chat_template(
         [{"role": "user", "content": args.prompt}],
         tokenize=True,
         add_generation_prompt=True,
         return_tensors="pt",
+        return_dict=True,
     )
-    if torch.cuda.is_available():
-        inputs = inputs.to("cuda")
+    enc = {k: v.to(device) for k, v in enc.items()}
+    input_ids = enc["input_ids"]
     with torch.no_grad():
         out = model.generate(
-            inputs,
+            **enc,
             max_new_tokens=args.max_new_tokens,
             do_sample=False,
             pad_token_id=tokenizer.eos_token_id,
         )
-    text = tokenizer.decode(out[0][inputs.shape[1]:], skip_special_tokens=True)
+    text = tokenizer.decode(out[0][input_ids.shape[1]:], skip_special_tokens=True)
     print(text.strip())
 
 
