@@ -145,15 +145,36 @@ pub const CATALOG: &[CatalogEntry] = &[
         size_bytes: 4_683_074_336,
         sha256: None,
     },
+    CatalogEntry {
+        id: "helmsman-4b",
+        name: "Helmsman 4B",
+        blurb: "unhosted's own orchestration specialist — planning, routing, prioritizing, tuned from Qwen3 4B",
+        file: "helmsman-4b-Q4_K_M.gguf",
+        url: "https://huggingface.co/sinhaankur/helmsman-4b/resolve/main/helmsman-4b-Q4_K_M.gguf",
+        size_bytes: 2_497_278_880,
+        sha256: Some("sha256:3c81246dbde3ffaeeca5d490c38739343d68630281731c557d11620318331bcd"),
+    },
 ];
 
-/// A `*.gguf` present in the models dir.
+/// Where an installed model file lives. `Library` files sit in our own
+/// models dir and are fully managed (loadable, deletable). `LmStudio`
+/// files are discovered read-only in LM Studio's models tree — we list
+/// them and load them in place, but never write to or delete them.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InstalledSource {
+    Library,
+    LmStudio,
+}
+
+/// A `*.gguf` present in the models dir or a discovered external tree.
 #[derive(Debug, Clone, Serialize)]
 pub struct InstalledModel {
     pub file: String,
     pub size_bytes: u64,
     /// Unix seconds of the file's mtime; lets the UI sort by recency.
     pub modified_unix: u64,
+    pub source: InstalledSource,
 }
 
 /// State of the supervised llama-server child.
@@ -334,11 +355,134 @@ pub fn scan_models(dir: &std::path::Path) -> Vec<InstalledModel> {
                 file: name,
                 size_bytes: meta.len(),
                 modified_unix,
+                source: InstalledSource::Library,
             })
         })
         .collect();
     out.sort_by_key(|m| std::cmp::Reverse(m.modified_unix));
     out
+}
+
+/// LM Studio's models tree (`~/.lmstudio/models`), when it exists.
+pub fn lmstudio_models_dir() -> Option<PathBuf> {
+    let dir = crate::paths::home_dir().ok()?.join(".lmstudio").join("models");
+    dir.is_dir().then_some(dir)
+}
+
+/// Discover `*.gguf` files in LM Studio's `<publisher>/<model>/` layout.
+/// Walks exactly the two directory levels LM Studio uses (plus files
+/// sitting directly in the root, which hand-copied models end up as).
+/// Read-only: listing here never writes to or deletes anything.
+pub fn scan_lmstudio_models(root: &std::path::Path) -> Vec<InstalledModel> {
+    fn ggufs_in(dir: &std::path::Path, out: &mut Vec<InstalledModel>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            let Ok(meta) = e.metadata() else { continue };
+            if !meta.is_file() || !name.to_ascii_lowercase().ends_with(".gguf") {
+                continue;
+            }
+            let modified_unix = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            out.push(InstalledModel {
+                file: name,
+                size_bytes: meta.len(),
+                modified_unix,
+                source: InstalledSource::LmStudio,
+            });
+        }
+    }
+
+    let mut out = Vec::new();
+    ggufs_in(root, &mut out);
+    let Ok(publishers) = std::fs::read_dir(root) else {
+        return out;
+    };
+    for publisher in publishers.flatten() {
+        let pdir = publisher.path();
+        if !pdir.is_dir() {
+            continue;
+        }
+        ggufs_in(&pdir, &mut out);
+        if let Ok(models) = std::fs::read_dir(&pdir) {
+            for model in models.flatten() {
+                let mdir = model.path();
+                if mdir.is_dir() {
+                    ggufs_in(&mdir, &mut out);
+                }
+            }
+        }
+    }
+    out.sort_by_key(|m| std::cmp::Reverse(m.modified_unix));
+    out
+}
+
+/// Every model we can serve: the library, then LM Studio discoveries
+/// whose file names don't collide with a library file (the managed
+/// copy stays authoritative). Newest first across both sources.
+pub fn scan_all_models(library_dir: &std::path::Path) -> Vec<InstalledModel> {
+    let discovered = lmstudio_models_dir()
+        .map(|root| scan_lmstudio_models(&root))
+        .unwrap_or_default();
+    merge_installed(scan_models(library_dir), discovered)
+}
+
+/// Library entries win file-name collisions; the result is newest-first.
+fn merge_installed(
+    mut library: Vec<InstalledModel>,
+    discovered: Vec<InstalledModel>,
+) -> Vec<InstalledModel> {
+    for m in discovered {
+        if !library.iter().any(|x| x.file == m.file) {
+            library.push(m);
+        }
+    }
+    library.sort_by_key(|m| std::cmp::Reverse(m.modified_unix));
+    library
+}
+
+/// On-disk path for a validated bare model file name: the library
+/// first, then LM Studio's tree. `None` means it's nowhere we serve
+/// from.
+pub fn resolve_model_path(file: &str) -> Option<PathBuf> {
+    if let Ok(dir) = models_dir() {
+        let p = dir.join(file);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    let root = lmstudio_models_dir()?;
+    // Cheap: re-walk the small discovery tree rather than caching paths.
+    if let Ok(publishers) = std::fs::read_dir(&root) {
+        let mut dirs = vec![root.clone()];
+        for publisher in publishers.flatten() {
+            let pdir = publisher.path();
+            if pdir.is_dir() {
+                if let Ok(models) = std::fs::read_dir(&pdir) {
+                    for model in models.flatten() {
+                        let mdir = model.path();
+                        if mdir.is_dir() {
+                            dirs.push(mdir);
+                        }
+                    }
+                }
+                dirs.push(pdir);
+            }
+        }
+        for dir in dirs {
+            let p = dir.join(file);
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+    }
+    None
 }
 
 impl ModelManager {
@@ -373,7 +517,7 @@ impl ModelManager {
             }
         }
         let dir = models_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let installed = scan_models(&dir);
+        let installed = scan_all_models(&dir);
         let llama_bin = crate::vram_pool::find_llama_server();
         let catalog = CATALOG
             .iter()
@@ -541,11 +685,9 @@ impl ModelManager {
     /// observed via [`Self::snapshot`].
     pub async fn load(&self, file: &str, port: u16) -> Result<RuntimeState> {
         let file = safe_model_filename(file)?;
-        let dir = models_dir()?;
-        let model_path = dir.join(&file);
-        if !model_path.is_file() {
-            bail!("{file} is not in the library");
-        }
+        let Some(model_path) = resolve_model_path(&file) else {
+            bail!("{file} is not in the library or LM Studio's models folder");
+        };
         let Some(bin) = crate::vram_pool::find_llama_server() else {
             bail!(
                 "llama-server not found — install llama.cpp \
@@ -1034,5 +1176,58 @@ mod tests {
     fn scan_models_missing_dir_is_empty() {
         let dir = std::path::Path::new("/nonexistent/unhosted-test-dir");
         assert!(scan_models(dir).is_empty());
+    }
+
+    #[test]
+    fn scan_lmstudio_models_walks_publisher_model_layout() {
+        let root = std::env::temp_dir().join(format!("unhosted-ls-test-{}", std::process::id()));
+        let nested = root.join("someone").join("some-model");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("some-model-Q4_K_M.gguf"), b"x").unwrap();
+        std::fs::write(root.join("loose.gguf"), b"xy").unwrap();
+        std::fs::write(nested.join("notes.txt"), b"nope").unwrap();
+        // Deeper than the two-level layout: must NOT be picked up.
+        let too_deep = nested.join("extra");
+        std::fs::create_dir_all(&too_deep).unwrap();
+        std::fs::write(too_deep.join("deep.gguf"), b"deep").unwrap();
+
+        let found = scan_lmstudio_models(&root);
+        let names: Vec<_> = found.iter().map(|m| m.file.as_str()).collect();
+        assert!(names.contains(&"some-model-Q4_K_M.gguf"));
+        assert!(names.contains(&"loose.gguf"));
+        assert!(!names.contains(&"deep.gguf"));
+        assert!(!names.iter().any(|n| n.ends_with(".txt")));
+        assert!(found.iter().all(|m| m.source == InstalledSource::LmStudio));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn merge_installed_prefers_library_on_name_collision() {
+        let lib = vec![InstalledModel {
+            file: "a.gguf".into(),
+            size_bytes: 1,
+            modified_unix: 10,
+            source: InstalledSource::Library,
+        }];
+        let discovered = vec![
+            InstalledModel {
+                file: "a.gguf".into(),
+                size_bytes: 2,
+                modified_unix: 99,
+                source: InstalledSource::LmStudio,
+            },
+            InstalledModel {
+                file: "b.gguf".into(),
+                size_bytes: 3,
+                modified_unix: 50,
+                source: InstalledSource::LmStudio,
+            },
+        ];
+        let merged = merge_installed(lib, discovered);
+        assert_eq!(merged.len(), 2);
+        let a = merged.iter().find(|m| m.file == "a.gguf").unwrap();
+        assert_eq!(a.source, InstalledSource::Library);
+        // Newest-first across sources.
+        assert_eq!(merged[0].file, "b.gguf");
     }
 }
