@@ -145,15 +145,6 @@ pub const CATALOG: &[CatalogEntry] = &[
         size_bytes: 4_683_074_336,
         sha256: None,
     },
-    CatalogEntry {
-        id: "helmsman-4b",
-        name: "Helmsman 4B",
-        blurb: "unhosted's own orchestration specialist — planning, routing, prioritizing, tuned from Qwen3 4B",
-        file: "helmsman-4b-Q4_K_M.gguf",
-        url: "https://huggingface.co/sinhaankur/helmsman-4b/resolve/main/helmsman-4b-Q4_K_M.gguf",
-        size_bytes: 2_497_278_880,
-        sha256: Some("sha256:3c81246dbde3ffaeeca5d490c38739343d68630281731c557d11620318331bcd"),
-    },
 ];
 
 /// Where an installed model file lives. `Library` files sit in our own
