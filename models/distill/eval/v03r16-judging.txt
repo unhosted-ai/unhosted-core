@@ -1,0 +1,148 @@
+### 1 [logic_math] (268 tok)
+OUTPUT: Serializing the dependencies first: A and B run in parallel (6 days total), then C needs both (2 days), then D and E run in parallel (4 days). So the naive parallelization gives 3 + 5 + 2 + 4 = 14 days. But C can start streaming on A and B as soon as they finish - zero slack, so C gets started at day 3, not day 6, which reduces 4 days of slack. So the real split is: A and B finish in parallel (3 days), C starts immediately and needs 2 - C finishes in 5 days, then D and E start immediately and finish in 4 days - so the answer is 5 + 4 = 9 days. The mistake is assuming C waits 6 days - no: C needs both A and B to finish, so C starts at day 3 and needs 2 days - so C finishes at day 9. D and E start immediately at day 3 and finish in 4 days - 7 days - so the answer is 9, not 7. So the answer is: C finishes at day 9, and D and E finish at day 7 - the project can't wait on both - so the answer is 9.
+
+### 2 [logic_math] (147 tok)
+OUTPUT: The all-in cost includes the fixed bid plus the delay cost for days beyond day 6. Compare: $8,000 (10 days, 4 extra days) = $8,000 + 4 x $600 = $9,200. $9,500 (7 days, 1 extra day) = $9,500 + $600 = $10,100. $12,000 (5 days, no extra days) = $12,000. So the answer is: the fixed bid with no delay is cheapest — the 5-day quote, by $200.
+
+### 3 [logic_math] (132 tok)
+OUTPUT: The queue grows by 50 jobs per hour for the first 2 hours, so the backlog doubles from zero to 120. After the surge ends, the queue is 120 jobs deep and the processing rate drops to 180 per hour, which is 80 jobs below full. The time to clear the backlog is 120 / 180 = 2/3 hour = 80 minutes. Adding the 2 hours of growth gives 2 + 80/60 = 2.67 hours. So the answer is: roughly 2.67 hours.
+
+### 4 [planning] (84 tok)
+OUTPUT: 1. Onboarding docs first — done in 1 week, screenshots are now possible. 2. Test coverage — done in 2 weeks, blocked on docs. 3. Marketing — needs the docs and screenshots done by week 4, so start it now. 4. Final polish — no docs or tests done? Stop blocking on them. Match marketing's deadline, not the full build's.
+
+### 5 [planning] (135 tok)
+OUTPUT: 9 hours against a 4-hour window - impossible, so the sync must be split with a checkpoint at 9am, trading time for safety: sync the first 90 minutes manually (with a 15-minute buffer), then auto-sync the remaining 70 minutes, and verify the merge before committing the main transaction. If the auto part fails, start it again - not in Sunday 2-6am, but in the next day's 2-6am, which is a tradeoff worth paying for data integrity. The tradeoff is worth it: the sync is done, verified, and committed within the window, which is the goal.
+
+### 6 [planning] (108 tok)
+OUTPUT: 30 minutes a day x 8 weeks = 12 hours total. That's a real constraint, so the plan must be focused on the things that actually help in a 4-week trip: greetings, asking for directions, ordering food, and basic questions. Don't spend time memorizing grammar rules or translating whole texts — that takes hours and doesn't help in a trip. The goal is to learn the most useful phrases fast, not to become fluent. Match the material to the trip, not to a grammar course.
+
+### 7 [routing] (101 tok)
+OUTPUT: 1. Security vulnerability report — route to on-call engineer immediately. It has active risk and a deadline implied by the nature of the incident. 2. Billing dispute from the large account — route to finance or legal, not the on-call engineer. 3. Press inquiry about layoffs — route to the communications lead. Order by (impact x urgency); the press one loses only because nothing breaks — the billing dispute is the real incident. So the answer is: billing dispute, press, security.
+
+### 8 [routing] (104 tok)
+OUTPUT: Don't delegate the feature — that's a real customer request and deserves real-time attention. But the CI job? That's a systemic issue worth fixing fast; delegate the intern's test run to on-call, document the merge-blocking issue once, and hand off the feature to the team's open-ended backlog with a deadline. Order of priority: fix the CI, answer the customer, delegate the intern's question. Don't invent a new job for the customer — that just shifts blame to a teammate's shoulders.
+
+### 9 [routing] (79 tok)
+OUTPUT: Human paralegal - the model's speed or accuracy is irrelevant if the contract contains a clause the human would have missed, and the consequences of such a mistake dwarf the cost of drafting. For a court filing, the human's judgment and the consequences of being wrong matter more than the human's time. Pay the human the whole cost once; don't buy this dilemma a second time.
+
+### 10 [summarizing] (95 tok)
+OUTPUT: Three weeks of delay. Cause: vendor rate limits (10/sec vs. contracted 100) — mitigated by a 50% workaround built by engineering. Legal is deciding. The workaround is effective but adds complexity and a permanent tradeoff (slower, less reliable than contracted). Decide now: proceed with the workaround and accept the delay, or negotiate a new rate agreement in the contract. Don't invent a solution the vendor can't provide.
+
+### 11 [summarizing] (36 tok)
+OUTPUT: 47 suites passed (13 in the deprecated module — scheduled for deletion next sprint). No new failures. The remaining 19 are red/gold and need attention.
+
+### 12 [summarizing] (127 tok)
+OUTPUT: Boil down: checkout latency is mostly spent on a synchronous fraud check — 80% — and switching to an async API would cut it, but the integration takes two sprints. The tradeoff: 1% rise in fraud loss during the transition. Recommendation: start the integration now (one sprint), set a checkpoint at the end of it, and only accept the full switch when the loss is below 0.5% — trading a little on the flipside for the payoff of faster checkout. Don't let the integration run out of scope; it's the flipbook, not the cover, that matters.
+
+### 13 [consequence_prediction] (91 tok)
+OUTPUT: The freeze would slip, merge the payments, and the Black Friday order spike would hit with zero preparation — midnight for the 5-star review, not morning, because that's when the real damage is done. The fix would be a postmortem, not a migration: frozen merge conflicts, angry users, and a CEO who knows the date of the incident by the end of the week. The lesson: freeze on payments, not on commitment.
+
+### 14 [consequence_prediction] (324 tok)
+OUTPUT: Opt-in on-call rotation means the on-call list is open-ended, and anyone can volunteer — no longer a fixed shift. This changes the dynamics of who's on call and how often people are exposed to it. Second-order effects are unintended consequences that don't directly stem from the policy but are shaped by it. They include: 
+
+1. **Burnout risk for the few who do on-call** — if on-call is volunteer-based, the people who do it are already at higher risk, and no one is accountable for its cost. The rotation doesn't stop burnout; it just shifts it to whoever's willing and hasn't been burned out enough yet.
+
+2. **A culture of on-call fatigue** — the on-call list grows organically, and no one is off-duty except those who can't volunteer. The system doesn't stop the tradeoff; it just made it optional, so the burnout builds silently.
+
+3. **Moral hazard — who calls?** — if on-call is opt-in, who's left out is the one who'd have been a good fit but didn't volunteer? The system doesn't stop the on-call war; it just made it a matter of who's brave enough to answer. The list is still full, just less predictable.
+
+4. **A slower response to incidents** — the on-call list is reactive, and the volunteer list is selective. Incidents are more likely to happen at times when no one's willing, and the on-call list is already full. Opt-in doesn't change the incident rate; it changes who's there.
+
+### 15 [consequence_prediction] (101 tok)
+OUTPUT: The AI replies are too robotic, impersonal, or factually wrong to be approved — killing the human touch and slowing the approval rate. The model learns from real support tickets, so it starts drafting answers that sound confident but miss the context, tone, and legal boundaries of actual conversations. Agents disapprove draft replies at 40%+, and the support queue grows because the AI answers are rejected more than they produce. The human approval becomes a bottleneck, and the goal of speed is lost.
+
+### 16 [multi_agent] (504 tok)
+OUTPUT: First, the human's 5-hour, 20 x 5 = 100 pages of exactly what the pipeline needs - zero slack. So the extractor and classifier must finish their work within the first 5 hours, and the scraper must finish its 100 pages within that same window, which means 20 pages/hour, zero slack. The extractor's rate is unknown, nor is the classifier's; the scraper's 10% failure rate adds a 90% chance per page. The human's time is fixed, so the classifier must finish its own queue within the first 5 hours, and the extractor must finish its own queue within that window, which means the scraper must finish its 100 pages within the first 5 hours despite the 10% chance per page. The extractor's rate is unknown, so the classifier's rate is unknown, and the scraper's rate is unknown - all three are unknown. What does the human's time actually cover? The human's time is the only part of the pipeline that's fixed; the classifier and extractor's times are unknown and would push the day over if they took too long. So the real constraint is the scraper's 10% failure rate: 100 x 0.1 = 10 pages of retries, about 10 extra hours of work. The extractor and classifier are unknown and would push the date if they took too long - so the extractor's rate and the classifier's rate are both unknown, and the classifier's rate is what would finish the pipeline if nothing goes wrong, so the answer is: define the extractor and classifier rates first, then the scraper's rate, and the human's rate (fixed), and the pipeline's finish time depends on the first stage that fails. If the extractor or classifier take too long, the human waits - but the human can't finish its own quota if the extractor or classifier take too long. So the answer is: define the extractor and classifier rates first, then the scraper's rate, and the human's (fixed) rate, and the pipeline's finish time is the maximum of the first-stage finish time and the second-stage finish time, which is the classifier's finish time, and the first-stage finish time is the scraper's finish time, which is 100 / 20 = 5 hours, and the classifier's finish time is unknown, so the answer depends on it.
+
+### 17 [multi_agent] (98 tok)
+OUTPUT: Don't overwrite each other's edits. Each agent should write its own version first, then merge the three into the final one - and the merge must be idempotent (i.e. it doesn't produce different output on subsequent runs). The conflict is not technical; it's orchestational. The agents are writing to the same file simultaneously, which means every edit erodes the previous one, and no final state is consistent. Solution: merge before committing, not editing in parallel.
+
+### 18 [multi_agent] (108 tok)
+OUTPUT: Stop delegating when the agent is either (1) consistently failing despite multiple attempts and a clear error pattern, or (2) taking an unreasonable amount of time without progress. A good default: if the agent has tried three times and the first one was complete and the next two were blocked or wrong, stop delegating — the agent is stuck and the cost of more attempts is wasted. Decide by the agent's track record, not by the coordinator's pride; the goal is to get the result, not to keep delegating.
+
+### 19 [constraints_tradeoffs] (118 tok)
+OUTPUT: Don't pick all three - compliance audit deliverables need to be accurate, timely, and defensible, so the tradeoff is usually good vs. fast, or cheap vs. good. For this specific choice: good - the audit must be thorough and verifiable, or it can't be trusted on the compliance record. A fast, cheap audit produces deliverables that are usable now but unreliable on paper - and on audits, a mistake is a legal and reputational risk. Spend the time to get it right: the cost of being wrong dwarfs the cost of taking longer.
+
+### 20 [constraints_tradeoffs] (86 tok)
+OUTPUT: Spot instances are best for jobs that can be restarted and tolerate a 4% hourly risk of being interrupted — acceptable if the work can be re-run without harm. Kill rates above 5% per hour make a spot instance bargain a no. So: spot the long, reversible, and well-defined re-runable jobs, not the ones whose output can't be re-synthesized. Match instance price to job characteristics.
+
+### 21 [constraints_tradeoffs] (150 tok)
+OUTPUT: The juniors, despite their lack of experience — the team is already drowning in debt, and new engineers are the ones who learn and who help clean up the mess. Junior engineers are the ones who absorb the debt while they grow, and mid-level engineers who can't get direction is a team of people blocked by a process problem, not individual talent. Replacing the juniors would be a slower, more expensive mistake: the seniors are expensive and don't create new value; the juniors create value through the work they do, however unglorious. The juniors are the ones who will eventually become the mid-level engineers who can actually stand on their own, and this is the cheaper path to a future self-sustaining team.
+
+### 22 [ambiguity] (95 tok)
+OUTPUT: Define what 'dashboard for the data' actually means. Ask what data, what purpose, and what format. Build a data model first — where the fields and relationships go — so the dashboard doesn't build on a foundation the client couldn't use or the team couldn't maintain. Then get written requirements: what the user needs from this dashboard and what actions it should enable. A dashboard is a tool, not a decoration; it must solve a real, measurable problem.
+
+### 23 [ambiguity] (124 tok)
+OUTPUT: Don't dismiss it just because it lacks details — but don't invent a bug report from thin air. First: is the reporter reliable? A person saying the app is broken without any steps is a no-step report, which means it's a request, not a bug. My move: ask for more details, specifically what changed and what the expected behavior is. If the reporter can't provide any, that's a no-report report — stop asking and note the gap. If the reporter is unreliable or blocked, that's a decision, not a bug. Match the reporter's reliability to the report's value.
+
+### 24 [ambiguity] (218 tok)
+OUTPUT: Don't let the silence scare you — it's a common mid-project signal, and the right decision depends on the silence's cause. First: is there a real gap? Two weeks of no contact after a stable, paid project is a real signal, but silence isn't always bad. It could mean: (1) the client is blocked by a personal issue, (2) they're deciding, (3) they're blocked by a deadline, or (4) they're avoiding a decision. Decide by the gap's duration and the client's history — two weeks is a reasonable pause, not a hard cutoff. If the silence is sudden and unguarded, flag it as a risk and decide now: build on, pause, or finish and ship the work you can't fully own. Decide by the cost of waiting: if the deadline can't be moved, the build wins; if the deadline is flexible, the pause wins. Decide, then decide again if the silence resumes — silence is the cost of doing business; the decision is the cost of owning the result.
+
+### 25 [prioritization] (132 tok)
+OUTPUT: Don't try to hold all three on a spreadsheet. First: demo prep is the CEO's time, not yours — hand it off with context so the last-minute edits don't fall on your shoulders. Second: the sev-2 needs your attention, not a silent handoff; write it down and assign a teammate if the demo can't absorb it. Third: the customer escalation — the fastest way it goes away is by their losing patience, so the demo prep must be done BEFORE the customer incident, not after. Trade the sev-2 for time on the demo; the customer incident is the one that can't be traded away.
+
+### 26 [prioritization] (107 tok)
+OUTPUT: Don't deliver all 6 if the remaining 6 are blocked — that's a no. Choose the 6 that finish fastest and are on the critical path. If the rest are blocked, that's a decision, and it's a decision with consequences: reassign two to next sprint, document the blocked ones, and propose a date within the sprint window for a decision. Decide by finish time and impact, not by request. If nothing can be decided, ask for a longer sprint — and decide then, not now.
+
+### 27 [prioritization] (82 tok)
+OUTPUT: No. The user data is worth more than the demo, and a silent data-corrupting bug is a quality and a legal liability, not a tradeoff. Ship after the fix, with the fix attached — and tell the teammate the data is at risk if this goes live. If the fix takes longer than 15 minutes, that's a demo-ship decision, not a quiet acceptance.
+
+### 28 [communication_risk] (73 tok)
+OUTPUT: We've identified and fixed a data leak affecting 200 users. That's done, and legal requirements now demand a public notification. Here's the full disclosure: [insert link or brief summary]. The 200-users-affected version is the one that needs the announcement, not the 1,200+ that were mistakenly flagged.
+
+### 29 [communication_risk] (141 tok)
+OUTPUT: Tell them early, directly, and with a plan — not a surprise. Lead with the change and what you're doing about it: 'We've now identified a three-week delay, and here's what we're doing to make the launch happen on time despite it.' Let their reaction be your signal: if they're upset, give them the honest cause briefly and immediately follow with what you're doing to close it down. If they're calm, tell them the full cause briefly and end with the date you now call it — the new launch date — so the delay isn't a dangling question. Don't bury the cause — that just shifts blame to you and makes the new date feel arbitrary.
+
+### 30 [communication_risk] (126 tok)
+OUTPUT: Don't invent a flip condition — that just shifts blame to you later — so the answer isn't 'it's fine, we've done it before.' That's a dodge, and the board isn't buying it. The flip: 'migrating the database first would take two weeks and could cause data loss, so we're migrating the API first.' Now the VP isn't buying the flip — but the board is, because it's honest and has consequences named. And the flip has a cost attached. Don't invent a flip the board won't be judged on; invent one the board will be judged on.
+
+### 31 [execution_process] (128 tok)
+OUTPUT: Kill it - standups are dead, just like the stove. They've been replaced by written async updates (10 minutes, searchable, skimmable) that everyone can read on their own time, and the real-time version is gone. If a standup is happening, it's a live meeting, and killing it just means the meeting happens - but it's a meeting, so it still has its cost. The written version avoids the time and the awkwardness of standing up and no one listening; it documents the answers once, and anyone can read them on their own schedule. Meetings are for decisions, not status theater.
+
+### 32 [execution_process] (108 tok)
+OUTPUT: Stop the manual runbook. Deploy Friday 6pm to everyone's Friday - that's a Friday of engineers, not a Friday of releases. Then define a pipeline with rollback, limits on what can be deployed, and ownership split (one engineer, three weekends of vacation, and one incident a year) in the deploy playbook, not in the engineer's head. If an engineer is the only one who can deploy, the pipeline must be written so no one can accidentally deploy - the human error is the rollback, not the deploy.
+
+### 33 [execution_process] (152 tok)
+OUTPUT: Push back. Human error is a category that includes everything from a typo to a misconfigured firewall, and blaming it downplays the real system and process failures that led to the outage. For example, if the error was choosing the wrong region, that's a decision problem the team should be accountable for — not a blame trade. If it was a miscommunication between two teams, that's a process problem worth fixing, not a person's mistake. If it was a missing timeout, that's an architectural flaw worth addressing, not a human lapse. The human is accountable for the decision and the consequences; the system is accountable for the outcome. Naming 'human error' as the root cause hides the real failures and leaves the team with no actionable target.
+
+### 34 [goals_learning] (105 tok)
+OUTPUT: 90 days, 3 weeks at 30 minutes each, measured by a simple checklist, not by deep dives. The goal is to design real systems (a search engine, a chatbot, a data pipeline) and then to review the design against a checklist. The tradeoff is speed vs. depth: 30 minutes per design, then 15 minutes to review. A 90-day loop is a tradeoff, not a full design of one system. The checklist is the anchor.
+
+### 35 [goals_learning] (250 tok)
+OUTPUT: The goal could be wrong, but it's more likely the execution — and the execution is blameable only if it's deliberate or reckless. If the goal is ambitious, well-specified, and the team is competent, then it's a matter of execution: the goal exists, the team is capable, but something went wrong, so they missed it. That's a team or process problem, not a judgment of the goal itself. The execution could have been sloppy, misaligned, or the goal could have been unrealistic — but 'the goal is wrong' is a value judgment, and one that collapses under scrutiny: goals are set to be reachable, and if they're unreachable, that's a process problem, not a moral one. Compare: if the goal was 'build the app in two weeks,' and it took two weeks and the app is two weeks late, the goal is wrong — but 'we shipped on time, the goal was wrong' smacks of blaming the setter. The verdict: execution, and specifically, the execution of the goal. If the executors are competent and honest, the process (goal-setting, planning, oversight) has failed, and that's a systemic issue to fix, not a blame trade.
+
+### 36 [goals_learning] (188 tok)
+OUTPUT: Keep the lights on is a maintenance, not a strategic, goal — it doesn't fit the ambition of OKRs, which are for the things that matter to the goal. The lights are on because the team is running efficiently and not because someone is chasing a status quo. Measure: is the system stable, or is it constantly falling over? If the lights are flickering, that's a real, measurable problem worth addressing, but it shouldn't be an explicit objective — it's the whole point of having a good engineering or operations team. The exception is if 'lights on' is a specific, measurable target (e.g., 'run the system at 99% uptime'), then it's fine — but not as a standalone 'goal' to chase. OKRs are for the things that matter and that take deliberate effort and tradeoff decisions; 'keep the lights on' is the default, not the deliberate choice.
+
+### 37 [resource_stakeholder] (125 tok)
+OUTPUT: Don't split the difference by default — that just shifts blame to the VP who didn't get their number. Ask each a quick, specific question: what's the actual bottleneck if I were to move this person? If it's a process, fix the process and split the difference. If it's a resource, buy more. If it's a conflict, write it down and hand it off to whoever has the authority to decide, with both having been heard. If it's a tradeoff, tell the loser the tradeoff explicitly and give them a deadline to request a real change, not just a smaller slice.
+
+### 38 [resource_stakeholder] (109 tok)
+OUTPUT: Don't build the integration yet — the test suite is the higher-value, lower-risk choice. The 8 engineers x 2 x 35 = 140 hours saved a week is real and reusable; the $80k deal is a one-time win. Fix the tests now: timeboxed, measurable progress, and the new integrations will still be needed. Build the integration only after the tests are stable — then the choice isn't between building fast or building well, it's between building well and building fast.
+
+### 39 [resource_stakeholder] (98 tok)
+OUTPUT: Engineering wins, with the release delayed 3 days - but marketing wins the event itself. The compromise: Friday, 2pm, which gives engineering a 12-hour soak-and-commit window, and marketing a 40-hour marketing push, which usually wins the conference. If the soak is too short, marketing wins by surprise; if it's too long, engineering wins by default. So the answer is: Friday, with the 12-hour deadline written in stone.
+
+### 40 [negotiation] (128 tok)
+OUTPUT: Don't jump to rejection yet — a 35% price increase with no corresponding value delivered is a tradeoff with no flip condition. But the migration time (6 months) makes the decision a matter of patience and the cost of staying. Negotiate with a deadline: 'We can move if the price comes down or we're given a service target to meet.' If they can't, the exit becomes a calculated, reversible choice: quote the next competitor's price and the migration date, and let the deadline pass with a real offer. Don't accept the renewal quote as the final answer; accept the tradeoff with teeth.
+
+### 41 [negotiation] (103 tok)
+OUTPUT: Don't offer them a lower band. That would make the real top of the band — the candidate who'd have a slightly better fit — a worse fit, which contradicts the decision. Instead, move the band up 20% and offer the top candidate with a slightly smaller stake. The tradeoff is worth it: the new fit is better off, and the real top is now a slightly better fit than before. If the top is genuinely the best, this is the honest decision to make.
+
+### 42 [hiring_team] (195 tok)
+OUTPUT: Don't just give the manager title to someone who shows no interest — that's the whole point of a manager: people, relationships, and coordination. The strong engineer has the technical skill and likely the decision-making ability to become a manager; what he lacks is the soft skills that actually make the team function as a whole. What to do: offer a hybrid role — a technical lead who does the work only he can do (design, code, solve problems) but also mentors and coordinates other engineers under his guidance. This lets him stay on the technical track while learning the human side of the job at a slower, more focused pace. The tradeoff is that he becomes a specialist who coordinates rather than a full manager of people and budgets. The long term: move him to a position where people problems are the whole job — a team leader or director — only after he has learned the ropes. Don't move people fast to technical leadership; it collapses the team.
+
+### 43 [hiring_team] (134 tok)
+OUTPUT: 1. Identify the work that's blocked by this person and quantify it. 2. Split the load across the team fairly and document ownership. 3. Set a goal to have a second person capable of stepping in if the first leaves. 4. Check that no new work is added to the queue if the first leaves — split ownership of new work too. 5. Review the team's capacity and the new ownership map monthly. The tradeoff is a slower start (time to reassign work) vs. a more resilient team. Don't add new work to the queue just because one person is the bottleneck; reassign the old work first.
+
+### 44 [out_of_domain] (62 tok)
+OUTPUT: Australia has a federal capital, Canberra, which is the seat of the Australian government. It's chosen as a compromise point between Sydney and Melbourne, the two largest cities. The capital is not a city that's the capital of a state; it's a separate entity. So the answer is: Canberra.
+
+### 45 [out_of_domain] (43 tok)
+OUTPUT: A hash map stores key-value pairs and resolves collisions using a hash function to find where each key should go. It's fast to insert, delete, and find data, making it ideal for frequent lookups.
+
+### 46 [out_of_domain] (25 tok)
+OUTPUT: Waves crash on the shore,  
+Salt wind, tide, and ancient secrets —  
+One moment, never ending.
+
