@@ -47,6 +47,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max-tokens", type=int, default=512)
     p.add_argument("--ctx", type=int, default=4096)
     p.add_argument("--limit", type=int, default=0)
+    p.add_argument("--no-think", action="store_true",
+                   help="Disable hybrid-thinking via chat_template_kwargs (Qwen3-style models)")
     return p.parse_args()
 
 
@@ -66,13 +68,15 @@ def wait_healthy(port: int, proc: subprocess.Popen) -> None:
     sys.exit(f"error: llama-server not healthy after {HEALTH_TIMEOUT_S}s")
 
 
-def chat(port: int, prompt: str, max_tokens: int) -> dict:
+def chat(port: int, prompt: str, max_tokens: int, no_think: bool = False) -> dict:
     body = {
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.0,
         "max_tokens": max_tokens,
         "stream": False,
     }
+    if no_think:
+        body["chat_template_kwargs"] = {"enable_thinking": False}
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}/v1/chat/completions",
         data=json.dumps(body).encode("utf-8"),
@@ -112,7 +116,7 @@ def main() -> None:
         with args.out.open("w", encoding="utf-8") as out_f:
             for i, row in enumerate(rows, 1):
                 t0 = time.time()
-                payload = chat(args.port, row["prompt"], args.max_tokens)
+                payload = chat(args.port, row["prompt"], args.max_tokens, args.no_think)
                 dt = time.time() - t0
                 choice = payload["choices"][0]
                 output = choice["message"]["content"]

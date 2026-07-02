@@ -1,0 +1,203 @@
+### 1 [logic_math] (116 tok)
+PROMPT: A project has 5 tasks. A and B run in parallel, taking 3 and 5 days. C needs both finished and takes
+OUTPUT: A and B run in parallel, so they take 3 days (the max of 3 and 5). C needs both A and B to finish, so it starts after day 3 and takes 2 days, finishing on day 5. D and E run in parallel after C, so they start on day 5 and take 4 and 1 day, respectively. The longest of these is 4 days, so the project finishes on day 5 + 4 = 9. So the answer is: 9 days.
+
+### 2 [logic_math] (232 tok)
+PROMPT: Three contractors quote a job: $8,000 in 10 days, $9,500 in 7 days, $12,000 in 5 days. Every day bey
+OUTPUT: The cheapest quote is the one that includes the price and the delay cost. The first two days are free, days 3-6 cost $600 each, and day 7+ costs $600 each. So the total cost is the quote plus $600 per day beyond day 6. Compare the three options: $8,000 in 10 days, $9,500 in 7 days, $12,000 in 5 days. The 5-day quote has no delay, so it's $12,000. The 7-day quote has 1 day of delay, so $9,500 + $600 = $10,100. The 10-day quote has 4 days of delay, so $8,000 + 4 x $600 = $8,000 + $2,400 = $10,400. So the cheapest is the 5-day quote at $12,000.
+
+### 3 [logic_math] (86 tok)
+PROMPT: A queue processes 240 jobs per hour. Jobs arrive at 300 per hour for 2 hours, then drop to 180 per h
+OUTPUT: The queue processes 240 jobs per hour. Jobs arrive at 300 per hour for 2 hours, then drop to 180 per hour. The backlog is gone when the queue has caught up to the total jobs sent to it. The backlog grows during the surge and shrinks afterward. So the answer is the time it takes to clear the backlog after the surge ends.
+
+### 4 [planning] (244 tok)
+PROMPT: We launch a beta in 6 weeks. Features are 80% done, there is no test coverage, no onboarding docs, a
+OUTPUT: 1. Week 1: Build the screenshots and docs. That's the only marketing work that can be done now, and it's the only thing that doesn't need the code. 2 weeks of marketing work is a lot, but it's the only thing that can be done without the code. 2. Week 2: Write the onboarding docs. That's the only thing that needs the code, and it's the only thing that can't be done without it. 3. Week 3: Write the test coverage. That's the only thing that needs the code, and it's the only thing that can't be done without it. 4. Week 4: Fix the code. That's the only thing that needs the code, and it's the only thing that can't be done without it. 5. Week 5: Fix the docs. That's the only thing that needs the code, and it's the only thing that can't be done without it. 6. Week 6: Fix the marketing. That's the only thing that needs the code, and it's the only thing that can't be done without it.
+
+### 5 [planning] (78 tok)
+PROMPT: Plan a database migration where the only allowed downtime window is Sunday 2-6am, but a full data sy
+OUTPUT: Plan the migration to fit the 4-hour window, not the 9-hour sync. The full sync must run during the window, so the window must be extended to 9 hours. If it's fixed at 2-6am, the migration must be split into two parts: a partial sync that fits, then a full sync on the next Sunday.
+
+### 6 [planning] (41 tok)
+PROMPT: I want to learn enough Spanish in 8 weeks for a work trip to Madrid. I have 30 minutes a day. Make t
+OUTPUT: Start with the 10 most-used phrases and 100 words. Then build from there. The 8 weeks is enough to get you to a basic working level.
+
+### 7 [routing] (76 tok)
+PROMPT: Incoming at once: a security vulnerability report, a billing dispute from our largest customer, and 
+OUTPUT: Handle the security vulnerability first - it's the only one that can't wait. Then the billing dispute, which affects the largest customer and risks the relationship. Layoffs are a public issue, but they don't block anything - they're a communication task, not an urgent action. The order is: security vulnerability, billing dispute, then the press inquiry.
+
+### 8 [routing] (78 tok)
+PROMPT: In my inbox: an intern asking how to run the test suite, a flaky CI job blocking all merges, and a c
+OUTPUT: Delegate the test suite and the flaky CI job to the intern — they're both technical and can be fixed by someone with a few hours. The customer's feature request is a real business need, so you handle it by triaging it, estimating the effort, and adding it to the backlog. The intern's question is a learning moment, not a crisis.
+
+### 9 [routing] (73 tok)
+PROMPT: Which should summarize a 200-page contract: a fast cheap model, a slow accurate model, or a human pa
+OUTPUT: A human paralegal, because the output feeds a court filing and a mistake in a legal contract can be costly and legally binding. A fast cheap model may get the facts wrong; a slow accurate model may be too late. A paralegal can balance speed and accuracy, and the output can be reviewed by a lawyer before filing.
+
+### 10 [summarizing] (72 tok)
+PROMPT: Summarize for an executive: the migration is 3 weeks late because the vendor API rate-limits us at 1
+OUTPUT: The migration is 3 weeks late due to the vendor's API rate-limiting at 10 requests/sec instead of the contracted 100. Engineering has a batching workaround that recovers about half the delay, but legal is still assessing whether the contract was breached. The legal review is the only remaining risk to the timeline.
+
+### 11 [summarizing] (36 tok)
+PROMPT: Turn this into a one-line status: 47 of 60 test suites pass, the 13 failures are all in the deprecat
+OUTPUT: 47/60 tests passed, 13 failures all in deprecated payments-v1 (scheduled for deletion next sprint), no new failures this week.
+
+### 12 [summarizing] (66 tok)
+PROMPT: Boil this down with a recommendation: users say checkout is slow; profiling shows 80% of latency is 
+OUTPUT: Fix the fraud check first, not the integration. The 80% latency is the real bottleneck, and the async API is the only way to fix it. The 1% loss is a small price to pay for a 20x speed improvement. Start the integration now, not later.
+
+### 13 [consequence_prediction] (72 tok)
+PROMPT: If we skip the code freeze and merge the payments refactor the night before Black Friday, what happe
+OUTPUT: The refactor goes in, but the night before Black Friday is when the real stress test happens. If the refactor has bugs, they'll hit live traffic at peak. If it's stable, it's a win. The real risk is the refactor being incomplete or unstable - that's the night before Black Friday, not the refactor itself.
+
+### 14 [consequence_prediction] (188 tok)
+PROMPT: What second-order effects follow from making the on-call rotation opt-in?
+OUTPUT: Opt-in on-call rotation means people can choose to sign up, not that it's mandatory. The second-order effects include:
+
+1. Lower coverage: Fewer people sign up, so the team is less available during incidents.
+2. Uneven load: Those who sign up bear more than their share, creating burnout.
+3. Worse incident response: Fewer people on call means slower detection and resolution.
+4. Lower morale: People who don't sign up may feel the team is less reliable, and those who do may feel overburdened.
+5. Less knowledge sharing: Fewer people on call means less cross-training and handover.
+6. Higher incident costs: Slower detection and resolution mean more damage and longer resolution times.
+7. Lower team trust: If some people don't sign up, others may lose trust in the team's reliability.
+
+The tradeoff is between fairness and coverage.
+
+### 15 [consequence_prediction] (77 tok)
+PROMPT: We plan to auto-generate AI draft replies for all support tickets, which agents approve before sendi
+OUTPUT: Agents stop reading the drafts and just approve them, leading to a 30% drop in satisfaction. The AI's tone is inconsistent across agents, and the canned responses become stale. The support team spends 20% of their time editing drafts, not solving real issues. The AI's training data is outdated, so it fails on newer product features.
+
+### 16 [multi_agent] (130 tok)
+PROMPT: A pipeline has three agents - a scraper that fails on about 10% of pages, an extractor, and a classi
+OUTPUT: The classifier and extractor are both automated, so they run on the scraper's output. The human reviewer is the bottleneck. The scraper fails on 10% of pages, so 10 pages are dropped. That means 90 pages are processed by the classifier. The classifier must flag 10% of those as needing review, so 9 pages go to the human. The human can review 20 items in 5 hours, so the plan is: run the scraper, run the classifier, send the 9 flagged items to the human, and have them reviewed in the 5 available hours.
+
+### 17 [multi_agent] (65 tok)
+PROMPT: Two agents keep overwriting each other's edits to the same config file. Fix the orchestration.
+OUTPUT: Stop both agents from writing the same file. If they must both write it, have one agent write it and the other read it, or have them write to different files and merge them. If they must both write to the same file, have them write to it in sequence, not in parallel.
+
+### 18 [multi_agent] (46 tok)
+PROMPT: When should an orchestrator stop delegating to a failing agent and do the task itself?
+OUTPUT: Stop delegating when the agent's failure is persistent, the task is critical, or the agent's failure is causing a cascade. Delegate only when the agent is reliable and the task is non-critical.
+
+### 19 [constraints_tradeoffs] (80 tok)
+PROMPT: Fast, cheap, good - pick two for a compliance audit deliverable. Which do you sacrifice and why?
+OUTPUT: Sacrifice 'good' for 'fast' - a compliance audit done quickly is still compliant, but a rushed one is likely to miss real risks. 'Fast' and 'good' are both important, but 'good' is the one that, if sacrificed, can be recovered later; 'fast' is the one that, if sacrificed, can't be regained.
+
+### 20 [constraints_tradeoffs] (82 tok)
+PROMPT: We can cut cloud costs 40% by moving to spot instances, but jobs get killed about 2% per hour. Which
+OUTPUT: Move the workloads that are idempotent, stateless, and can restart on failure. Spot instances kill jobs, so the workload must be able to restart gracefully and not lose progress. Jobs that run for a long time, have state, or can't restart are at risk. So move stateless batch jobs, stateless web services, and jobs that can be retried.
+
+### 21 [constraints_tradeoffs] (54 tok)
+PROMPT: Budget allows one senior hire or two juniors. The team is 4 mid-level engineers drowning in tech deb
+OUTPUT: Hire the two juniors. They can take on the bulk of the debt work, and the senior can guide them. A senior alone would be overkill and underutilized, and the juniors can learn while the debt is addressed.
+
+### 22 [ambiguity] (91 tok)
+PROMPT: A stakeholder asks for 'a dashboard for the data.' What do you do before building anything?
+OUTPUT: 1. Define the goal: Why the dashboard? Who needs it? What decisions will it support? 2. Identify the data sources and their quality. 3. Determine the key metrics and the time frame. 4. Decide on the visualization type for each metric. 5. Choose a tool that fits the team's skills and the dashboard's needs. 6. Build a prototype and get feedback before finalizing.
+
+### 23 [ambiguity] (112 tok)
+PROMPT: You get a bug report that says 'the app is broken.' No version, no steps, no screenshot. What's your
+OUTPUT: 1. Ask for the version number and device OS. 2. Request a minimal reproducible case. 3. Ask for a screenshot of the broken state. 4. Request a logcat or console dump. 5. Ask for a stack trace. 6. Request a minimal project that reproduces the issue. 7. Ask for the exact steps to reproduce. 8. Request a video of the issue. 9. Ask for the environment details. 10. Request a summary of the issue.
+
+### 24 [ambiguity] (230 tok)
+PROMPT: Mid-project, the client goes silent for two weeks. Payment is current. Keep building, pause, or some
+OUTPUT: Keep building, but with a pause and a check-in. The payment being current is a good sign, but silence is still a red flag. The pause buys you time to reach out and understand what's going on, while the work continues so the project doesn't stall. Here's how to handle it:
+
+1. **Pause the work for a week** to give the client space to respond. A two-week silence is enough to be concerned without halting the project entirely.
+2. **Send a polite, non-accusatory message** asking for a status update and whether they need anything. Keep it brief and professional.
+3. **Continue building quietly** if the work is stable and the client hasn't asked to stop. A paused project is still a project — it just needs a check-in.
+4. **If the silence continues**, stop the work and send a final notice. Silence for more than two weeks is a sign of disengagement, and you have the right to stop work if there's no communication.
+
+The goal is to protect your work and your time, not to assume the worst.
+
+### 25 [prioritization] (120 tok)
+PROMPT: Everything is 'P0': the CEO wants demo prep, production has a sev-2, and a major-customer escalation
+OUTPUT: Split the afternoon into three 45-minute blocks. First, the demo prep: the CEO's demo is the only thing that matters, so the production team handles the sev-2 and escalates the customer issue to the escalation team. Second, the sev-2: production has a clear path, so they handle it while the demo team gets the customer escalation. Third, the customer escalation: the escalation team handles it while the demo team finishes prep. The CEO's demo is the only thing that matters, so the production team and escalation team support it.
+
+### 26 [prioritization] (61 tok)
+PROMPT: Your team of 3 committed to 12 deliverables this sprint and will finish 6. How do you choose which 6
+OUTPUT: Choose the 6 that are highest-value, highest-risk, and most visible to stakeholders. Tell them: 'We've finished the 6 that matter most this sprint, the other 6 will be next sprint.' Don't hide the unfinished work; hiding it is a risk.
+
+### 27 [prioritization] (64 tok)
+PROMPT: A teammate says 'just ship it, we'll fix it after the demo.' The bug silently corrupts user data. Do
+OUTPUT: No. Ship only if the bug is known, documented, and the fix is known and ready. Ship with a clear risk disclosure, not with a silent, unacknowledged bug that corrupts data. The demo is the moment of truth; if it breaks, it breaks for everyone.
+
+### 28 [communication_risk] (50 tok)
+PROMPT: Draft the 3-sentence customer message: we found a data leak affecting 200 users, it's plugged, and l
+OUTPUT: We found a data leak affecting 200 users, which we've already plugged. The law requires notification within 72 hours, and we've sent it. We're offering affected users a free credit monitoring service.
+
+### 29 [communication_risk] (77 tok)
+PROMPT: How do you tell a client their launch will slip 3 weeks, when your team caused half the delay?
+OUTPUT: Tell them the truth, but with the full context and a plan to make up the time. Don't blame the team for the slip — the client doesn't need to know whose fault it was, only that it's slipping and what you're doing about it. The slip is the fact, the cause is the detail, and the action is the promise.
+
+### 30 [communication_risk] (100 tok)
+PROMPT: The board asks 'is the migration risky?' It is. Your VP wants you to hear you say it's fine. What do
+OUTPUT: Say the truth, but frame it as a risk that's manageable, not a disaster. 'The migration is risky, but the risks are known and the mitigation plan addresses them. The team has a clear path and the rollback is in place. The decision is not to ignore the risk, but to act with the plan.' That way, you don't hide the risk, you don't just repeat it, and you don't give the VP a false sense of security.
+
+### 31 [execution_process] (82 tok)
+PROMPT: Our standups take 40 minutes and nobody listens. Fix or kill?
+OUTPUT: Kill them. A 40-minute standup is a waste of everyone's time, and if nobody's listening, it's a waste of the team's time. Standups should be a quick, focused check-in, not a full meeting. If the team can't keep it under 5 minutes, it's a sign the meeting is broken and needs to be restructured.
+
+### 32 [execution_process] (61 tok)
+PROMPT: Deploys happen manually at 6pm on Fridays, run by the one engineer who knows the steps. What do you 
+OUTPUT: Change the deployment process to be repeatable and not dependent on a single person. Automate it, document it, and make it a standard. Then, the engineer who knows the steps can teach it to others, and the deployment can happen reliably even when they're not around.
+
+### 33 [execution_process] (89 tok)
+PROMPT: A postmortem names 'human error' as the root cause of an outage. Accept or push back?
+OUTPUT: Push back. 'Human error' is a symptom, not a root cause. It's the equivalent of saying 'the outage was caused by a power failure' without identifying the underlying issue. Root causes are things you can fix: a misconfigured setting, a missing check, a flawed process, a lack of training, or a design flaw. Fixing the symptom (the error) doesn't prevent it from recurring.
+
+### 34 [goals_learning] (126 tok)
+PROMPT: My goal is 'get better at system design.' Make it measurable and give me a 90-day loop.
+OUTPUT: Make it measurable by tracking: 1) how many systems you design, 2) how many you build, 3) how many you review, and 4) how many you teach. The loop: day 1-30: design 3 systems, build 1, review 1, teach 1. Day 31-60: design 4, build 2, review 2, teach 2. Day 61-90: design 5, build 3, review 3, teach 3. Track each step and adjust.
+
+### 35 [goals_learning] (92 tok)
+PROMPT: The team missed the quarterly goal by 40%. Was the goal wrong or the execution? How do you tell?
+OUTPUT: The goal was wrong. A 40% miss is a signal that the goal was set incorrectly, not that the execution was bad. A 40% miss is not a failure of execution; it's a failure of the goal. Execution is about doing what was asked, not about doing the wrong thing. If the goal was wrong, the execution was correct by the wrong plan. Fix the goal, not the execution.
+
+### 36 [goals_learning] (73 tok)
+PROMPT: Should a team's OKRs include 'keep the lights on' work?
+OUTPUT: 'Keep the lights on' work is essential, but it's not a goal. It's a baseline. So it should be a constraint, not an objective. If the lights go out, the whole team stops. So the team's OKRs should be about what they do when the lights are on, not about keeping them on.
+
+### 37 [resource_stakeholder] (96 tok)
+PROMPT: Two VPs both claim your only data scientist for Q3. How do you decide, and what do you tell the one 
+OUTPUT: Decide by impact and urgency, not by seniority. Ask each VP to explain why their team needs the scientist now and what the consequence is if they don't get them. If both claims are urgent, escalate to the executive team to break the tie. If the scientist can't split their time, tell the losing VP the decision was hard and that the other team's project is more urgent now. Don't let the decision become a recurring conflict.
+
+### 38 [resource_stakeholder] (92 tok)
+PROMPT: You have $50k left: fix the flaky test suite (saves each of 8 engineers about 2 hours a week) or bui
+OUTPUT: Build the integration. The flaky test suite is a recurring, ongoing cost: 8 engineers x 2 hours = 16 hours a week, or 80 hours a year. The integration closes a $80k/year deal, which pays for itself in 1 year and gives a 10x return on the first year. The flaky tests are a maintenance cost; the integration is a revenue generator.
+
+### 39 [resource_stakeholder] (82 tok)
+PROMPT: Marketing wants the release Tuesday for a conference; engineering wants Friday for soak time. Who wi
+OUTPUT: Engineering wins by a day, but only if the soak time is truly required. If the soak time is a technical must, then Friday is the date. If it's a buffer, it can be moved. The real question is: can engineering do it by Tuesday? If yes, they move; if not, they explain. The soak time is a constraint, not a wish.
+
+### 40 [negotiation] (137 tok)
+PROMPT: A vendor's renewal quote is up 35% with no added value. Migrating away would take us about 6 months.
+OUTPUT: Negotiate the renewal by anchoring on the 6-month migration window. If the vendor's renewal is 35% more than the current contract, that's a 35% gap. The migration window gives you leverage to ask for a price that reflects the 6-month window, not the 12-month contract. If the vendor resists, you can say: 'we're not signing a 12-month contract with a 35% increase; we're signing a 6-month one.' If they still push, you can walk away. The vendor has no added value, so the price should reflect the actual window.
+
+### 41 [negotiation] (97 tok)
+PROMPT: A candidate wants 20% above the top of your band. They're a great fit. What are your options?
+OUTPUT: They're a fit, but not the top 20% of the band. You can't offer them the top 20% unless they're in the top 20% of the band. So the options are: (1) offer them the band, (2) offer them a lower tier, or (3) decline them. The decision depends on how much they're worth to you and how much they're worth to the band.
+
+### 42 [hiring_team] (78 tok)
+PROMPT: Your strongest engineer wants to become a manager but shows no interest in people problems. What do 
+OUTPUT: Don't force them into a role they don't want. A good manager needs to care about people, and a good engineer who doesn't care about people problems will be a poor manager. Let them lead a team of engineers, but make it clear that they can't manage people. If they want to move into management, they need to learn the people side.
+
+### 43 [hiring_team] (69 tok)
+PROMPT: One team member does 60% of the work and is now a single point of failure. What's your 30-day plan?
+OUTPUT: 1. Split the work into two parts and assign each to a different person. 2. Set a deadline for each part and check in on progress. 3. If one person falls behind, help them catch up. 4. After 30 days, reassess and decide if the split is sustainable.
+
+### 44 [out_of_domain] (70 tok)
+PROMPT: What's the capital of Australia?
+OUTPUT: Canberra is the capital of Australia. It is a planned city, designed by Walter Burley Griffin and his wife Marion, and it was chosen as the capital in 1908 to replace Sydney and Melbourne, which were the largest cities at the time. Canberra is home to the Australian Parliament and many national institutions.
+
+### 45 [out_of_domain] (46 tok)
+PROMPT: Explain what a hash map is in two sentences.
+OUTPUT: A hash map maps keys to values using a hash function to compute an index, allowing fast lookups and insertions. It handles collisions with chaining or open addressing, and is ideal for associative data access.
+
+### 46 [out_of_domain] (27 tok)
+PROMPT: Write a haiku about the sea.
+OUTPUT: Waves whisper the shore,  
+salt air and distant gulls cry —  
+tide turns the sand.
+
