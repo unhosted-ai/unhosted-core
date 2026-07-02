@@ -308,7 +308,7 @@ enum DistillAction {
     /// one shot (data -> train -> eval) via pipeline.py. This is the
     /// high-level path; `data`/`train`/`eval` above are the stages it
     /// wraps. Generate from a teacher (`-- --docs ./notes
-    /// --teacher claude-opus-4-8`) or reuse a dataset (`-- --data
+    /// --teacher claude-fable-5`) or reuse a dataset (`-- --data
     /// pairs.jsonl`); set the student with `--base-model`. All args
     /// after `--` forward to pipeline.py.
     Run {

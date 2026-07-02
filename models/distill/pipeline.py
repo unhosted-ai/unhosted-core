@@ -17,7 +17,7 @@ Usage:
 
   # Bigger student model on a GPU machine:
   python pipeline.py --docs path/to/docs --out-dir runs/my-run \\
-      --teacher claude-opus-4-8 \\
+      --teacher claude-fable-5 \\
       --base-model Qwen/Qwen2.5-7B-Instruct
 
   # Resume an interrupted run (skips completed stages):
@@ -69,7 +69,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--teacher",
                    default=os.environ.get("DISTILL_TEACHER_MODEL", "default"),
                    help="Teacher model. 'default' = local unhosted daemon. "
-                        "'claude-opus-4-8', 'claude-sonnet-4-6' = Anthropic SDK. "
+                        "'claude-fable-5', 'claude-opus-4-8' = Anthropic SDK. "
                         "Any other string = OpenAI-compat model name.")
     p.add_argument("--base-model",
                    default="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
