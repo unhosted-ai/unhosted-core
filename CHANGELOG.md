@@ -6,6 +6,16 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+## [0.0.79] — 2026-07-13
+
+### Added
+
+- **Cognitive Twin persona layer.** The agent can now speak in a configurable
+  persona: a persona prompt is layered into the system context, editable from
+  the web UI (Cognitive Twin sidebar → persona editor). Includes a cloned-voice
+  bridge with daemon routes and voice upload, so spoken replies can use a
+  user-provided voice.
+
 ### Changed
 
 - **Catalog-driven P2P is now live (ADR-0014).** All seven curated catalog
@@ -18,6 +28,20 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
   `sha256: None`, which left peer sourcing dormant for catalog downloads. A
   new test (`every_catalog_entry_has_a_pinned_digest`) keeps future entries
   from silently re-disabling it.
+
+- **Swarm seeding activity metrics** — the daemon now surfaces peer-pull counts
+  so seeding shows as working, not just capable.
+
+- **Dependency refresh** — 75 semver-compatible bumps across the workspace,
+  including the network/TLS/QUIC stack behind the swarm transport (rustls,
+  quinn, h2, webpki-roots).
+
+### Internal
+
+- **Core/app module seam + crate extraction.** The monolith was split along a
+  clean seam into `unhosted-core-base` (shared kernel) and `unhosted-agent`
+  (agent logic), leaving `unhosted-core` as the daemon engine. No behavior
+  change — groundwork for the desktop/OS/mobile products that share the core.
 
 ## [0.0.78] — 2026-06-13
 
