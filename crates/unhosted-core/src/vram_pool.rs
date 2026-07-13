@@ -142,7 +142,12 @@ pub fn local_memory() -> Option<MemoryInfo> {
             .args(["-n", "hw.memsize"])
             .output()
             .ok()
-            .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse::<u64>().ok())?;
+            .and_then(|o| {
+                String::from_utf8_lossy(&o.stdout)
+                    .trim()
+                    .parse::<u64>()
+                    .ok()
+            })?;
         // Free memory: `vm_stat` reports page counts; page size is 16384 on
         // Apple Silicon, 4096 on Intel. Parse the page size from the header.
         let available = (|| {
@@ -158,14 +163,20 @@ pub fn local_memory() -> Option<MemoryInfo> {
             let mut free_pages = 0u64;
             for line in text.lines() {
                 // "Pages free:" + "Pages inactive:" approximate reclaimable RAM.
-                if let Some(rest) = line.strip_prefix("Pages free:").or_else(|| line.strip_prefix("Pages inactive:")) {
+                if let Some(rest) = line
+                    .strip_prefix("Pages free:")
+                    .or_else(|| line.strip_prefix("Pages inactive:"))
+                {
                     let n: u64 = rest.trim().trim_end_matches('.').parse().ok()?;
                     free_pages += n;
                 }
             }
             Some(free_pages * page_size)
         })();
-        return Some(MemoryInfo { total_bytes: total, available_bytes: available });
+        return Some(MemoryInfo {
+            total_bytes: total,
+            available_bytes: available,
+        });
     }
     #[cfg(target_os = "linux")]
     {
@@ -174,12 +185,23 @@ pub fn local_memory() -> Option<MemoryInfo> {
         let mut available = None;
         for line in meminfo.lines() {
             if let Some(rest) = line.strip_prefix("MemTotal:") {
-                total = rest.split_whitespace().next().and_then(|n| n.parse::<u64>().ok()).map(|kb| kb * 1024);
+                total = rest
+                    .split_whitespace()
+                    .next()
+                    .and_then(|n| n.parse::<u64>().ok())
+                    .map(|kb| kb * 1024);
             } else if let Some(rest) = line.strip_prefix("MemAvailable:") {
-                available = rest.split_whitespace().next().and_then(|n| n.parse::<u64>().ok()).map(|kb| kb * 1024);
+                available = rest
+                    .split_whitespace()
+                    .next()
+                    .and_then(|n| n.parse::<u64>().ok())
+                    .map(|kb| kb * 1024);
             }
         }
-        return total.map(|t| MemoryInfo { total_bytes: t, available_bytes: available });
+        return total.map(|t| MemoryInfo {
+            total_bytes: t,
+            available_bytes: available,
+        });
     }
     #[allow(unreachable_code)]
     None

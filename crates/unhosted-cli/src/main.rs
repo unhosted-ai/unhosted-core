@@ -1018,7 +1018,7 @@ async fn survey_memory(requested: &[String]) -> Result<()> {
     // Which peers to query: the requested set, or all paired peers.
     let registry = PeerRegistry::load().context("loading peer registry")?;
     let targets: Vec<_> = if requested.is_empty() {
-        registry.peers.iter().cloned().collect()
+        registry.peers.to_vec()
     } else {
         registry
             .peers
@@ -1063,7 +1063,10 @@ async fn survey_memory(requested: &[String]) -> Result<()> {
                 }
             }
             Ok(r) => println!("  {:<16} : unreachable (HTTP {})", peer.name, r.status()),
-            Err(_) => println!("  {:<16} : unreachable (no response at {})", peer.name, peer.addr),
+            Err(_) => println!(
+                "  {:<16} : unreachable (no response at {})",
+                peer.name, peer.addr
+            ),
         }
     }
 
@@ -1142,7 +1145,9 @@ fn vram_pool_fit(model: Option<&str>, size_gb: Option<f64>, headroom_gb: f64) ->
             println!("      memory probing is not implemented yet, so treat as a ballpark.)");
         } else {
             println!("     this machine has no usable memory headroom to anchor an estimate;");
-            println!("     enlist peers and try `unhosted vram-pool start --model <m> --peers <…>`.");
+            println!(
+                "     enlist peers and try `unhosted vram-pool start --model <m> --peers <…>`."
+            );
         }
         println!();
         println!("     next: `unhosted vram-pool detect` to confirm RPC capability, then");
@@ -1210,7 +1215,10 @@ fn total_ram_bytes() -> Option<u64> {
             .args(["-n", "hw.memsize"])
             .output()
             .ok()?;
-        return String::from_utf8_lossy(&out.stdout).trim().parse::<u64>().ok();
+        return String::from_utf8_lossy(&out.stdout)
+            .trim()
+            .parse::<u64>()
+            .ok();
     }
     #[cfg(target_os = "linux")]
     {

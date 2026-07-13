@@ -356,7 +356,10 @@ pub fn scan_models(dir: &std::path::Path) -> Vec<InstalledModel> {
 
 /// LM Studio's models tree (`~/.lmstudio/models`), when it exists.
 pub fn lmstudio_models_dir() -> Option<PathBuf> {
-    let dir = crate::paths::home_dir().ok()?.join(".lmstudio").join("models");
+    let dir = crate::paths::home_dir()
+        .ok()?
+        .join(".lmstudio")
+        .join("models");
     dir.is_dir().then_some(dir)
 }
 
