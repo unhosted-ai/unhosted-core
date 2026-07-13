@@ -11,3 +11,9 @@ wandb/
 
 # OS noise.
 .DS_Store
+
+# Model weights and local eval runs — never in git (HF Hub instead).
+runs/
+helmsman-4b/
+gguf/
+*.gguf

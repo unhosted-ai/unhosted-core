@@ -4472,22 +4472,30 @@ if (els.bugReportCopyDiagnostics) {
         }
         refresh();
       });
-      const delBtn = actionBtn("delete", { danger: true, disabled: isActive });
-      delBtn.addEventListener("click", async () => {
-        if (!confirm(`delete ${m.file} from disk?`)) return;
-        try {
-          await api(`/v1/models/file/${encodeURIComponent(m.file)}`, { method: "DELETE" });
-          notify(`${m.file} deleted`, { level: "success", duration: 2200 });
-        } catch (e) {
-          notify(`delete failed: ${e.message}`, { level: "error" });
-        }
-        refresh();
-      });
+      // LM Studio discoveries are loadable in place but not ours to
+      // delete — no delete button for them, and the row says where
+      // the file lives.
+      const fromLmStudio = m.source === "lm_studio";
+      const buttons = [loadBtn];
+      if (!fromLmStudio) {
+        const delBtn = actionBtn("delete", { danger: true, disabled: isActive });
+        delBtn.addEventListener("click", async () => {
+          if (!confirm(`delete ${m.file} from disk?`)) return;
+          try {
+            await api(`/v1/models/file/${encodeURIComponent(m.file)}`, { method: "DELETE" });
+            notify(`${m.file} deleted`, { level: "success", duration: 2200 });
+          } catch (e) {
+            notify(`delete failed: ${e.message}`, { level: "error" });
+          }
+          refresh();
+        });
+        buttons.push(delBtn);
+      }
       els.installedList.appendChild(
         modelRow({
           name: m.file,
-          sub: humanBytes(m.size_bytes),
-          buttons: [loadBtn, delBtn],
+          sub: humanBytes(m.size_bytes) + (fromLmStudio ? " · from LM Studio" : ""),
+          buttons,
           active: isActive,
         }),
       );

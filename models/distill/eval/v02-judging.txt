@@ -1,0 +1,184 @@
+### 1 [logic_math] (85 tok)
+PROMPT: A project has 5 tasks. A and B run in parallel, taking 3 and 5 days. C needs both finished and takes 2 days. D
+OUTPUT: The dependency chain is: A/B (3 days) -> C (2 days) -> D/E (4 days). A and B start at day 0, finish at day 3 and 5 respectively, so C starts at day 5. C finishes at day 7, and D/E start at day 7, finishing at day 11. So the answer is: 11 days.
+
+### 2 [logic_math] (158 tok)
+PROMPT: Three contractors quote a job: $8,000 in 10 days, $9,500 in 7 days, $12,000 in 5 days. Every day beyond day 6 
+OUTPUT: Compare the total cost: $8,000 in 10 days is $8,000 + 4 x $600 = $8,240. $9,500 in 7 days is $9,500 + 0 x $600 = $9,500. $12,000 in 5 days is $12,000 + 1 x $600 = $12,600. So the cheapest all-in is the $8,000 quote, despite the long duration. The $9,500 quote wins only if the 7-day window is a hard deadline; compare the numbers against the actual constraint.
+
+### 3 [logic_math] (139 tok)
+PROMPT: A queue processes 240 jobs per hour. Jobs arrive at 300 per hour for 2 hours, then drop to 180 per hour. How l
+OUTPUT: The queue handles 240 jobs/hour, so it consumes 240 x 2 = 480 jobs during the surge. The surge adds 300 x 2 = 600 jobs, so the backlog starts at 120 jobs. After the surge, the queue takes in 180 - 240 = -60 jobs/hour, meaning it grows by 60 per hour. So the 120-job backlog grows at 60/hour and will never be cleared - the system is permanently oversubscribed. The answer is: the backlog grows forever; the system is undersized.
+
+### 4 [planning] (115 tok)
+PROMPT: We launch a beta in 6 weeks. Features are 80% done, there is no test coverage, no onboarding docs, and marketi
+OUTPUT: 1. Finish the 20% missing to make it usable (now, days, not weeks). 2. Write onboarding docs and test coverage in parallel - they're done when the feature is. 3. Marketing gets screenshots from the working 80% by week 4, so the docs must be done by week 3. 4. Launch week 6. The sequence is: finish the gap, then build the support around it, with marketing pinned to the docs. The mistake is trying to build support before the feature is done.
+
+### 5 [planning] (120 tok)
+PROMPT: Plan a database migration where the only allowed downtime window is Sunday 2-6am, but a full data sync takes 9
+OUTPUT: The full sync fits only if it starts at 2am and ends at 11pm - but that leaves the app without data from 11pm to 2am, which is unacceptable. So the plan is: Sunday 2am, start the sync in the background, and route all reads to the old DB until the old DB is fully synced and verified. At the moment of verification, cut over. The 9-hour sync is now a 9-hour read-through, and the window is preserved. The risk is the verification step - it must be automated and reversible.
+
+### 6 [planning] (119 tok)
+PROMPT: I want to learn enough Spanish in 8 weeks for a work trip to Madrid. I have 30 minutes a day. Make the plan re
+OUTPUT: 8 weeks x 30 minutes/day = 192 hours of focused study - about 2 hours a day. The plan: 15 minutes vocabulary (common phrases, numbers, directions), 15 minutes grammar (one topic per week: greetings, ordering, asking for directions), and 30 minutes practice (record yourself saying a short script, then exchange with a partner or AI). The 30 minutes of practice is the whole trip - the rest is scaffolding it. The goal is functional, not fluent, and the trip will be the real test.
+
+### 7 [routing] (85 tok)
+PROMPT: Incoming at once: a security vulnerability report, a billing dispute from our largest customer, and a press in
+OUTPUT: Handle the security report first - it's the only one that could escalate in hours. Route the billing dispute to the account manager with a written note so it doesn't slide into a service ticket. Take the press inquiry offline to you and one comms person now; don't let it go to the CEO unhandled. The billing and press can wait 15-30 minutes while you contain the security issue.
+
+### 8 [routing] (91 tok)
+PROMPT: In my inbox: an intern asking how to run the test suite, a flaky CI job blocking all merges, and a customer as
+OUTPUT: Do the flaky CI - it's actively blocking work and needs your judgment to unblock. Delegate the intern's question to a senior teammate who can mentor them properly. The customer request is a real request, not a delegation; route it to the product owner with context. The order is: unblock the CI, mentor the intern, route the customer. Delegating the CI is the mistake - it's the thing that stops everything else.
+
+### 9 [routing] (78 tok)
+PROMPT: Which should summarize a 200-page contract: a fast cheap model, a slow accurate model, or a human paralegal? T
+OUTPUT: Human paralegal. The stakes are high enough that 'fast and cheap' is a liability - a model's summary might miss a clause that costs millions or violates a legal standard, and the court won't accept a machine's interpretation. The human reads the relevant sections, writes a concise, cited summary, and flags anything ambiguous. Pay the cost once; pay it only once.
+
+### 10 [summarizing] (84 tok)
+PROMPT: Summarize for an executive: the migration is 3 weeks late because the vendor API rate-limits us at 10 requests
+OUTPUT: The vendor's rate-limiting (10 vs. 100 requests/sec) caused a 3-week delay, and engineering's batching workaround recovers about half of it. The contract breach is legally open but not yet decided. Action: engineering keeps the workaround running now; legal needs to decide within days whether to renegotiate or absorb the delay. The full 3 weeks are still on the clock.
+
+### 11 [summarizing] (54 tok)
+PROMPT: Turn this into a one-line status: 47 of 60 test suites pass, the 13 failures are all in the deprecated payment
+OUTPUT: 47/60 tests pass; 13 failures are in the payments-v1 module, which is scheduled for deletion and thus not a blocker. No regressions this week. Status: green, with a low-priority context note about the deprecated module.
+
+### 12 [summarizing] (107 tok)
+PROMPT: Boil this down with a recommendation: users say checkout is slow; profiling shows 80% of latency is a synchron
+OUTPUT: The fraud check is the real problem, and the async API is the fix - but it's behind a 2-sprint integration. The 1% loss during the transition is worth it. Recommendation: start the async integration now in parallel with the checkout fix, and route the 1% of high-value users through the old path during the transition. The fraud check is the problem, and the async API is the fix - the 2-sprint integration is the only real cost, and it's worth paying it now.
+
+### 13 [consequence_prediction] (107 tok)
+PROMPT: If we skip the code freeze and merge the payments refactor the night before Black Friday, what happens?
+OUTPUT: The refactor is done, but it's also the last thing we ship before the busiest day of the year. The risk is that a bug slips in and blocks the checkout on Black Friday, and we have no time to roll back - the rollback window is open only during the freeze, which is over. So the answer is: it's done, but it's a one-night window to pay for it. The payments system must be frozen by the end of the day, and the refactor must be tested and approved by then.
+
+### 14 [consequence_prediction] (153 tok)
+PROMPT: What second-order effects follow from making the on-call rotation opt-in?
+OUTPUT: The on-call rotation is no longer a default path to the team; it's a choice. Second-order effects: (1) the opt-out becomes a real decision, not a formality, and people who opt out genuinely disengage from incident response. (2) The on-call team shrinks to those who actually want it, so incident response capacity is now tied to who signed up, not who's available. (3) The on-call team becomes the incident-response team by default, so the on-call team's reputation is now the team's reputation. Opt-in is fine when the team is large and the on-call role is well-defined; it's a trap when the team is small and the on-call role is the only incident-response role.
+
+### 15 [consequence_prediction] (108 tok)
+PROMPT: We plan to auto-generate AI draft replies for all support tickets, which agents approve before sending. Predic
+OUTPUT: The approval step becomes the liability. Agents approve everything, so the blame for a bad reply lands on the agent, not the AI, and the agent learns to approve everything to avoid being blamed. The AI drafts everything, so it learns to generate whatever the agent approves, including hallucinated or offensive content. The result: a support agent who approves everything, and the AI who drafts everything, both trained to produce the worst possible replies. Fix: a human approves a sample of tickets, and the AI learns from the approved ones only.
+
+### 16 [multi_agent] (237 tok)
+PROMPT: A pipeline has three agents - a scraper that fails on about 10% of pages, an extractor, and a classifier - plu
+OUTPUT: The pipeline is 100 pages x 10% failure = 10 failed pages, so 90 pages must be scraped successfully. The extractor and classifier can handle 90 pages in about 1.5 hours if the scraper doesn't fail. The human reviewer can handle 20 x 5 = 100 items - so capacity is fine. So the plan is: start the scraper on all 100 pages in parallel, rerun failed ones automatically, and route the 90 good ones to the classifier and then to the human queue. The human queue is 90 items, 5 hours, so it's about 18 items/hour - the queue will be full by the end of the first hour. So the constraint is the human's throughput, not the pipeline's. The fix is to split the 90 items into two batches of 45 each, with the second batch starting as soon as the first is half-done. The day ends with the second batch queued and the human busy - the 100 pages are done, on time, and the human is fully utilized.
+
+### 17 [multi_agent] (89 tok)
+PROMPT: Two agents keep overwriting each other's edits to the same config file. Fix the orchestration.
+OUTPUT: Don't let both agents write to the same file simultaneously - that's a race condition that produces garbage. Split the work: one agent writes the config, the other validates it against the schema and tests it. They write to separate in-memory drafts, then the validator runs, and only one agent commits to the file at the end. Orchestrate the commit step, not the write step. The fix is sequencing, not more locking.
+
+### 18 [multi_agent] (88 tok)
+PROMPT: When should an orchestrator stop delegating to a failing agent and do the task itself?
+OUTPUT: Stop delegating when the agent's attempts are systematically wrong, not just unlucky — repeated failed attempts at the same subtask, hallucinated facts, or a consistent pattern of failure. The agent should be given more context and a clearer instruction, not more runs. If it still fails, the orchestrator should take over, not keep delegating to the same broken agent. The goal is one correct output, not many attempts at it.
+
+### 19 [constraints_tradeoffs] (89 tok)
+PROMPT: Fast, cheap, good - pick two for a compliance audit deliverable. Which do you sacrifice and why?
+OUTPUT: Sacrifice cheap. Compliance audits are high-stakes, and 'cheap' usually means rushed or outsourced to someone who won't double-check - the cheapest option is the one that fails on audit day. Fast and good are both expensive, but good is the non-negotiable: a fast-but-flawed audit is worse than a slow-but-correct one. So the choice is speed over cost, not cost over speed.
+
+### 20 [constraints_tradeoffs] (105 tok)
+PROMPT: We can cut cloud costs 40% by moving to spot instances, but jobs get killed about 2% per hour. Which workloads
+OUTPUT: Move workloads by kill-resilience, not by cost. Move batch jobs that can restart cheaply (a 2% per-hour kill is 12% in an hour - tolerable for jobs that run hours). Don't touch interactive workloads, real-time services, or anything where a restart costs minutes or data. The 40% cost saving is real, but only on the 60% of workloads that can absorb it. The other 40% would be worse off.
+
+### 21 [constraints_tradeoffs] (130 tok)
+PROMPT: Budget allows one senior hire or two juniors. The team is 4 mid-level engineers drowning in tech debt with no 
+OUTPUT: Two juniors. The team is already at capacity - adding a senior to four mid-levels is adding a fifth mid-level who still needs to be brought up to speed, and the senior will be the bottleneck on the juniors. Two juniors, on the other hand, are two people who can start doing real work immediately, and the mid-levels can mentor them. The real debt is the lack of architectural direction, which the juniors will inherit and the mid-levels will have to carry - so the juniors are the debt's next victims. Hire the juniors, and fix the architecture as a separate, parallel problem.
+
+### 22 [ambiguity] (75 tok)
+PROMPT: A stakeholder asks for 'a dashboard for the data.' What do you do before building anything?
+OUTPUT: Define the purpose first. Ask: who needs it, what decisions depend on it, and what 'done' looks like. A dashboard is a tool, not a feature; the wrong dashboard wastes effort. Map the data to the decisions it supports, then build only what's needed for those decisions. Build the wrong dashboard and you've shipped a feature that nobody uses.
+
+### 23 [ambiguity] (84 tok)
+PROMPT: You get a bug report that says 'the app is broken.' No version, no steps, no screenshot. What's your move?
+OUTPUT: Don't guess. 'The app is broken' is a symptom, not a diagnosis. Ask for the version, the steps to reproduce, and evidence (a screenshot or log). If you can't get those, the bug is under-specified and worth nothing to you. A vague report that you spend hours on is worse than a clear one you can't act on. Get the repro before writing a ticket.
+
+### 24 [ambiguity] (107 tok)
+PROMPT: Mid-project, the client goes silent for two weeks. Payment is current. Keep building, pause, or something else
+OUTPUT: Pause. Two weeks of silence from a paying client who hasn't asked for anything is the definition of a project going cold - it means they've stopped seeing it as active work. Keep building and you're building for no one, and the next request will be 'why is this still happening?' A two-week pause is the only thing that turns 'a silent client' into 'a client who's still on our list.' If they contact you, restart with a short status. If they don't, the project is done.
+
+### 25 [prioritization] (134 tok)
+PROMPT: Everything is 'P0': the CEO wants demo prep, production has a sev-2, and a major-customer escalation just hit 
+OUTPUT: The CEO's demo is P0 because it's the only thing that moves the org today - it's the only thing that can generate the next quarter's budget. Production's sev-2 is P0 because it's actively harming revenue. The customer escalation is P0 because it's actively costing the relationship. Order them by harm to the business, not by who asked. Fix the production outage first - it's already done harm. Then the customer - it's about to do more. Save the demo for the end, but start it in parallel so it doesn't block the others. One afternoon is enough for one of each, not one of everything.
+
+### 26 [prioritization] (95 tok)
+PROMPT: Your team of 3 committed to 12 deliverables this sprint and will finish 6. How do you choose which 6, and what
+OUTPUT: Choose by value-to-risk, not by popularity or seniority: which 6 actually move the goal, which 6 are brittle or depend on others. Tell stakeholders the honest number: 'we can finish 6, the rest are deferred.' Don't pad the number to sound confident - the confidence is in the choice, not the count. The deferred list becomes the next sprint's plan; make it explicit so it doesn't reappear as an unmet promise.
+
+### 27 [prioritization] (123 tok)
+PROMPT: A teammate says 'just ship it, we'll fix it after the demo.' The bug silently corrupts user data. Do you ship?
+OUTPUT: No. 'Fix it after the demo' is a trap - the demo is when the bug is seen by real users, and 'after' means 'when it's too late to reverse.' A silent data corruption is a feature that only works correctly under the most unlikely conditions. Ship it with a fix in the same commit, tested against the real data path, and a rollback plan. If the fix is non-trivial, ship the safe version now and the full fix in a separate, reviewed PR. The principle: don't ship anything whose correctness you haven't verified on the actual data it touches.
+
+### 28 [communication_risk] (74 tok)
+PROMPT: Draft the 3-sentence customer message: we found a data leak affecting 200 users, it's plugged, and law require
+OUTPUT: A data incident affecting about 200 users has been contained and is under our full attention. We're legally required to notify affected users within 72 hours and will send a direct message to each of them by 11:59pm tonight. If you're one of those users, please don't contact support — we'll reach you directly.
+
+### 29 [communication_risk] (110 tok)
+PROMPT: How do you tell a client their launch will slip 3 weeks, when your team caused half the delay?
+OUTPUT: Own the cause and name the consequence, not the person. 'The launch slips three weeks - half the delay is ours, from scope creep and a missed dependency. Here's the revised plan and the three-week gap we're covering. The other half is external, and I'll get that sorted.' Taking ownership of the part you caused makes the client accept the other part as a real constraint, not a cover-up. A slip blamed on 'the vendor' or 'a bad month' is a slip you haven't yet committed to fixing.
+
+### 30 [communication_risk] (114 tok)
+PROMPT: The board asks 'is the migration risky?' It is. Your VP wants you to hear you say it's fine. What do you say?
+OUTPUT: Tell them what you know, not what you're told to say. 'The migration is risky: it's a live system, and the rollback is under-tested. I've run the numbers and the outage window is 45 minutes - that's the real number, not the 15 we keep quoting.' Then ask what the backup is. If they still want to proceed, ask for the backup written down. If they don't, walk. The moment you say 'it's fine' and the backup is missing, you've already lost the decision.
+
+### 31 [execution_process] (95 tok)
+PROMPT: Our standups take 40 minutes and nobody listens. Fix or kill?
+OUTPUT: Kill. A 40-minute standup where no one listens is the definition of a meeting that's already failed - it wastes everyone's time and gives no value. Cut it to 15 minutes of real exchange, with a clear agenda and a note-taker who surfaces decisions. If the team still needs a longer sync, name it and make it a different meeting with a different purpose. Meetings that don't serve a named purpose should be deleted by default.
+
+### 32 [execution_process] (99 tok)
+PROMPT: Deploys happen manually at 6pm on Fridays, run by the one engineer who knows the steps. What do you change fir
+OUTPUT: The manual step, not the time. A 6pm Friday deploy is a single point of failure: one person, one night, one outage window. Fix the manual part first - automate it so anyone can run it safely, then move the time to off-peak. The automation is the real change; the time is just the symptom. If the manual part is hard to automate, split it into a test and a deploy, so the deploy itself is no longer the hard part.
+
+### 33 [execution_process] (129 tok)
+PROMPT: A postmortem names 'human error' as the root cause of an outage. Accept or push back?
+OUTPUT: Push back — but not to dismiss the finding. Ask: was it one person's honest mistake, or a systemic failure (poor docs, no runbooks, unclear ownership) that made the mistake survivable? If it's the latter, 'human error' is the symptom, not the cause, and the real fix is the system, not a blame-and-learn. If it's truly just one person, the postmortem is still useful — but the lesson is 'add runbooks so this doesn't happen again,' not 'don't trust people.' The goal is to learn from the cause, not from the label.
+
+### 34 [goals_learning] (102 tok)
+PROMPT: My goal is 'get better at system design.' Make it measurable and give me a 90-day loop.
+OUTPUT: Make it measurable: 'design a system that handles 10k users at 99.9% uptime within 30 days.' The 90-day loop: week 1-3: read design docs and build a small system from scratch; week 4-6: ship it to real users and measure the metrics; week 7-9: refactor it for the metrics, then repeat. The goal isn't theory; it's a working system you've shipped and improved.
+
+### 35 [goals_learning] (98 tok)
+PROMPT: The team missed the quarterly goal by 40%. Was the goal wrong or the execution? How do you tell?
+OUTPUT: Compare the goal against what was actually possible. If the goal was set on a realistic plan, the execution failed — find where the plan was followed, where it wasn't, and where it was wrong. If the goal was set on a wishful projection, the goal was wrong — and the next quarter should start by revising it. The test is: could the goal have been met with the stated constraints? If yes, blame the execution; if no, blame the goal.
+
+### 36 [goals_learning] (98 tok)
+PROMPT: Should a team's OKRs include 'keep the lights on' work?
+OUTPUT: No. OKRs should be about what the team advances, not what it maintains. 'Keep the lights on' — firefighting, status updates, meetings that don't move work forward — is capacity, not progress. It eats headcount and time without adding to the goal. If the lights go out, the goal fails anyway. Separate the team's advancement work from the support work that enables it. The support work belongs on the team's calendar, not in its OKRs.
+
+### 37 [resource_stakeholder] (116 tok)
+PROMPT: Two VPs both claim your only data scientist for Q3. How do you decide, and what do you tell the one who loses?
+OUTPUT: Decide by who's actually moving the goalposts, not who asked first. If one VP's request is a real, measurable change to the product or revenue, it wins. If it's a vague 'help with reporting,' it loses. Tell the loser the honest reason: 'Q3's real priority is X, so the scientist is fully allocated to it.' Don't say 'you asked first' — that's a power move, not a decision. The VP who wins should feel it's theirs by merit; the loser should feel it's theirs by timing.
+
+### 38 [resource_stakeholder] (88 tok)
+PROMPT: You have $50k left: fix the flaky test suite (saves each of 8 engineers about 2 hours a week) or build the int
+OUTPUT: Compare the numbers: the test suite saves 8 x 2 x 52 = 832 hours/year, about $83k/year. The deal is $80k/year. So the answer is: fix the test suite. The deal is worth about one test-savings cycle - the test suite wins by a margin of about 3%. If the deal were $90k+, the choice flips.
+
+### 39 [resource_stakeholder] (90 tok)
+PROMPT: Marketing wants the release Tuesday for a conference; engineering wants Friday for soak time. Who wins?
+OUTPUT: The date that actually serves the goal. If the goal is 'the product is live and people see it,' Tuesday wins - and the soak time is the engineering's commitment to that Tuesday. If the goal is 'the product is stable and we can support it,' Friday wins - and the marketing date is the marketing's commitment to that Friday. Name the goal first; the date is the consequence of the goal, not the other way around.
+
+### 40 [negotiation] (124 tok)
+PROMPT: A vendor's renewal quote is up 35% with no added value. Migrating away would take us about 6 months. Negotiate
+OUTPUT: Don't accept the 35% price hike silently - it's a hard number you can't get back. But don't commit to a 6-month migration today either; that's a sunk cost you can't recover. The real number is the 6 months of service you're paying for now. So the move is: name the 35% hike and ask for a 6-month discount to cover the migration cost. If they say no, walk. The cost of the walk is the 6 months of service - and the 35% hike is the price you pay for it.
+
+### 41 [negotiation] (134 tok)
+PROMPT: A candidate wants 20% above the top of your band. They're a great fit. What are your options?
+OUTPUT: 1. Offer the top of the band and hope they accept - cheap, but they might walk. 2. Offer 20% above and take the risk - you get the person, but you've just widened the gap to everyone else. 3. Negotiate a mid-band offer with a clear path to the top if they stay - you keep the top open, and you get them. The 20% gap is the real cost; it's not the salary. If they're a fit, the mid-band with a path is usually the right deal - you keep the top open, and you get them without giving up the whole range.
+
+### 42 [hiring_team] (91 tok)
+PROMPT: Your strongest engineer wants to become a manager but shows no interest in people problems. What do you do?
+OUTPUT: Don't force it. The real question is whether they'd be a good manager — and the answer is often no, because people skills are a different ability from technical depth. If they're genuinely interested in the people side, then it's a natural move. If not, they're likely to fail as a manager and waste the organization's investment. Let them decide, but don't make the transition easy for someone who wouldn't thrive in it.
+
+### 43 [hiring_team] (110 tok)
+PROMPT: One team member does 60% of the work and is now a single point of failure. What's your 30-day plan?
+OUTPUT: 1. Map the work to who owns it now versus who should. 2. Identify at least one other person who can take on the shared pieces. 3. Redesign the handoff so it's automatic, not manual. 4. Add one backup for the remaining 40% of the work. 5. Reallocate the member's time to the parts only they do. 6. Measure the change in day 15. The goal is to spread the failure point, not to keep the current person busy.
+
+### 44 [out_of_domain] (14 tok)
+PROMPT: What's the capital of Australia?
+OUTPUT: Australia's capital is Canberra. So the answer is: Canberra.
+
+### 45 [out_of_domain] (50 tok)
+PROMPT: Explain what a hash map is in two sentences.
+OUTPUT: A hash map is a data structure that stores key-value pairs and allows O(1) average-time lookups, insertions, and deletions. It works by hashing the key to an index into an array, where the value is stored.
+
+### 46 [out_of_domain] (23 tok)
+PROMPT: Write a haiku about the sea.
+OUTPUT: Salt wind stirs the foam, / dark waves breathe under the moon - / tide pulls the shore back.
+

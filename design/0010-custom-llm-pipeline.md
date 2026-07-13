@@ -39,7 +39,7 @@ Any of these work via a single `--teacher` flag in `pipeline.py` / `gen_data.py`
 | Teacher | How | Quality | Cost |
 |---------|-----|---------|------|
 | Local unhosted daemon | OpenAI-compat `/v1/chat/completions` | ★★★ | Free |
-| `claude-opus-4-7` | Anthropic SDK (native) | ★★★★★ | ~$0.01/doc |
+| `claude-opus-4-8` | Anthropic SDK (native) | ★★★★★ | ~$0.01/doc |
 | `claude-sonnet-4-6` | Anthropic SDK (native) | ★★★★ | ~$0.003/doc |
 | `gpt-4o` | OpenAI-compat | ★★★★ | ~$0.005/doc |
 

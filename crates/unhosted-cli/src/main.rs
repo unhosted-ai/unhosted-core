@@ -304,6 +304,27 @@ enum DistillAction {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// End-to-end "pick a model and teach it": run the whole recipe in
+    /// one shot (data -> train -> eval) via pipeline.py. This is the
+    /// high-level path; `data`/`train`/`eval` above are the stages it
+    /// wraps. Generate from a teacher (`-- --docs ./notes
+    /// --teacher claude-fable-5`) or reuse a dataset (`-- --data
+    /// pairs.jsonl`); set the student with `--base-model`. All args
+    /// after `--` forward to pipeline.py.
+    Run {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Turn a trained adapter into a runnable GGUF — the last step from
+    /// "training finished" to "I can load this in LM Studio". Merges the
+    /// LoRA into its base, converts to GGUF, quantizes, and (with
+    /// `--install-lmstudio`) drops it into LM Studio's models folder.
+    /// Needs a llama.cpp checkout (`--llama-cpp` or $LLAMA_CPP_DIR). All
+    /// args after `--` forward to export_gguf.py.
+    Export {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -313,6 +334,26 @@ enum VramPoolAction {
     /// Prints a status line plus an install hint pinned to the
     /// actual gap detected. Safe to run with no daemon running.
     Detect,
+    /// Advise whether a model fits in this machine's memory or wants a
+    /// VRAM pool. Estimates the model's memory need (from a cached GGUF,
+    /// a known model's size, or --size-gb), compares it to total RAM
+    /// minus a headroom margin, and prints a recommendation plus a rough
+    /// peer count if pooling is needed. A heuristic, not a guarantee —
+    /// quantization, context length, and KV-cache all move the real
+    /// number. Safe to run with no daemon running.
+    Fit {
+        /// Model name/short-id (e.g. llama3.1:8b), a path to a local
+        /// .gguf, or a full GGUF URL. Used to estimate memory need.
+        #[arg(long)]
+        model: Option<String>,
+        /// Override the model size estimate, in gigabytes. Use when the
+        /// model isn't cached/known and you only know its rough size.
+        #[arg(long)]
+        size_gb: Option<f64>,
+        /// Memory to leave free for the OS and other apps, in gigabytes.
+        #[arg(long, default_value_t = 4.0)]
+        headroom_gb: f64,
+    },
     /// (v0.1.0+ — not yet implemented in this slice.) Start a
     /// layer-split inference cluster across this machine and the
     /// specified peers.
@@ -332,6 +373,17 @@ enum VramPoolAction {
     /// (v0.1.0+ — not yet implemented.) Show cluster topology and
     /// per-peer VRAM utilization. For now reports local capability.
     Status,
+    /// Survey memory across this machine and trusted peers by querying
+    /// each peer's /v1/sysinfo. Reports real per-peer total/available RAM
+    /// and total poolable memory — the data the planner needs to split a
+    /// model across the network instead of assuming peers match this
+    /// machine. Peers that don't answer are shown as unreachable.
+    Survey {
+        /// Peers to query (names from `peer list`). Defaults to all
+        /// paired peers in ~/.config/unhosted/peers.toml.
+        #[arg(long, value_delimiter = ',', num_args = 1..)]
+        peers: Vec<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -678,6 +730,8 @@ fn run_distill(action: DistillAction) -> Result<()> {
         DistillAction::Train { args } => ("train.py", args),
         DistillAction::Eval { args } => ("eval.py", args),
         DistillAction::Push { args } => ("push_to_hub.py", args),
+        DistillAction::Run { args } => ("pipeline.py", args),
+        DistillAction::Export { args } => ("export_gguf.py", args),
     };
     let script_path = locate_distill_script(script)?;
     let python = python_executable();
@@ -820,6 +874,13 @@ async fn run_vram_pool(action: VramPoolAction) -> Result<()> {
         VramPoolAction::Detect => {
             print_capability(&cap);
         }
+        VramPoolAction::Fit {
+            model,
+            size_gb,
+            headroom_gb,
+        } => {
+            vram_pool_fit(model.as_deref(), size_gb, headroom_gb)?;
+        }
         VramPoolAction::Start { model, peers } => {
             // 1. Build the plan locally so a bad request fails before
             //    any HTTP round-trip.
@@ -918,8 +979,253 @@ async fn run_vram_pool(action: VramPoolAction) -> Result<()> {
             }
             return Ok(());
         }
+        VramPoolAction::Survey { peers } => {
+            survey_memory(&peers).await?;
+            return Ok(());
+        }
     }
     Ok(())
+}
+
+/// Query memory across this machine and trusted peers, and report the
+/// total poolable RAM. This is the per-peer probing the VRAM-pool planner
+/// needs — it replaces "assume peers match me" with real numbers read
+/// from each peer's /v1/sysinfo endpoint.
+async fn survey_memory(requested: &[String]) -> Result<()> {
+    use unhosted_core::vram_pool;
+    const GB: f64 = 1_073_741_824.0;
+
+    println!("vram-pool survey — memory across the network\n");
+
+    let mut total_poolable: u64 = 0;
+
+    // Local machine first, read directly (no HTTP round-trip to ourselves).
+    match vram_pool::local_memory() {
+        Some(m) => {
+            total_poolable += m.total_bytes;
+            let avail = m
+                .available_bytes
+                .map(|b| format!("{:.1} GB free", b as f64 / GB))
+                .unwrap_or_else(|| "free unknown".to_string());
+            println!(
+                "  this machine     : {:.1} GB total, {avail}",
+                m.total_bytes as f64 / GB
+            );
+        }
+        None => println!("  this machine     : (memory unreadable on this platform)"),
+    }
+
+    // Which peers to query: the requested set, or all paired peers.
+    let registry = PeerRegistry::load().context("loading peer registry")?;
+    let targets: Vec<_> = if requested.is_empty() {
+        registry.peers.iter().cloned().collect()
+    } else {
+        registry
+            .peers
+            .iter()
+            .filter(|p| requested.contains(&p.name))
+            .cloned()
+            .collect()
+    };
+
+    if targets.is_empty() {
+        println!("\n  no peers to survey (none paired, or none matched --peers).");
+        println!("  pair one with `unhosted pair`, then re-run.");
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .context("building http client")?;
+
+    for peer in &targets {
+        let url = format!("http://{}/v1/sysinfo", peer.addr);
+        match client.get(&url).send().await {
+            Ok(r) if r.status().is_success() => {
+                let v: serde_json::Value = r.json().await.unwrap_or_default();
+                let total = v["memory"]["total_bytes"].as_u64();
+                let avail = v["memory"]["available_bytes"].as_u64();
+                let rpc = v["rpc_capable"].as_bool().unwrap_or(false);
+                match total {
+                    Some(t) => {
+                        total_poolable += t;
+                        let availstr = avail
+                            .map(|b| format!("{:.1} GB free", b as f64 / GB))
+                            .unwrap_or_else(|| "free unknown".to_string());
+                        let rpcstr = if rpc { "rpc-ready" } else { "NOT rpc-ready" };
+                        println!(
+                            "  {:<16} : {:.1} GB total, {availstr} ({rpcstr})",
+                            peer.name,
+                            t as f64 / GB
+                        );
+                    }
+                    None => println!("  {:<16} : reachable, but memory not reported", peer.name),
+                }
+            }
+            Ok(r) => println!("  {:<16} : unreachable (HTTP {})", peer.name, r.status()),
+            Err(_) => println!("  {:<16} : unreachable (no response at {})", peer.name, peer.addr),
+        }
+    }
+
+    println!(
+        "\n  total poolable   : {:.1} GB across this machine + {} peer(s)",
+        total_poolable as f64 / GB,
+        targets.len()
+    );
+    println!("  (totals are physical RAM; on Apple Silicon that is also the GPU budget.)");
+    Ok(())
+}
+
+/// Advise whether a model fits in local memory or wants a VRAM pool.
+///
+/// This is deliberately a heuristic. The real footprint depends on
+/// quantization, context length, and KV-cache growth — none of which we
+/// can know from a file size alone. We estimate the *weights* footprint
+/// from the model size and add a modest runtime overhead factor, then
+/// compare to total RAM minus headroom. The output is guidance, framed
+/// as such, not a guarantee.
+fn vram_pool_fit(model: Option<&str>, size_gb: Option<f64>, headroom_gb: f64) -> Result<()> {
+    const BYTES_PER_GB: f64 = 1_073_741_824.0;
+    // Weights + a runtime overhead allowance (activations, KV-cache at a
+    // modest context). 1.3x is a rough, slightly-conservative middle.
+    const RUNTIME_OVERHEAD: f64 = 1.3;
+
+    // 1. Determine the model's on-disk size in GB.
+    let (model_gb, source) = if let Some(g) = size_gb {
+        (g, "from --size-gb".to_string())
+    } else if let Some(m) = model {
+        estimate_model_size_gb(m)?
+    } else {
+        anyhow::bail!(
+            "vram-pool fit needs a model: pass --model <name|path|url> or --size-gb <n>."
+        );
+    };
+
+    let need_gb = model_gb * RUNTIME_OVERHEAD;
+
+    // 2. Read total system RAM.
+    let total_gb = match total_ram_bytes() {
+        Some(b) => b as f64 / BYTES_PER_GB,
+        None => {
+            anyhow::bail!("could not read this machine's total memory on this platform.");
+        }
+    };
+    let usable_gb = (total_gb - headroom_gb).max(0.0);
+
+    // 3. Report.
+    println!("vram-pool fit");
+    println!("  model size       : {model_gb:.1} GB ({source})");
+    println!("  est. memory need : {need_gb:.1} GB (weights x{RUNTIME_OVERHEAD} runtime overhead)");
+    println!("  this machine RAM : {total_gb:.1} GB total, {usable_gb:.1} GB usable (after {headroom_gb:.0} GB headroom)");
+    println!();
+
+    if need_gb <= usable_gb {
+        println!("  ✅ fits locally — no pool needed.");
+        println!("     run it directly (e.g. `unhosted pull` + serve, or load it in LM Studio).");
+    } else {
+        // How many *additional* equally-sized peers would cover the gap.
+        // Each peer contributes roughly `usable_gb` (assume similar machines;
+        // a real planner would use per-peer probed memory — not built yet).
+        let deficit = need_gb - usable_gb;
+        let extra_peers = if usable_gb > 0.0 {
+            (deficit / usable_gb).ceil() as u64
+        } else {
+            // No usable local memory at all — can't anchor an estimate.
+            0
+        };
+        println!("  ⚠️  does NOT fit locally — needs a VRAM pool.");
+        if extra_peers > 0 {
+            println!(
+                "     roughly {extra_peers} more peer(s) of similar memory would cover the {deficit:.1} GB gap."
+            );
+            println!("     (heuristic — assumes peers ~as capable as this machine; per-peer");
+            println!("      memory probing is not implemented yet, so treat as a ballpark.)");
+        } else {
+            println!("     this machine has no usable memory headroom to anchor an estimate;");
+            println!("     enlist peers and try `unhosted vram-pool start --model <m> --peers <…>`.");
+        }
+        println!();
+        println!("     next: `unhosted vram-pool detect` to confirm RPC capability, then");
+        println!("           `unhosted vram-pool start --model <m> --peers <names>`.");
+    }
+    Ok(())
+}
+
+/// Estimate a model's on-disk size in GB from a name, path, or URL.
+/// Order: a local .gguf path -> a cached file matching the name ->
+/// a known entry in MODELS. Returns (size_gb, human-readable source).
+fn estimate_model_size_gb(model: &str) -> Result<(f64, String)> {
+    const BYTES_PER_GB: f64 = 1_073_741_824.0;
+
+    // A direct path to a .gguf on disk.
+    let p = std::path::Path::new(model);
+    if p.is_file() {
+        let bytes = std::fs::metadata(p)
+            .with_context(|| format!("reading {model}"))?
+            .len();
+        return Ok((bytes as f64 / BYTES_PER_GB, format!("from file {model}")));
+    }
+
+    // A known model in the built-in table.
+    if let Some((_, _, size)) = MODELS.iter().find(|(n, _, _)| *n == model) {
+        if *size > 0 {
+            return Ok((*size as f64 / BYTES_PER_GB, format!("known model {model}")));
+        }
+    }
+
+    // A cached GGUF whose filename contains the requested name.
+    if let Ok(cache) = model_cache_dir() {
+        if cache.exists() {
+            if let Ok(entries) = std::fs::read_dir(&cache) {
+                for e in entries.flatten() {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    if name.ends_with(".gguf")
+                        && name.to_lowercase().contains(&model.to_lowercase())
+                    {
+                        if let Ok(meta) = e.metadata() {
+                            return Ok((
+                                meta.len() as f64 / BYTES_PER_GB,
+                                format!("cached file {name}"),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    anyhow::bail!(
+        "couldn't determine the size of '{model}'. Pass --size-gb <n>, a path to a \
+         local .gguf, or a known model name (`unhosted models`)."
+    )
+}
+
+/// Total physical RAM in bytes, read from the OS without extra crates.
+/// macOS: `sysctl -n hw.memsize`. Linux: `/proc/meminfo` MemTotal.
+/// Returns None on unsupported platforms or read failure.
+fn total_ram_bytes() -> Option<u64> {
+    #[cfg(target_os = "macos")]
+    {
+        let out = std::process::Command::new("sysctl")
+            .args(["-n", "hw.memsize"])
+            .output()
+            .ok()?;
+        return String::from_utf8_lossy(&out.stdout).trim().parse::<u64>().ok();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
+        for line in meminfo.lines() {
+            if let Some(rest) = line.strip_prefix("MemTotal:") {
+                // Format: "MemTotal:       32788516 kB"
+                let kb: u64 = rest.split_whitespace().next()?.parse().ok()?;
+                return Some(kb * 1024);
+            }
+        }
+        return None;
+    }
+    #[allow(unreachable_code)]
+    None
 }
 
 async fn run_doctor() -> Result<()> {

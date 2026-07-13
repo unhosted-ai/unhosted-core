@@ -17,7 +17,7 @@ For Claude teachers (recommended for highest-quality data), pass the
 model name directly and set ANTHROPIC_API_KEY:
 
   python gen_data.py --docs docs/ --out data/train.jsonl \\
-      --model claude-opus-4-7
+      --model claude-fable-5
 
 The script detects "claude-*" model names and switches automatically
 to the Anthropic SDK (native messages API, not the compat layer).

@@ -1,0 +1,1122 @@
+### 1 [logic_math] (447 tok, stop)
+OUTPUT: We are given a project with 5 tasks, and we need to determine the **minimum total duration** of the project based on the dependencies and durations of the tasks.
+
+---
+
+### **Task Details:**
+
+- **A** takes **3 days**, runs **independently**.
+- **B** takes **5 days**, runs **independently**.
+- **C** takes **2 days**, **requires both A and B to be completed**.
+- **D** takes **4 days**, runs **independently** after **C**.
+- **E** takes **1 day**, runs **independently** after **C**.
+
+---
+
+### **Step-by-step Analysis:**
+
+#### **1. Parallel Tasks A and B:**
+- A and B run **in parallel**, so the time to complete both is the **maximum** of their durations.
+- A = 3 days, B = 5 days → **A and B take 5 days** to complete.
+
+#### **2. Task C:**
+- C depends on both A and B being completed.
+- So, **C starts after A and B are done**, which is **after 5 days**.
+- C takes **2 days** → **C finishes at 5 + 2 = 7 days**.
+
+#### **3. Tasks D and E:**
+- D and E run **in parallel** after C.
+- D = 4 days, E = 1 day → **D and E take 4 days** to complete.
+- Since they run in parallel, the total time for D and E is **4 days**.
+- D and E start after C is done, which is at **7 days**.
+- So, D and E finish at **7 
+
+### 2 [logic_math] (482 tok, stop)
+OUTPUT: We are given three contractor quotes and a **delay cost** of **$600 per day beyond day 6**. We need to determine which quote is the **cheapest all-in**, meaning we must compare the **total cost** of each contractor, including the **delay cost** if the job takes longer than 6 days.
+
+---
+
+### Step 1: Understand the quotes
+
+| Contractor | Cost | Time (days) |
+|-----------|------|-------------|
+| A         | $8,000 | 10 days     |
+| B         | $9,500 | 7 days      |
+| C         | $12,000 | 5 days      |
+
+---
+
+### Step 2: Calculate the delay cost for each contractor
+
+We are charged **$600 per day beyond day 6**.
+
+#### Contractor A: 10 days
+- Days beyond day 6: 10 - 6 = 4 days
+- Delay cost: 4 × $600 = **$2,400**
+- **Total cost**: $8,000 + $2,400 = **$10,400**
+
+#### Contractor B: 7 days
+- Days beyond day 6: 7 - 6 = 1 day
+- Delay cost: 1 × $600 = **$600**
+- **Total cost**: $9,500 + $600 = **$10,100**
+
+#### Contractor C: 5 days
+- Days beyond day 6: 5 - 6 = -1 → **0 days**
+- Delay cost: 0 × $600 = **$0**
+- **Total cost**: $12,000 + $0 = **$12,000**
+
+---
+
+### Step 3: Compare total costs
+
+| Contractor | Total Cost |
+|-----------|------------|
+| A         | $10,400    |
+| B         | $10,100  
+
+### 3 [logic_math] (474 tok, stop)
+OUTPUT: We are given:
+
+- **Queue processing rate**: 240 jobs per hour  
+- **Job arrival rate**:
+  - **First 2 hours**: 300 jobs per hour  
+  - **After that**: 180 jobs per hour  
+
+We are to find **how long after the surge begins** until the **backlog is gone**.
+
+---
+
+### Step 1: Calculate the **backlog** during the surge
+
+During the first **2 hours**, the arrival rate is **300 jobs/hour**, and the processing rate is **240 jobs/hour**.
+
+So, the **net increase in backlog** per hour is:
+
+$$
+300 - 240 = 60 \text{ jobs/hour}
+$$
+
+Over 2 hours, the **total backlog** is:
+
+$$
+60 \text{ jobs/hour} \times 2 \text{ hours} = 120 \text{ jobs}
+$$
+
+---
+
+### Step 2: Determine how long it takes to clear the backlog
+
+After the surge (i.e., after the first 2 hours), the arrival rate drops to **180 jobs/hour**, and the processing rate remains **240 jobs/hour**.
+
+So, the **net reduction in backlog** per hour is:
+
+$$
+240 - 180 = 60 \text{ jobs/hour}
+$$
+
+We have a backlog of **120 jobs**, and the queue is clearing at a rate of **60 jobs/hour**.
+
+So, the time to clear the backlog is:
+
+$$
+\frac{120 \text{ jobs}}{60 \text{ jobs/hour}} = 2 \text{ hours}
+$$
+
+---
+
+### Step 3: Total time from the start of the surge
+
+The
+
+### 4 [planning] (768 tok, length)
+OUTPUT: Given the tight timeline and the current state of the project, you need to **prioritize ruthlessly** and **sequence the work** in a way that ensures the **beta launch is viable and market-ready** by week 6. Here's a **high-level sequence** that balances urgency, risk, and deliverables:
+
+---
+
+### 📅 **Timeline Overview (6 Weeks)**
+
+| Week | Focus Area | Key Deliverables |
+|------|------------|------------------|
+| Week 1 | **Critical Path Setup** | Finalize roadmap, assign ownership, set up CI/CD, define MVP scope |
+| Week 2 | **Core Features Finalization** | Finalize 80% features, fix bugs, ensure stability |
+| Week 3 | **Test Coverage & Bug Fixing** | Add test coverage, fix critical bugs, ensure reliability |
+| Week 4 | **Marketing & Screenshots** | Generate screenshots, write marketing copy, prepare launch assets |
+| Week 5 | **Onboarding Docs & Final QA** | Write onboarding docs, run final QA, prepare user guides |
+| Week 6 | **Beta Launch & Monitoring** | Launch beta, monitor feedback, prepare for next steps |
+
+---
+
+### 🚀 **Detailed Work Sequence**
+
+#### **Week 1: Critical Path Setup**
+- **Finalize MVP scope** (ensure it's what marketing needs)
+- **Assign ownership** for each fe
+
+### 5 [planning] (768 tok, length)
+OUTPUT: Planning a **database migration** with a **limited downtime window** (Sunday 2-6am) and a **full data sync that takes 9 hours** requires careful scheduling and planning to **minimize disruption** and **ensure data consistency**. Here's a **step-by-step plan** for the migration:
+
+---
+
+## 📌 **Overview of the Problem**
+- **Downtime window**: Sunday 2:00 AM to 6:00 AM (4 hours)
+- **Full data sync**: 9 hours
+- **Goal**: Migrate the database with minimal impact on users and services
+
+---
+
+## 📅 **Downtime Window Constraints**
+- The migration **cannot** be completed within the 4-hour window.
+- Therefore, the migration must be **split into phases** or **scheduled in a way that allows for partial syncs**.
+
+---
+
+## ✅ **Migration Strategy: Phased Migration with Incremental Syncs**
+
+### 1. **Pre-Migration Preparation**
+- **Backup current database**: Ensure a full backup is taken before migration.
+- **Test the migration process**: Run a dry run in a staging environment to estimate time and identify potential issues.
+- **Plan rollback strategy**: In case of failure, have a rollback plan in place.
+- **Coordinate with stakeholders**: Inform users and teams about the migration and its impact.
+
+---
+
+
+
+### 6 [planning] (768 tok, length)
+OUTPUT: That’s a great goal! 8 weeks is a solid timeframe to learn enough Spanish to get by in Madrid for a work trip. With 30 minutes a day, you can make steady progress by focusing on practical, real-world language skills. Here's a **realistic 8-week plan** to help you achieve your goal:
+
+---
+
+## 🗓️ **8-Week Spanish Learning Plan (30 minutes/day)**
+
+### **Weeks 1–2: Foundations (Basic Greetings, Numbers, and Common Phrases)**
+
+**Goal:** Build confidence with basic communication.
+
+**Daily Focus:**
+- **10 minutes:** Practice **vocabulary** (greetings, numbers, days of the week, colors, common verbs like *hablar*, *comer*, *trabajar*, *ir*, *ser*, *estar*).
+- **10 minutes:** **Grammar basics** (present tense of regular verbs, articles, prepositions, and basic sentence structure).
+- **5 minutes:** **Listening practice** (short audio clips or videos with simple dialogue).
+- **5 minutes:** **Speaking practice** (repeat phrases, use flashcards, or practice with a language partner or app like Tandem or HelloTalk).
+
+**Resources:**
+- Duolingo (for vocabulary and grammar)
+- SpanishPod101 (for listening)
+- Memrise (for vocabulary flashcards)
+- YouTube (e.g., "SpanishPod101" or "Easy Languages")
+
+---
+
+### 7 [routing] (527 tok, stop)
+OUTPUT: In a high-pressure situation with multiple urgent items, here's how I would prioritize and handle each:
+
+---
+
+### **1. Security Vulnerability Report (Highest Priority)**  
+**Action:**  
+- **Immediate response:** Acknowledge receipt of the report and confirm that it's being investigated.  
+- **Internal escalation:** Alert the security team, IT department, and CISO (Chief Information Security Officer) to initiate a full assessment.  
+- **Containment:** If the vulnerability is critical, initiate containment procedures (e.g., patching, isolating affected systems).  
+- **Communication:** Prepare a response to the reporter (if anonymous) and internal stakeholders to ensure transparency and prevent escalation.
+
+**Why first:** A security vulnerability can lead to data breaches, system downtime, or reputational damage — it's a critical risk to the business.
+
+---
+
+### **2. Billing Dispute from Largest Customer (Second Priority)**  
+**Action:**  
+- **Review the dispute:** Quickly assess the details of the billing issue to determine if it's a technical error, a misunderstanding, or a potential fraud.  
+- **Engage the finance team:** Assign a dedicated person to resolve the issue and communicat
+
+### 8 [routing] (610 tok, stop)
+OUTPUT: When faced with multiple urgent tasks like:
+
+1. **An intern asking how to run the test suite**  
+2. **A flaky CI job blocking all merges**  
+3. **A customer asking for a feature we don’t have**
+
+You need to **prioritize** and **decide whether to delegate or take ownership** based on the **impact**, **urgency**, and **your role**.
+
+---
+
+### 🔍 **1. Flaky CI job blocking all merges**  
+**Priority: Highest**  
+**Action: Do it**  
+- A flaky CI job is a **blocking issue** that affects **all development** and **team productivity**.
+- It’s a **technical debt** that needs to be resolved **immediately**.
+- **Delegating** this could lead to delays or misdiagnosis of the root cause.
+- **You should take ownership** and investigate the flaky test, re-run it, and fix the underlying issue.
+
+---
+
+### 🧑‍💻 2. Intern asking how to run the test suite  
+**Priority: Medium**  
+**Action: Delegate or assist**  
+- This is a **support request** that can be handled by a more experienced team member or the intern’s mentor.
+- If you’re **overloaded**, you can **delegate** this to a senior developer or a team lead.
+- If you’re **available**, you can **brief the intern** and guide them through the process, which 
+
+### 9 [routing] (484 tok, stop)
+OUTPUT: For a **200-page contract** that will be used in a **court filing**, the best choice is a **slow accurate model** — but **not a human paralegal**. Here's why:
+
+### 1. **Human Paralegal**
+- **Pros**: 
+  - Can understand legal nuances, context, and intent.
+  - Can catch subtle errors, ambiguities, and inconsistencies.
+  - May have experience with similar contracts and court procedures.
+- **Cons**:
+  - **Time-consuming** and expensive.
+  - May have **limited capacity** to process a 200-page document in a short time.
+  - May introduce **subjectivity** or **bias** based on personal interpretation.
+
+### 2. **Fast Cheap Model (e.g., basic AI or low-cost tool)**
+- **Pros**:
+  - Quick and inexpensive.
+  - Can process large volumes of text quickly.
+- **Cons**:
+  - **High risk of errors** in legal terminology, interpretation, and structure.
+  - May **miss critical details** that are essential for court filings.
+  - **Lack of legal expertise** can lead to **inaccurate or misleading summaries**.
+
+### 3. **Slow Accurate Model (e.g., advanced AI with legal training)**
+- **Pros**:
+  - **High accuracy** in legal terminology and structure.
+  - Can **parse complex contracts** and extract key clauses.
+
+### 10 [summarizing] (78 tok, stop)
+OUTPUT: The migration is currently 3 weeks behind schedule due to the vendor's API rate-limiting us at 10 requests per second, which is significantly lower than the contracted 100 requests per second. Engineering has implemented a batching workaround that has recovered approximately half of the lost time. Legal is currently reviewing whether the contract was breached as a result of the rate-limiting issue.
+
+### 11 [summarizing] (38 tok, stop)
+OUTPUT: 47 out of 60 test suites passed, with all 13 failures in the deprecated payments-v1 module set for deletion next sprint, and no new failures this week.
+
+### 12 [summarizing] (123 tok, stop)
+OUTPUT: **Summary:**  
+Users report slow checkout, with profiling showing 80% of the latency is due to a synchronous fraud check. The fraud vendor provides an async API, but integration would take 2 sprints. During the transition, fraud losses are expected to rise by about 1%.
+
+**Recommendation:**  
+Proceed with the async API integration to reduce checkout latency and improve user experience, despite the short-term 1% increase in fraud losses. The long-term benefits of faster checkout and reduced cart abandonment outweigh the temporary risk. Start the integration as soon as possible to minimize the impact of the transition.
+
+### 13 [consequence_prediction] (637 tok, stop)
+OUTPUT: Skipping the code freeze and merging the **payments refactor** the night before **Black Friday** is a **high-risk decision** that could lead to a variety of negative outcomes. Here's a breakdown of what could happen:
+
+---
+
+### 🚨 **1. Critical Bugs in Payment Systems**
+- **Payment systems** are mission-critical. A refactor could introduce **bugs** in:
+  - Payment processing
+  - Fraud detection
+  - Transaction validation
+  - Refunds or chargebacks
+- These bugs could result in:
+  - Failed transactions
+  - Incorrect charges
+  - Data corruption
+  - Loss of customer trust
+
+---
+
+### 📉 **2. Revenue Loss**
+- Black Friday is a **peak sales period**.
+- If the payment system is down or malfunctioning:
+  - Customers may abandon carts
+  - Orders may not be processed
+  - Revenue could drop significantly
+  - You could lose out on **millions of dollars** in sales
+
+---
+
+### 🛑 **3. System Downtime**
+- A refactor without a proper code freeze and testing could lead to:
+  - **System crashes**
+  - **Service outages**
+  - **Down time** during peak traffic
+- This could result in:
+  - Legal and regulatory issues
+  - Loss of customer trust
+  - Damage to brand reputation
+
+---
+
+### 🧠 **4. Increased Risk of Sec
+
+### 14 [consequence_prediction] (768 tok, length)
+OUTPUT: Making the on-call rotation **opt-in** can have several **second-order effects** on team dynamics, workload distribution, and overall system reliability. These effects can be both positive and negative, depending on the team's structure, culture, and the nature of the system being maintained. Here's a breakdown of the key second-order effects:
+
+---
+
+### ✅ **Positive Second-Order Effects**
+
+1. **Improved Morale and Job Satisfaction**
+   - Team members who are not interested in on-call responsibilities may feel less stressed and more satisfied with their roles.
+   - This can reduce burnout and improve overall job satisfaction.
+
+2. **Better Work-Life Balance**
+   - Opt-in on-call reduces the pressure to be available 24/7, allowing team members to better balance personal and professional life.
+   - This can lead to higher retention and lower turnover.
+
+3. **More Strategic Use of Talent**
+   - Team members with expertise in specific areas (e.g., security, compliance, or high-impact features) can be prioritized for on-call roles, improving the quality of incident response.
+   - This allows for more targeted and effective on-call coverage.
+
+4. **Encourages Ownership and Responsibility**
+ 
+
+### 15 [consequence_prediction] (768 tok, length)
+OUTPUT: Auto-generating AI draft replies for support tickets with agent approval is a promising approach to improve efficiency and consistency. However, within **3 months**, several issues are likely to arise due to the complexity of integrating AI into a support workflow. Here's a breakdown of what could go wrong:
+
+---
+
+### 🔧 **1. Quality and Relevance of AI Drafts**
+- **Problem:** AI-generated drafts may be generic, irrelevant, or overly technical, leading to poor customer experience.
+- **Impact:** Agents may spend extra time editing, and customers may feel ignored or misunderstood.
+- **Solution:** Continuous training and fine-tuning of the AI model with real support data is essential.
+
+---
+
+### 📈 **2. Over-Reliance on AI Leads to Agent Burnout**
+- **Problem:** Agents may become complacent or over-reliant on AI drafts, leading to reduced engagement and critical thinking.
+- **Impact:** Decreased quality of responses and potential erosion of customer trust.
+- **Solution:** Encourage agents to use AI as a tool, not a replacement, and provide training on when and how to override AI suggestions.
+
+---
+
+### 🧠 **3. AI Misunderstands Customer Context**
+- **Problem:** AI may not fully understand t
+
+### 16 [multi_agent] (768 tok, length)
+OUTPUT: To orchestrate the pipeline effectively, we need to balance the automated processes (scraper, extractor, classifier) with the human reviewer's capacity. Here's a step-by-step plan to ensure **100 pages are scraped, processed, and human-reviewed by the end of the day**.
+
+---
+
+### 🧠 **Overview of the Pipeline**
+
+1. **Scraper**: Fails on ~10% of pages → 10 pages fail, 90 are scraped successfully.
+2. **Extractor**: Processes scraped data.
+3. **Classifier**: Categorizes or flags items for review.
+4. **Human Reviewer**: Can review **20 items/hour**, available for **5 hours** → **100 items** can be reviewed.
+
+---
+
+### 📌 **Step-by-Step Orchestration Plan**
+
+#### ✅ **Step 1: Scrape the 100 Pages**
+- **Total pages**: 100
+- **Scraper failure rate**: 10% → **10 pages fail**, **90 pages scraped successfully**
+- **Scraped items**: 90
+
+#### ✅ **Step 2: Extract Data from Scraped Pages**
+- **Extractor** processes the 90 scraped pages.
+- **Extracted items**: 90 (assuming 1 item per page)
+
+#### ✅ **Step 3: Classify the Extracted Items**
+- **Classifier** categorizes or flags items for review.
+- **Assume**: 100% of items require human review (or some subset, say 80%)
+- **Items needing review**: 72 (ass
+
+### 17 [multi_agent] (768 tok, length)
+OUTPUT: When two agents are overwriting each other's edits to the same config file, it's a classic **conflict in concurrent file editing**. This is a common issue in orchestration or automation workflows where multiple processes or agents are modifying the same file without coordination.
+
+---
+
+### ✅ **Solution: Coordinate File Edits with Locking or Version Control**
+
+Here are several strategies to **fix the orchestration** and prevent overwriting:
+
+---
+
+## 1. **Use a File Locking Mechanism**
+
+Use a lock file or a file-based lock to ensure only one agent can edit the config file at a time.
+
+### Example (in Python):
+```python
+import fcntl
+import os
+
+lock_file = "/tmp/config_lock"
+config_file = "/etc/myapp/config.yaml"
+
+with open(lock_file, 'w') as f:
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX)  # Acquire exclusive lock
+        with open(config_file, 'r') as config:
+            config_data = yaml.safe_load(config)
+        # Make your edits
+        config_data['new_key'] = 'new_value'
+        with open(config_file, 'w') as config:
+            yaml.safe_dump(config_data, config)
+    finally:
+        fcntl.flock(f, fcntl.LOCK_UN)  # Release the lock
+```
+
+---
+
+## 2. **Use a Version Control Sys
+
+### 18 [multi_agent] (768 tok, length)
+OUTPUT: An orchestrator should stop delegating to a failing agent and take over the task itself **when the agent is no longer reliable, responsive, or capable of completing the task successfully**. Here are the key indicators that signal when the orchestrator should intervene:
+
+---
+
+### ✅ **When the Agent is Failing to Perform Its Role:**
+- **Repeated failures**: The agent consistently fails to complete tasks or returns incorrect results.
+- **Timeouts or unresponsiveness**: The agent does not respond within a reasonable time frame.
+- **Incorrect or inconsistent output**: The agent's output is unreliable or inconsistent, leading to errors downstream.
+
+---
+
+### ✅ **When the Task is Critical or Time-Sensitive:**
+- **High-priority tasks**: If the task is mission-critical, the orchestrator should not rely on an unreliable agent.
+- **Time-sensitive operations**: If the task must be completed within a specific timeframe, the orchestrator should take control to avoid delays.
+
+---
+
+### ✅ **When the Agent is Not Capable of the Task:**
+- **Skill mismatch**: The agent lacks the required knowledge, tools, or permissions to perform the task.
+- **Complex or specialized tasks**: Some tasks require specifi
+
+### 19 [constraints_tradeoffs] (574 tok, stop)
+OUTPUT: When choosing between **fast**, **cheap**, and **good** for a compliance audit deliverable, you must **sacrifice one** to achieve the other two. Here's a breakdown of the trade-offs and which one to prioritize:
+
+---
+
+### **Option 1: Sacrifice "Cheap" (Cost)**
+- **Pick:** Fast + Good
+- **Why:** A **fast and good** audit deliverable ensures that the audit is completed on time and meets high standards of accuracy and completeness. This is critical for regulatory compliance and risk mitigation.
+- **Trade-off:** Higher cost due to more resources, time, and expertise.
+- **Best for:** Organizations that prioritize **regulatory compliance**, **risk reduction**, and **long-term reputation** over short-term cost savings.
+
+---
+
+### **Option 2: Sacrifice "Good" (Quality)**
+- **Pick:** Fast + Cheap
+- **Why:** A **fast and cheap** audit may be sufficient for **basic compliance checks** or **low-risk environments**, but it may lack depth and thoroughness.
+- **Trade-off:** Higher risk of **non-compliance**, **regulatory penalties**, and **reputational damage**.
+- **Best for:** Organizations with **limited budgets**, **low-risk operations**, or **temporary compliance needs**.
+
+---
+
+### **Option 3: 
+
+### 20 [constraints_tradeoffs] (768 tok, length)
+OUTPUT: Moving to **Spot Instances** can significantly reduce cloud costs (like you mentioned, up to 40%), but it comes with the trade-off of **job termination**—typically around **2% per hour**. Whether a workload is suitable for Spot Instances depends on how **tolerant** it is to **interruptions** and how **critical** it is to **run continuously**.
+
+Here's a breakdown of which types of workloads are **good candidates** for Spot Instances and which are **not**:
+
+---
+
+### ✅ **Good Candidates for Spot Instances (Low Risk of Interruption Impact)**
+
+1. **Batch Processing Jobs**
+   - ETL (Extract, Transform, Load)
+   - Data processing pipelines
+   - Machine learning training jobs
+   - Batch rendering or video encoding
+
+2. **Non-Interactive Workloads**
+   - Long-running simulations
+   - Scientific computing
+   - Offline analytics
+   - Data archiving or migration
+
+3. **Caching or Indexing Jobs**
+   - Preprocessing data for search engines
+   - Building indexes for databases
+
+4. **Training Workloads**
+   - Machine learning model training
+   - Deep learning jobs (e.g., TensorFlow, PyTorch)
+   - AI/ML experiments
+
+5. **Background Jobs**
+   - Task queues (e.g., Celery, Sidekiq)
+   - Cron jobs
+   - Da
+
+### 21 [constraints_tradeoffs] (453 tok, stop)
+OUTPUT: Given the situation:
+
+- **Budget allows**: 1 senior hire or 2 junior hires.
+- **Current team**: 4 mid-level engineers who are "drowning in tech debt with no architectural direction."
+
+### Key Considerations:
+
+1. **Tech Debt and Architectural Direction**:
+   - Tech debt is a significant barrier to progress and can slow down development.
+   - Without architectural direction, the team is likely working in a disorganized, inefficient way.
+
+2. **Senior vs. Junior Engineers**:
+   - A **senior engineer** brings **architectural expertise**, **technical leadership**, and the ability to **refactor and restructure** the codebase.
+   - **Junior engineers** are typically less experienced and may not have the skills or judgment to make high-level architectural decisions.
+
+3. **Team Dynamics**:
+   - 4 mid-level engineers may be able to handle junior engineers, but they may not be able to guide or mentor them effectively.
+   - A senior engineer can **mentor juniors**, **lead the team**, and **provide clarity and direction**.
+
+4. **Long-Term Impact**:
+   - A senior hire can **immediately address the tech debt** and **set the architectural direction**.
+   - Two juniors may not have the capacity to m
+
+### 22 [ambiguity] (768 tok, length)
+OUTPUT: Before building a dashboard for the data, it's essential to take a structured and strategic approach to ensure the final product meets the stakeholder's needs effectively. Here's what you should do:
+
+---
+
+### 1. **Understand the Stakeholder's Needs**
+- **Ask clarifying questions**: What is the purpose of the dashboard? What decisions will it support?
+- **Identify the audience**: Who will use the dashboard? What is their level of technical expertise?
+- **Define the goals**: What key performance indicators (KPIs) or metrics are important to the stakeholder?
+- **Determine the scope**: What data sources are available? What data is required?
+
+---
+
+### 2. **Define the Data Requirements**
+- **Identify data sources**: Databases, APIs, spreadsheets, etc.
+- **Determine data structure**: What fields, tables, or datasets are needed?
+- **Check data quality**: Are the data clean, consistent, and reliable?
+- **Understand data frequency**: Is the data real-time, daily, weekly, or monthly?
+
+---
+
+### 3. **Determine the Dashboard Purpose and Use Cases**
+- **What questions will the dashboard answer?**
+- **What actions should the user be able to take based on the data?**
+- **What is the frequency of up
+
+### 23 [ambiguity] (687 tok, stop)
+OUTPUT: When you receive a bug report that says **"the app is broken"** with **no version, no steps, no screenshot**, your move should be to **gather as much information as possible** to identify and resolve the issue. Here's a structured approach:
+
+---
+
+### ✅ **1. Ask for More Details**
+You need to **triangulate** the problem. Ask the user to provide:
+
+- **Device information** (model, OS version, Android/iOS version)
+- **App version** (e.g., 2.3.4)
+- **What they were doing when the app broke** (e.g., "trying to log in", "uploading a file")
+- **Any error messages** (even if they don’t remember them)
+- **If the app crashes, how long before it crashes**
+- **If the app is unresponsive, what action triggered it**
+- **If they can reproduce the issue**
+- **If they can provide a screenshot or video**
+- **If they can share logs or crash reports** (if available)
+
+---
+
+### 📝 **2. Use a Template to Guide the User**
+Send a clear, friendly message like this:
+
+> Hi [User Name],  
+> Thank you for reporting the issue. To help us fix it, could you please provide the following details:  
+> - What device and OS version are you using?  
+> - What version of the app are you on?  
+> - What were you doing when th
+
+### 24 [ambiguity] (768 tok, length)
+OUTPUT: When a client goes silent for two weeks, even though payments are current, it's a red flag that needs careful attention. Here's a structured approach to help you decide what to do next:
+
+---
+
+### 📌 **1. Understand the Situation**
+- **Why is the client silent?**  
+  - Are they busy with other projects?  
+  - Is there a change in priorities or leadership?  
+  - Are they waiting for a deliverable or approval?  
+  - Could there be a communication breakdown?
+
+- **Check your communication channels:**  
+  - Have you sent any updates or reminders?  
+  - Have you been clear about timelines or next steps?
+
+---
+
+### 📌 **2. Consider the Options**
+
+#### ✅ **Option 1: Keep Building (with caution)**
+- **Pros:**  
+  - You continue working, which keeps the project moving.  
+  - You maintain momentum and avoid scope creep.  
+  - You can use this time to refine or improve the work.
+
+- **Cons:**  
+  - Risk of wasting time on unapproved work.  
+  - No guarantee the client will return or approve the work.
+
+- **Best for:**  
+  - If the client has been clear about next steps.  
+  - If the work is low-risk and can be paused or adjusted later.
+
+---
+
+#### ⚠️ **Option 2: Pause the Project**
+- **Pros:**  
+  - 
+
+### 25 [prioritization] (689 tok, stop)
+OUTPUT: You're in a **P0** situation — everything is critical, and you have **one afternoon** to manage it. Here's how to prioritize and act:
+
+---
+
+### 🚨 **P0 Prioritization: The 3 Tiers**
+
+#### **Tier 1: Major Customer Escalation (Highest Priority)**
+- **Why?** This is a **customer-facing issue** and could **damage reputation, revenue, or trust**.
+- **Action:**
+  - **Assign to a senior engineer or team lead** immediately.
+  - **Escalate to the CTO or PMO** if needed.
+  - **Provide a clear status update** to the customer (even if it's "under investigation").
+  - **Set up a 15-minute call** with the customer to explain the situation and next steps.
+
+#### **Tier 2: Production Sev-2 (High Priority)**
+- **Why?** This is a **production issue** that could impact **users, revenue, or system stability**.
+- **Action:**
+  - **Investigate the root cause** immediately.
+  - **Check if it's impacting any critical services** (e.g., payment, login, etc.).
+  - **Deploy a hotfix or rollback** if needed.
+  - **Monitor the system closely** and update stakeholders (engineering, product, ops).
+
+#### **Tier 3: CEO Demo Prep (Medium Priority)**
+- **Why?** Important, but **not as urgent** as the other two.
+- **Act
+
+### 26 [prioritization] (768 tok, length)
+OUTPUT: When your team of 3 is committed to 12 deliverables in a sprint but can only realistically complete 6, it's important to **prioritize carefully** and **communicate transparently** with stakeholders. Here's a structured approach to both **choosing the 6 deliverables** and **telling stakeholders**:
+
+---
+
+### **1. Choosing the 6 Deliverables: Prioritization Strategy**
+
+#### **A. Reassess the Sprint Goal**
+- **Revisit the sprint goal** to ensure it still aligns with the team's capacity.
+- If the original goal was too ambitious, **refocus** the sprint goal to reflect what is realistically achievable.
+
+#### **B. Use a Prioritization Framework**
+Use one or more of these to select the top 6 deliverables:
+
+- **MoSCoW Method** (Must-have, Should-have, Could-have, Won’t-have):
+  - Focus on **Must-have** and **Should-have** items.
+- **Value vs. Effort Matrix**:
+  - Plot deliverables by **value** (high/low) and **effort** (high/low).
+  - Prioritize those with **high value and low effort**.
+- **Impact vs. Complexity Matrix**:
+  - Prioritize deliverables that have **high impact** and **low complexity**.
+- **Kano Model**:
+  - Focus on **basic needs** (must-haves) and **delighters** (optional, but 
+
+### 27 [prioritization] (428 tok, stop)
+OUTPUT: No, you **do not ship**.
+
+Here's why:
+
+### 1. **User Data is Irreplaceable**
+If the bug silently corrupts user data, it's not just a minor inconvenience—it's a **serious security and integrity issue**. Users trust your product to protect their data. Shipping with a bug that compromises that trust is a **major risk**.
+
+### 2. **Reputation and Trust**
+Once users realize their data is being corrupted, the damage is done. You'll lose trust, face legal consequences, and potentially lose customers. The cost of a data breach can be **far greater** than the cost of fixing the bug before release.
+
+### 3. **"Fix it after the demo" is a dangerous mindset**
+The phrase "just ship it, we'll fix it after the demo" is a **recipe for disaster**. It prioritizes **schedule** over **quality and safety**. If the bug is serious enough to corrupt data, it's **not something you can fix after the fact**—it's something you need to **fix before release**.
+
+### 4. **Demo ≠ Production**
+A demo is a **preview**, not the real world. In production, the bug will affect **real users**, not just a few testers. The consequences are **real, irreversible, and costly**.
+
+### 5. **Ethical Responsibility**
+As a developer,
+
+### 28 [communication_risk] (52 tok, stop)
+OUTPUT: We have identified a data leak affecting 200 users, and the issue has been successfully resolved. We are required by law to notify affected users within 72 hours of discovering the breach. Please review the attached notice for details and next steps.
+
+### 29 [communication_risk] (768 tok, length)
+OUTPUT: Telling a client their launch will slip — especially when your team caused part of the delay — is a delicate and strategic communication. The goal is to **take responsibility**, **explain the situation clearly**, and **reassure the client** that you're working to resolve the issue. Here's a structured approach to help you navigate this:
+
+---
+
+### ✅ **1. Acknowledge the Delay Early and Clearly**
+Start by being upfront about the delay. Don’t hide it or downplay it.
+
+> **Example:**  
+> “We’re sorry to inform you that your launch is now scheduled for [new date], which is three weeks later than originally planned.”
+
+---
+
+### ✅ **2. Take Responsibility (Even if It’s Partial)**
+Even if your team caused only part of the delay, it’s important to **own the situation**. Clients appreciate honesty and accountability.
+
+> **Example:**  
+> “We understand the impact this delay will have on your timeline, and we take full responsibility for the challenges we’ve faced in delivering the project on time.”
+
+---
+
+### ✅ **3. Explain the Root Cause (Without Blaming Others)**
+Be clear about what caused the delay, but **frame it as a challenge** rather than a failure. Avoid placing blame on external parties
+
+### 30 [communication_risk] (443 tok, stop)
+OUTPUT: When the board asks, *"Is the migration risky?"* and it **is**, but your VP wants you to say it's **fine**, you need to **balance honesty with strategic communication**. Here's how to respond:
+
+---
+
+### **1. Acknowledge the risk honestly:**
+> "Yes, the migration does carry some risk. We’ve identified potential challenges, such as [specific risks: data integrity, system compatibility, downtime, etc.]."
+
+---
+
+### **2. Frame the risk as manageable:**
+> "However, we’ve implemented a comprehensive risk mitigation plan. We’ve conducted thorough testing, established rollback procedures, and have a dedicated team monitoring the process in real time."
+
+---
+
+### **3. Emphasize the benefits and strategic value:**
+> "While there are risks, the long-term benefits of the migration—such as improved scalability, enhanced security, and better user experience—far outweigh the short-term challenges. This is a strategic move that positions the company for future growth."
+
+---
+
+### **4. Reassure the board with confidence:**
+> "We’re confident in our approach and the team’s ability to execute this migration successfully. We’re prepared to address any issues as they arise and minimize disruption."
+
+---
+
+
+
+### 31 [execution_process] (549 tok, stop)
+OUTPUT: Your standup meetings are taking 40 minutes and nobody is listening — that's a red flag. It's time to **fix** them, not just kill them. Here's how to approach it:
+
+---
+
+### 🔍 **Why are they taking 40 minutes?**
+- Are people going off-topic?
+- Is the agenda unclear?
+- Is the team not prepared?
+- Is the facilitator not keeping things on track?
+- Are people just going through the motions?
+
+---
+
+### 🛠️ **Fix the Standup, Not the Meeting**
+
+#### 1. **Shorten the Meeting**
+- **Limit to 15 minutes** (or 10 if you're really tight).
+- Use a **timer** to enforce time limits.
+- Only allow **30 seconds per person** (or less if needed).
+
+#### 2. **Stick to the Core Purpose**
+- **What’s done?**
+- **What’s next?**
+- **What’s blocking?**
+- **No updates, no stories, no “I’m going to do this later.”**
+
+#### 3. **Use a Structured Format**
+- **3 questions only** (as above).
+- **No agenda items beyond that**.
+- **No “I need to talk about X”** — save that for a dedicated meeting.
+
+#### 4. **Assign a Facilitator**
+- Someone to **keep the meeting on track**.
+- They can **call out off-topic discussions** and **move the conversation forward**.
+
+#### 5. **Make It a Ritual**
+- **Start on time**.
+- **End on ti
+
+### 32 [execution_process] (519 tok, stop)
+OUTPUT: When deploying manually at 6pm on Fridays, and it's run by one engineer who knows the steps, the first thing you should change is **the frequency and automation of the deployment process**.
+
+### Here's why:
+
+1. **Single Point of Failure**: Relying on one person to do the deployment manually at a specific time is risky. If that person is unavailable, sick, or on vacation, the deployment can be delayed or missed.
+
+2. **Manual Deployment at 6pm on Fridays**:
+   - This is a **high-risk time** for deployments due to the "Friday Night" effect — people are tired, and there's less time to troubleshoot if something goes wrong.
+   - It's also a **low-visibility time** for support teams, which can lead to longer resolution times if something breaks.
+
+3. **Lack of Automation**:
+   - Manual deployments are error-prone and time-consuming.
+   - They can lead to **deployment fatigue** and **burnout** for the engineer who has to do it every week.
+
+---
+
+### What to Change First:
+
+#### ✅ **Automate the Deployment Process**
+- Use CI/CD pipelines (e.g., Jenkins, GitHub Actions, GitLab CI, CircleCI, etc.)
+- Set up **scheduled deployments** (e.g., every day at 10am, or during off-peak hours)
+- Implement 
+
+### 33 [execution_process] (649 tok, stop)
+OUTPUT: When a postmortem identifies **"human error"** as the root cause of an outage, whether to **accept** or **push back** depends on the **context**, **intent**, and **how the term is used**. Here's a breakdown to help you decide:
+
+---
+
+### ✅ **Accept the Root Cause (If Appropriate)**
+
+**When to accept:**
+
+- **The error was a direct, actionable mistake** (e.g., a misconfiguration, a typo in a command, a missed alert).
+- **The error was documented and analyzed** with clear steps to prevent recurrence.
+- **The root cause is not just a symptom but a real, actionable issue** (e.g., a lack of training, unclear procedures, or poor communication).
+- **The team is using the postmortem to improve processes and prevent future errors**.
+
+**Example:**
+> "The root cause was a misconfigured load balancer due to a typo in the command. We’ve added a double-check step and implemented a peer review process for all configuration changes."
+
+---
+
+### ❌ **Push Back (If the Term is Misused or Vague)**
+
+**When to push back:**
+
+- **"Human error" is used as a **placeholder** or **fallback** without identifying the real root cause** (e.g., "human error" is the only cause listed).
+- **The error is a symptom of a 
+
+### 34 [goals_learning] (768 tok, length)
+OUTPUT: Great goal! To **get better at system design**, it's important to make it **measurable** and structure it into a **90-day loop** with clear steps, milestones, and feedback. Here's a **90-day system design improvement plan** that is **actionable, measurable, and structured**.
+
+---
+
+## 🎯 **Goal: Get Better at System Design**
+
+### ✅ **Measurable Metrics:**
+- **Number of system design interviews passed** (e.g., LeetCode, FAANG, etc.)
+- **Number of system design projects completed**
+- **Time spent on system design practice per week**
+- **Feedback received from peers or mentors**
+- **Ability to explain trade-offs and scalability in interviews**
+- **System design whiteboard sessions completed**
+- **Number of system design patterns implemented**
+
+---
+
+## 🔄 **90-Day Loop: System Design Improvement Plan**
+
+### 📅 **Day 1–30: Foundation Building Phase**
+
+#### 📌 **Weekly Goals:**
+- Practice 3–5 system design problems per week
+- Complete 1–2 system design whiteboard sessions
+- Read 1–2 system design articles or books
+- Review 1–2 system design interview questions
+
+#### 📌 **Daily Tasks:**
+- Spend 30–60 minutes on system design practice
+- Review system design concepts (e.g., scalability, load bala
+
+### 35 [goals_learning] (768 tok, length)
+OUTPUT: Determining whether the **goal was wrong or the execution was poor** when a team missed a quarterly goal by 40% requires a **systematic analysis** of both the **goal-setting process** and the **execution process**. Here's how to approach this:
+
+---
+
+### 🔍 **1. Evaluate the Goal: Was It Realistic and Well-Defined?**
+
+**Ask:**
+- Was the goal **SMART** (Specific, Measurable, Achievable, Relevant, Time-bound)?
+- Did it align with the team's **capacity, resources, and constraints**?
+- Was it based on **realistic assumptions** and **historical performance**?
+- Did it account for **external factors** (market changes, competition, etc.)?
+
+**If the goal was:**
+- Too ambitious or unrealistic
+- Not aligned with the team's capabilities
+- Based on flawed assumptions
+- Not clearly defined or communicated
+
+→ **The goal may have been wrong.**
+
+---
+
+### 🛠️ **2. Evaluate the Execution: Was the Plan Effective?**
+
+**Ask:**
+- Were the **right resources and people** assigned to the task?
+- Was the **timeline and plan** realistic and well-structured?
+- Were there **adequate monitoring and feedback loops**?
+- Were **obstacles or risks** identified and mitigated?
+- Was there **effective communication and c
+
+### 36 [goals_learning] (768 tok, length)
+OUTPUT: The question of whether a team's OKRs (Objectives and Key Results) should include "keep the lights on" work is nuanced and depends on the team's role, the organization's goals, and how the OKR framework is applied. Here's a structured answer:
+
+---
+
+### ✅ **Yes, in some cases, "keep the lights on" work should be included in OKRs.**
+
+#### **Why?**
+1. **Operational Stability is Critical**  
+   For teams responsible for maintaining infrastructure, systems, or core services (e.g., DevOps, IT operations, or platform engineering), "keep the lights on" is not just a task—it's a **mission-critical** function. These teams must ensure that the organization's systems are reliable, secure, and performant.
+
+2. **Alignment with Business Goals**  
+   If the business relies on the team's systems to run smoothly (e.g., customer-facing apps, data pipelines, or internal tools), then maintaining those systems is a **strategic objective**. OKRs should reflect the **impact** of the team's work on the business.
+
+3. **Measurable Outcomes**  
+   "Keep the lights on" can be translated into **quantifiable key results**. For example:
+   - "Reduce system downtime by 50% in Q1."
+   - "Achieve 99.9% SLA complianc
+
+### 37 [resource_stakeholder] (655 tok, stop)
+OUTPUT: When two VPs both claim your only data scientist for Q3, it's a challenging situation that requires balancing fairness, business impact, and team morale. Here's a structured approach to decide and communicate effectively:
+
+---
+
+### **1. Evaluate the Business Impact**
+- **Understand the priorities of each VP.** What are their key goals for Q3? Are they launching a product, optimizing a process, or making a strategic decision?
+- **Assess the data scientist’s skills and availability.** Does the data scientist have the expertise to deliver on both projects, or is one project more critical?
+- **Consider the timeline.** Is one project time-sensitive, or can it be delayed without major consequences?
+
+---
+
+### **2. Determine the Best Use of Resources**
+- **Prioritize based on strategic value.** Which project aligns more with the company’s long-term goals or has a higher ROI?
+- **Evaluate the data scientist’s capacity.** If the data scientist is the only one, can they split their time effectively, or is one project better suited for their full attention?
+- **Consider alternatives.** Can the data scientist work part-time on both projects, or is it better to assign one project fully and defer
+
+### 38 [resource_stakeholder] (768 tok, length)
+OUTPUT: This is a classic **opportunity cost** decision — choosing between two valuable projects that both have high impact, but limited resources. Let's break it down and help you decide.
+
+---
+
+### 🧠 **Option 1: Fix the Flaky Test Suite**
+- **Cost:** Time and effort to debug and stabilize the test suite.
+- **Impact:**
+  - **Saves 8 engineers ~2 hours/week** = **~16 hours/week total**.
+  - That’s **~800 hours/year** saved (assuming 40 hours/week).
+  - Reduces frustration, improves productivity, and improves code quality.
+  - Long-term: fewer bugs, faster releases, better team morale.
+- **ROI:** High. It's a **low-cost, high-impact** fix that pays off in **team efficiency and reliability**.
+
+---
+
+### 🧠 **Option 2: Build the Integration for the $80k/year Deal**
+- **Cost:** Time and effort to build the integration.
+- **Impact:**
+  - **$80k/year** is a **significant revenue stream**.
+  - Could be a **one-time win** or a **recurring revenue**.
+  - Might open the door to more deals or partnerships.
+- **ROI:** High, but **uncertain**. It depends on the deal being closed, and the integration being successful.
+
+---
+
+### 🧠 **Which is More Important?**
+This depends on your **business priorities** and
+
+### 39 [resource_stakeholder] (386 tok, stop)
+OUTPUT: The answer depends on the priorities and the structure of your project timeline, but here's a breakdown:
+
+- **Marketing wants the release on Tuesday** to align with a conference, likely to maximize visibility, media coverage, and audience engagement.
+- **Engineering wants the release on Friday** to allow for **soak time** (a period where the system is monitored for issues after deployment, often used in DevOps and software releases).
+
+### Who "wins"?
+- **Engineering** typically has the **technical authority** to decide when a release is safe. Soak time is critical for identifying bugs, performance issues, or unexpected behavior in production.
+- However, **Marketing** may have **business authority** to push for an earlier release to meet a strategic event (like a conference).
+
+### Possible Outcomes:
+1. **Engineering wins** if the release is **critical to system stability** and the conference is not time-sensitive.
+2. **Marketing wins** if the **conference is a high-priority business event** and the team can **adjust the soak time** or **roll out a staged release**.
+3. **Compromise** is often the best approach:  
+   - Release on **Tuesday**, but with **limited soak time** (e.g., moni
+
+### 40 [negotiation] (244 tok, stop)
+OUTPUT: Here's a professional and strategic response you can use to address the vendor renewal quote:
+
+---
+
+**Subject:** Request for Renewal Quote Review and Negotiation
+
+Dear [Vendor Name/Team],
+
+We are currently reviewing our renewal quote, which has increased by 35% without any corresponding added value. While we appreciate the service and support provided by your team, we are looking to explore more cost-effective options that align with our current budget and operational needs.
+
+Migrating away from your platform would take approximately six months, and we are committed to ensuring a smooth transition if we decide to move. However, we believe there is room for negotiation to bring the renewal cost in line with our expectations.
+
+We would appreciate the opportunity to discuss this further and explore potential adjustments to the renewal terms. Please let us know a convenient time to schedule a call or meeting to review the quote and discuss possible alternatives.
+
+Thank you for your attention to this matter.
+
+Best regards,  
+[Your Full Name]  
+[Your Job Title]  
+[Your Company Name]  
+[Contact Information]
+
+---
+
+Let me know if you'd like a version tailored for a specific industry or tone
+
+### 41 [negotiation] (745 tok, stop)
+OUTPUT: If a candidate is a **great fit** and wants **20% above the top of your band**, you have several options depending on your hiring strategy, budget, and the urgency of the role. Here's a breakdown of your options:
+
+---
+
+### 🔍 **1. Consider the Candidate's Motivation**
+- **Why do they want 20% above the band?**  
+  - They may be overqualified or seeking a higher salary than your current budget allows.
+  - They might be looking for a better compensation package, equity, or other benefits.
+  - They could be in a competitive market and want to negotiate from a stronger position.
+
+---
+
+### 🧠 **2. Evaluate the Candidate's Value**
+- **Are they truly a "great fit"?**  
+  - If they have **exceptional skills, experience, or cultural fit**, you may be able to justify a higher offer.
+  - Consider whether their skills are **uncommon or in high demand**.
+  - Think about the **long-term value** they could bring to your organization.
+
+---
+
+### 💰 **3. Adjust Your Offer (If Possible)**
+- **Increase the offer within your budget**  
+  - If you have flexibility, you can offer **20% above the band** to secure a top-tier candidate.
+- **Negotiate a **package** (salary + benefits)**  
+  - Offer a **higher b
+
+### 42 [hiring_team] (596 tok, stop)
+OUTPUT: When your strongest engineer wants to become a manager but shows little interest in people problems, it's a classic challenge in leadership development. Here's a structured approach to address this situation:
+
+### 1. **Understand the Motivation**
+   - **Why does the engineer want to move into management?** Is it for career growth, better compensation, more influence, or a desire to lead projects?
+   - **Is the interest in management purely technical, or is there a genuine desire to lead people?** Sometimes engineers are drawn to management for the strategic or organizational aspects, not necessarily the people side.
+
+### 2. **Assess the Fit**
+   - **Does the engineer have the soft skills needed for management?** Leadership requires communication, conflict resolution, delegation, and empathy—skills that may not come naturally to all engineers.
+   - **Is the engineer more suited to a technical leadership role (e.g., tech lead, architect) rather than a people manager role?** If so, they may thrive in a hybrid role that combines technical and managerial responsibilities.
+
+### 3. **Provide Training and Development**
+   - **Offer leadership training programs** that focus on people manage
+
+### 43 [hiring_team] (736 tok, stop)
+OUTPUT: If one team member is doing **60% of the work** and is now a **single point of failure**, it's a serious risk to the project and team health. Here's a **30-day plan** to address this issue and reduce dependency on that individual:
+
+---
+
+### **Day 1–3: Assess the Situation**
+**Goal:** Understand the root cause and current impact.
+
+- **Talk to the team** to gather feedback on the workload and dependencies.
+- **Review project documentation** to see if tasks are clearly defined and assigned.
+- **Identify critical tasks** that this person is responsible for.
+- **Check for burnout or overcommitment** (this person may be overworked).
+- **Document the current workload** and dependencies.
+
+---
+
+### **Day 4–7: Define the Problem and Set Priorities**
+**Goal:** Clarify what needs to be done and who is responsible.
+
+- **Create a list of critical tasks** that this person is doing.
+- **Identify which tasks can be shared or delegated**.
+- **Set clear expectations** with the team about workload and ownership.
+- **Start a conversation** with the individual to understand their capacity and willingness to share the load.
+
+---
+
+### **Day 8–14: Begin Knowledge Transfer and Task Sharing**
+**Goal:** Start
+
+### 44 [out_of_domain] (11 tok, stop)
+OUTPUT: The capital of Australia is **Canberra**.
+
+### 45 [out_of_domain] (47 tok, stop)
+OUTPUT: A hash map is a data structure that stores key-value pairs, using a hash function to compute an index where each key-value pair is stored. This allows for efficient insertion, deletion, and lookup operations, typically in constant time.
+
+### 46 [out_of_domain] (22 tok, stop)
+OUTPUT: Waves whisper goodbye,  
+Salt-kissed winds carry the tide—  
+Ocean's endless song.
+

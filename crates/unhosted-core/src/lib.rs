@@ -547,6 +547,7 @@ pub async fn serve(node: Node) -> Result<()> {
         .route("/v1/punch", post(punch_handler))
         .route("/v1/quic/ping", post(quic_ping_handler))
         .route("/v1/identity", get(identity_handler))
+        .route("/v1/sysinfo", get(sysinfo_handler))
         .route("/v1/auth/token", get(auth_token_handler))
         // Audit feed. SSE stream for live tail + buffered snapshot
         // endpoint for late subscribers. Both auth-gated (the audit
@@ -3017,6 +3018,31 @@ async fn identity_handler(
         "name": state.node.name,
         "pubkey": state.identity.public_b64(),
         "addr": state.node.addr.to_string(),
+    })))
+}
+
+/// Report this node's memory + VRAM-pool capability so a peer (or the
+/// local CLI) can decide how to split a model across the network. Same
+/// auth posture as `/v1/identity`: read-only node metadata, available to
+/// loopback and authed peers. This is the per-peer probing the VRAM-pool
+/// planner needs to move from "assume peers are like me" to real numbers.
+async fn sysinfo_handler(
+    State(state): State<NodeState>,
+    axum::extract::ConnectInfo(remote): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<axum::Json<serde_json::Value>, StatusCode> {
+    let outcome = state.classify(&headers, Some(remote.ip()), &[]);
+    require_auth(&outcome, false)?;
+
+    let mem = crate::vram_pool::local_memory();
+    let cap = crate::vram_pool::probe();
+    Ok(axum::Json(serde_json::json!({
+        "name": state.node.name,
+        "memory": mem.map(|m| serde_json::json!({
+            "total_bytes": m.total_bytes,
+            "available_bytes": m.available_bytes,
+        })),
+        "rpc_capable": cap.ready(),
     })))
 }
 
