@@ -74,3 +74,26 @@ incremental = false
 inherits = "release"
 strip = false
 debug = "line-tables-only"
+
+# Dev/test tuning. None of this touches [profile.release] — the shipped
+# binary is unchanged. The goal is faster local + CI iteration:
+#
+# - `debug = "line-tables-only"`: enough for readable panic backtraces and
+#   `file:line` in errors, but skips the full DWARF variable/type info that
+#   bloats compile time and the CI cache. Full debuginfo is only occasionally
+#   needed under a debugger — reach for `--profile release-debug` then.
+[profile.dev]
+debug = "line-tables-only"
+
+# Optimize dependencies even in dev/test. Our own crates stay at opt-level 0
+# (fast to recompile on every edit), but deps — which rarely change and are
+# cached — get opt-level 1. This is a big win for the hashing/crypto-heavy
+# swarm tests (sha256 over multi-MiB chunks) and QUIC transport, which crawl
+# when their deps are unoptimized.
+[profile.dev.package."*"]
+opt-level = 1
+
+# Tests inherit dev; drop debuginfo entirely. A passing test needs none, and
+# a failing one still gets a line-table backtrace from the dev default above.
+[profile.test]
+debug = "line-tables-only"
