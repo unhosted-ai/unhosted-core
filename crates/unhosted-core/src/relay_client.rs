@@ -655,3 +655,168 @@ fn uuid_simple() -> String {
     rand::Rng::fill(&mut rand::thread_rng(), &mut buf);
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(buf)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── the wire protocol is a compatibility contract with the relay and
+    //    with peers on older/newer builds. These tests pin the tag names,
+    //    field renames, and the back-compat default so a rename can't slip
+    //    through silently. ────────────────────────────────────────────────
+
+    #[test]
+    fn client_message_forward_uses_snake_case_type_tag() {
+        let msg = ClientMessage::Forward {
+            peer_pubkey: "PK",
+            payload: "hello",
+        };
+        let v: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&msg).unwrap()).unwrap();
+        assert_eq!(v["type"], "forward");
+        assert_eq!(v["peer_pubkey"], "PK");
+        assert_eq!(v["payload"], "hello");
+    }
+
+    #[test]
+    fn client_message_register_and_punch_request_tags() {
+        let reg = ClientMessage::Register {
+            pubkey: "pk",
+            challenge: "ch",
+            signature: "sig",
+        };
+        let v: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&reg).unwrap()).unwrap();
+        assert_eq!(v["type"], "register");
+
+        let punch = ClientMessage::PunchRequest {
+            peer_pubkey: "pk",
+            udp_port: 51820,
+        };
+        let v: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&punch).unwrap()).unwrap();
+        assert_eq!(v["type"], "punch_request");
+        assert_eq!(v["udp_port"], 51820);
+    }
+
+    #[test]
+    fn server_messages_deserialize_by_snake_case_tag() {
+        let hello: ServerMessage =
+            serde_json::from_str(r#"{"type":"hello","challenge":"abc","protocol":1}"#).unwrap();
+        assert!(matches!(hello, ServerMessage::Hello { challenge, .. } if challenge == "abc"));
+
+        let inbound: ServerMessage =
+            serde_json::from_str(r#"{"type":"inbound","from_pubkey":"peer","payload":"{}"}"#)
+                .unwrap();
+        assert!(
+            matches!(inbound, ServerMessage::Inbound { from_pubkey, .. } if from_pubkey == "peer")
+        );
+
+        let punch: ServerMessage =
+            serde_json::from_str(r#"{"type":"punch_target","peer_pubkey":"p","addr":"1.2.3.4:5"}"#)
+                .unwrap();
+        assert!(matches!(punch, ServerMessage::PunchTarget { addr, .. } if addr == "1.2.3.4:5"));
+
+        let err: ServerMessage =
+            serde_json::from_str(r#"{"type":"error","code":"nope","message":"bad"}"#).unwrap();
+        assert!(matches!(err, ServerMessage::Error { code, .. } if code == "nope"));
+    }
+
+    #[test]
+    fn relay_payload_reqstart_round_trips_with_kind() {
+        let p = RelayPayload::ReqStart {
+            id: "id1".into(),
+            req_kind: "pair_accept".into(),
+            body: serde_json::json!({"x": 1}),
+        };
+        let s = serde_json::to_string(&p).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["kind"], "req_start");
+        assert_eq!(v["req_kind"], "pair_accept");
+        // and it round-trips back
+        let back: RelayPayload = serde_json::from_str(&s).unwrap();
+        assert!(
+            matches!(back, RelayPayload::ReqStart { req_kind, .. } if req_kind == "pair_accept")
+        );
+    }
+
+    #[test]
+    fn reqstart_without_req_kind_defaults_to_run() {
+        // Back-compat: an older peer's ReqStart carries no `req_kind`. It
+        // must deserialize to the documented "run" default, not fail.
+        let back: RelayPayload =
+            serde_json::from_str(r#"{"kind":"req_start","id":"x","body":{}}"#).unwrap();
+        match back {
+            RelayPayload::ReqStart { req_kind, id, .. } => {
+                assert_eq!(req_kind, "run");
+                assert_eq!(id, "x");
+            }
+            other => panic!("expected ReqStart, got {other:?}"),
+        }
+        assert_eq!(default_kind(), "run");
+    }
+
+    #[test]
+    fn relay_payload_response_frames_tag_correctly() {
+        for (payload, want_kind) in [
+            (
+                RelayPayload::RespChunk {
+                    id: "i".into(),
+                    data: "d".into(),
+                },
+                "resp_chunk",
+            ),
+            (RelayPayload::RespEnd { id: "i".into() }, "resp_end"),
+            (
+                RelayPayload::Err {
+                    id: "i".into(),
+                    msg: "boom".into(),
+                },
+                "err",
+            ),
+        ] {
+            let v: serde_json::Value =
+                serde_json::from_str(&serde_json::to_string(&payload).unwrap()).unwrap();
+            assert_eq!(v["kind"], want_kind);
+        }
+    }
+
+    #[test]
+    fn uuid_simple_is_22_char_url_safe_and_unique() {
+        let a = uuid_simple();
+        let b = uuid_simple();
+        // 16 bytes base64-url-nopad = 22 chars.
+        assert_eq!(a.len(), 22, "id was {a:?}");
+        assert_ne!(a, b, "two ids collided");
+        assert!(
+            a.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+            "non-url-safe char in {a:?}"
+        );
+    }
+
+    #[test]
+    fn disabled_client_reports_disabled_state() {
+        let c = RelayClient::disabled();
+        // current_state is async; drive it on a tiny runtime.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        assert_eq!(rt.block_on(c.current_state()), RelayState::Disabled);
+    }
+
+    #[tokio::test]
+    async fn call_errors_when_relay_not_connected() {
+        // A disabled/unconnected client has no out_tx, so call must fail
+        // fast rather than hang.
+        let c = RelayClient::disabled();
+        let res = c.call("some-peer", serde_json::json!({})).await;
+        assert!(res.is_err(), "expected error when not connected");
+    }
+
+    #[test]
+    fn relay_state_equality() {
+        assert_eq!(RelayState::Registered, RelayState::Registered);
+        assert_ne!(RelayState::Error("a".into()), RelayState::Error("b".into()));
+    }
+}

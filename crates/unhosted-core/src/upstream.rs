@@ -305,3 +305,103 @@ for setup details.
 "
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backend_url_and_probe_path_are_consistent() {
+        // Each backend's upstream_url must be the localhost default it maps
+        // to, and its probe path must be the always-available endpoint.
+        assert_eq!(
+            Backend::LlamaServer.upstream_url(),
+            LLAMA_SERVER_DEFAULT_URL
+        );
+        assert_eq!(Backend::Ollama.upstream_url(), OLLAMA_DEFAULT_URL);
+        assert_eq!(Backend::LmStudio.upstream_url(), LM_STUDIO_DEFAULT_URL);
+
+        assert_eq!(Backend::LlamaServer.probe_path(), "/health");
+        assert_eq!(Backend::Ollama.probe_path(), "/api/tags");
+        assert_eq!(Backend::LmStudio.probe_path(), "/v1/models");
+    }
+
+    #[test]
+    fn backend_names_are_stable() {
+        // Names surface in the doctor CLI + startup banner; keep them fixed.
+        assert_eq!(Backend::LlamaServer.name(), "llama-server");
+        assert_eq!(Backend::Ollama.name(), "ollama");
+        assert_eq!(Backend::LmStudio.name(), "lm studio");
+    }
+
+    #[test]
+    fn embedding_models_are_classified_out() {
+        // These must be skipped when picking a chat model.
+        assert!(is_embedding_model("nomic-embed-text"));
+        assert!(is_embedding_model("text-embedding-3-large"));
+        assert!(is_embedding_model("bge-reranker-base"));
+        assert!(is_embedding_model("BAAI/bge-EMBED")); // case-insensitive
+                                                       // These are chat models and must NOT be filtered.
+        assert!(!is_embedding_model("llama-3.2-3b-instruct"));
+        assert!(!is_embedding_model("qwen2.5-coder-7b"));
+        assert!(!is_embedding_model("mistral-7b"));
+    }
+
+    fn report(pairs: &[(Backend, bool)]) -> BackendReport {
+        BackendReport {
+            results: pairs
+                .iter()
+                .map(|&(backend, reachable)| ProbeResult {
+                    backend,
+                    url: backend.upstream_url().to_string(),
+                    reachable,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn first_reachable_returns_none_when_all_down() {
+        let r = report(&[
+            (Backend::LlamaServer, false),
+            (Backend::Ollama, false),
+            (Backend::LmStudio, false),
+        ]);
+        assert!(r.first_reachable().is_none());
+        assert!(!r.any_reachable());
+    }
+
+    #[test]
+    fn first_reachable_respects_priority_order() {
+        // Ollama + LmStudio up, llama-server down: first_reachable is the
+        // first *reachable* in the list order (priority), i.e. Ollama.
+        let r = report(&[
+            (Backend::LlamaServer, false),
+            (Backend::Ollama, true),
+            (Backend::LmStudio, true),
+        ]);
+        assert!(r.any_reachable());
+        assert_eq!(r.first_reachable().unwrap().backend, Backend::Ollama);
+    }
+
+    #[test]
+    fn offline_error_json_has_stable_shape() {
+        // The web UI + API clients key off this structure; lock it.
+        let v = offline_error_json("http://127.0.0.1:9999");
+        assert_eq!(v["error"]["type"], "upstream_offline");
+        assert_eq!(v["error"]["configured"], "http://127.0.0.1:9999");
+        let checked = v["error"]["checked"].as_array().unwrap();
+        assert_eq!(checked.len(), 3);
+        assert!(checked.iter().any(|u| u == LLAMA_SERVER_DEFAULT_URL));
+        assert!(v["error"]["message"].is_string());
+        assert!(v["error"]["hint"].is_string());
+    }
+
+    #[test]
+    fn install_hints_are_non_empty_for_this_platform() {
+        // Whatever OS the tests run on, we should get a real hint block.
+        let h = install_hints();
+        assert!(h.contains("no local model runtime is reachable"));
+        assert!(!h.trim().is_empty());
+    }
+}
