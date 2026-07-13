@@ -89,7 +89,7 @@ pub const CATALOG: &[CatalogEntry] = &[
         file: "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
         url: "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
         size_bytes: 807_694_464,
-        sha256: None,
+        sha256: Some("sha256:6f85a640a97cf2bf5b8e764087b1e83da0fdb51d7c9fab7d0fece9385611df83"),
     },
     CatalogEntry {
         id: "gemma-2-2b-it",
@@ -98,7 +98,7 @@ pub const CATALOG: &[CatalogEntry] = &[
         file: "gemma-2-2b-it-Q4_K_M.gguf",
         url: "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf",
         size_bytes: 1_708_582_752,
-        sha256: None,
+        sha256: Some("sha256:e0aee85060f168f0f2d8473d7ea41ce2f3230c1bc1374847505ea599288a7787"),
     },
     CatalogEntry {
         id: "llama-3.2-3b-instruct",
@@ -107,7 +107,7 @@ pub const CATALOG: &[CatalogEntry] = &[
         file: "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
         url: "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
         size_bytes: 2_019_377_696,
-        sha256: None,
+        sha256: Some("sha256:6c1a2b41161032677be168d354123594c0e6e67d2b9227c84f296ad037c728ff"),
     },
     CatalogEntry {
         id: "phi-3.5-mini-instruct",
@@ -116,7 +116,7 @@ pub const CATALOG: &[CatalogEntry] = &[
         file: "Phi-3.5-mini-instruct-Q4_K_M.gguf",
         url: "https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf",
         size_bytes: 2_393_232_672,
-        sha256: None,
+        sha256: Some("sha256:e4165e3a71af97f1b4820da61079826d8752a2088e313af0c7d346796c38eff5"),
     },
     CatalogEntry {
         id: "mistral-7b-instruct-v0.3",
@@ -125,7 +125,7 @@ pub const CATALOG: &[CatalogEntry] = &[
         file: "Mistral-7B-Instruct-v0.3-Q4_K_M.gguf",
         url: "https://huggingface.co/bartowski/Mistral-7B-Instruct-v0.3-GGUF/resolve/main/Mistral-7B-Instruct-v0.3-Q4_K_M.gguf",
         size_bytes: 4_372_812_000,
-        sha256: None,
+        sha256: Some("sha256:1270d22c0fbb3d092fb725d4d96c457b7b687a5f5a715abe1e818da303e562b6"),
     },
     CatalogEntry {
         id: "qwen2.5-7b-instruct",
@@ -134,7 +134,7 @@ pub const CATALOG: &[CatalogEntry] = &[
         file: "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
         url: "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
         size_bytes: 4_683_074_240,
-        sha256: None,
+        sha256: Some("sha256:65b8fcd92af6b4fefa935c625d1ac27ea29dcb6ee14589c55a8f115ceaaa1423"),
     },
     CatalogEntry {
         id: "qwen2.5-coder-7b-instruct",
@@ -143,7 +143,7 @@ pub const CATALOG: &[CatalogEntry] = &[
         file: "Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf",
         url: "https://huggingface.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf",
         size_bytes: 4_683_074_336,
-        sha256: None,
+        sha256: Some("sha256:1664fccab734674a50763490a8c6931b70e3f2f8ec10031b54806d30e5f956b6"),
     },
 ];
 
@@ -976,6 +976,22 @@ mod tests {
                     e.id
                 );
             }
+        }
+    }
+
+    #[test]
+    fn every_catalog_entry_has_a_pinned_digest() {
+        // Catalog-driven P2P (ADR-0014) keys models by content digest, so a
+        // `None` here silently disables peer sourcing for that entry — the
+        // download would work but never route to a LAN peer that has the
+        // bytes. Fail loudly if a new entry lands without its sha256 pinned.
+        for e in CATALOG {
+            assert!(
+                e.sha256.is_some(),
+                "catalog entry {} is missing its pinned sha256 — peer sourcing \
+                 stays off until it's backfilled (fetch HF's x-linked-etag header)",
+                e.id
+            );
         }
     }
 

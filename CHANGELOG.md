@@ -6,6 +6,19 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ## [Unreleased]
 
+### Changed
+
+- **Catalog-driven P2P is now live (ADR-0014).** All seven curated catalog
+  models carry their pinned `sha256:` whole-file digest (sourced from
+  HuggingFace's git-LFS `x-linked-etag` and verified against a full local
+  hash of the 1B model). Two effects: catalog downloads are now verified
+  chunk-by-chunk against the pinned digest instead of only size-checked, and
+  the swarm can content-address these models so a LAN/trusted peer that
+  already has the bytes becomes a source. Previously every entry shipped with
+  `sha256: None`, which left peer sourcing dormant for catalog downloads. A
+  new test (`every_catalog_entry_has_a_pinned_digest`) keeps future entries
+  from silently re-disabling it.
+
 ## [0.0.78] — 2026-06-13
 
 ### Added
