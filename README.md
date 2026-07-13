@@ -12,6 +12,7 @@
   <a href="#trust-radius">how it works</a> ·
   <a href="#whats-honest">what's honest</a> ·
   <a href="#roadmap">roadmap</a> ·
+  <a href="docs/DEVELOPMENT.md">develop</a> ·
   <a href="BRAND.md">brand</a>
 </p>
 
