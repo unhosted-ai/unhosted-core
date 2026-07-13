@@ -1,0 +1,32 @@
+# Cargo configuration for the unhosted workspace.
+#
+# By default this file changes NOTHING — every setting below is commented out,
+# so a fresh clone builds exactly as it did before. The blocks are here as an
+# opt-in menu for contributors who want faster iterative (debug) builds.
+#
+# ── Faster linking ────────────────────────────────────────────────────────
+# Linking a large Rust binary (ours is ~26 MB of code) is a big chunk of every
+# incremental rebuild. A parallel linker cuts that substantially. It does NOT
+# help release builds much — those are dominated by `lto = "fat"`, not the
+# link step — so this is purely a dev-loop convenience.
+#
+# This is opt-in on purpose: hard-coding a linker would break clones that don't
+# have it installed. Install one, then uncomment the block for your platform.
+#
+# Linux — mold (fastest):   sudo apt-get install mold   (or build from source)
+# [target.x86_64-unknown-linux-gnu]
+# linker = "clang"
+# rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+#
+# [target.aarch64-unknown-linux-gnu]
+# linker = "clang"
+# rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+#
+# macOS — lld:   brew install llvm   (ships ld64.lld)
+# The stock Apple linker is already fast on recent macOS; try lld only if you
+# see linking dominate your rebuilds.
+# [target.aarch64-apple-darwin]
+# rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+#
+# [target.x86_64-apple-darwin]
+# rustflags = ["-C", "link-arg=-fuse-ld=lld"]

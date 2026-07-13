@@ -149,6 +149,24 @@ crates stay at `opt-level 0` (fast to recompile every edit), but the 600+
 dependencies — which rarely change and are cached — run optimized. This is a
 large win for the sha256/QUIC-heavy swarm tests.
 
+### Optional: a faster linker
+
+Linking the ~26 MB binary is a meaningful slice of every incremental rebuild.
+A parallel linker (`mold` on Linux, `lld` on macOS) cuts that. It barely helps
+*release* builds — those are dominated by `lto = "fat"`, not the link step — so
+it's purely a dev-loop convenience.
+
+It's **opt-in** so a fresh clone never breaks on a missing linker:
+`.cargo/config.toml` ships with every block commented out (a true no-op).
+Install a linker and uncomment the block for your platform:
+
+```bash
+# Linux
+sudo apt-get install mold
+# macOS (lld ships with LLVM; stock Apple ld is already fast on recent macOS)
+brew install llvm
+```
+
 ## The gate (run before every push)
 
 All four must pass locally; the pre-commit hook enforces `fmt`, and CI
